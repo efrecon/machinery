@@ -1,0 +1,235 @@
+#! /usr/bin/env tclsh
+
+##################
+## Module Name     --  machinery.tcl
+## Original Author --  Emmanuel Frecon - emmanuel@sics.se
+## Description:
+##
+##    Cluster handler through docker-machine
+##
+##################
+
+set prg_args {
+    -help      ""               "Print this help and exit"
+    -verbose   5                "Verbosity level \[0-6\]"
+    -machine   "docker-machine" "Path to docker-machine"
+    -docker    "docker"         "Path to docker"
+    -token     ""               "Override token for cluster"
+    -cluster   ""               "YAML description, empty for cluster.yml"
+    -driver    "virtualbox"     "Default driver for VM creation"
+}
+
+package require Tcl 8.5
+
+
+# Arrange to access all libraries under lib sub-directory.  There is
+# only one, but we want to be sure to be able to expand if necessary.
+set dirname [file dirname [file normalize [info script]]]
+set appname [file rootname [file tail [info script]]]
+lappend auto_path [file join $dirname lib]
+package require cluster;   # This implements the core of our routines!
+
+
+# ::help:dump -- Dump help
+#
+#       Dump help based on the command-line option specifications and
+#       exit.  Optionally print an error message before the option
+#       reminder.
+#
+# Arguments:
+#	hdr	Optional header (error) message.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       exit program!!
+proc ::help:dump { { hdr "" } } {
+    global appname
+
+    if { $hdr ne "" } {
+	puts $hdr
+	puts ""
+    }
+    puts "NAME:"
+    puts "\t$appname - Cluster creation and management via docker-machine"
+    puts ""
+    puts "USAGE"
+    puts "\t${appname}.tcl \[global options\] command \[command options\]"
+    puts ""
+    puts "COMMANDS:"
+    puts "\tup\tCreate and bring up cluster and/or specific machines"
+    puts "\thalt\tBring down cluster and/or specific machines"
+    puts "\ttoken\tCreate (new) swarm token, force regeneration with -force"
+    puts "\tdestroy\tDestroy cluster and/or specific machines"
+    puts "\tinfo\tSwarm information for cluster"
+    puts ""
+    puts "GLOBAL OPTIONS:"
+    foreach { arg val dsc } $::prg_args {
+	puts "\t${arg}\t$dsc (default: ${val})"
+    }
+    exit
+}
+
+# The global array CRT will contain the state of the whole program.
+# Arrange for the default values of all program options to be
+# initialised into CRT.
+foreach {arg val dsc} $prg_args {
+    set CRT($arg) $val
+}
+
+# Did we request for help? Output and goodbye
+if { [::cluster::getopt argv "-help"] } {
+    ::help:dump
+}
+
+# Eat all program options from the command line, the latest value will
+# be the one as we don't have options that can appear several times.
+for {set eaten ""} {$eaten ne $argv} {} {
+    set eaten $argv
+    foreach opt [array names CRT -*] {
+	::cluster::getopt argv $opt CRT($opt) $CRT($opt)
+    }
+}
+
+# Pass arguments from the command-line as the defaults for the cluster
+# module.
+foreach k [list -machine -docker -verbose] {
+    ::cluster::defaults $k $CRT($k)
+}
+
+# No Arguments remaining?? dump help and exit since we need a command
+# to know what to really do...
+if { [llength $argv] <= 0 } {
+    ::help:dump "No command specified!"
+}
+
+
+# Parse cluster description from YAML file.  We take the default one
+# if nothing specified.  When specified, we will use the rootname as
+# the prefix for virtual machine names.  Also pass the default driver
+# for VM creation.
+if { $CRT(-cluster) eq "" } {
+    if { [catch {::cluster::parse cluster.yml \
+		     -prefix "" -driver $CRT(-driver)} vms] } {
+	::help:dump $vms
+    }
+    set CRT(-cluster) cluster.yml
+} else {
+    if { [catch {::cluster::parse $CRT(-cluster) \
+		     -driver $CRT(-driver)} vms] } {
+	::help:dump $vms
+    }
+}
+
+# Recap with current state of cluster as seen from docker-machine and
+# arrange for <cluster> to be the list of virtual machine descriptions
+# that represent the whole cluster that we should operate on.
+set cluster {}
+set state [::cluster::ls]
+foreach vm $vms {
+    lappend cluster [::cluster::bind $vm $state]
+}
+
+# Extract command (the first item of the remaining arguments) and
+# leave the remaining arguments to be parsed by each command
+# separately.
+set cmd [string tolower [lindex $argv 0]]
+set argv [lrange $argv 1 end]
+switch -nocase -- $cmd {
+    "help" {
+	::help:dump
+    }
+    "token" {
+	# Generate token if necessary (or forced through option
+	# -force), cache it and print it out.
+	if { $CRT(-token) ne "" } {
+	    set token $CRT(-token)
+	} else {
+	    set force [::cluster::getopt argv -force]
+	    set token [::cluster::token $CRT(-cluster) $force $CRT(-driver)]
+	}
+	puts stdout $token
+    }
+    "start" -
+    "up" {
+	# Start up one or several machines (or the whole cluster if no
+	# arguments), the machines will be created if they did not
+	# exists
+	if { $CRT(-token) ne "" } {
+	    set token $CRT(-token)
+	} else {
+	    set token [::cluster::token $CRT(-cluster) 0 $CRT(-driver)]
+	}
+	if { [llength $argv] == 0 } {
+	    set argv [::cluster::names $cluster]
+	}
+	foreach nm $argv {
+	    set vm [::cluster::find $cluster $nm]
+	    if { $vm ne "" } {
+		if { [dict exists $vm state] } {
+		    if { ![string equal -nocase [dict get $vm state] \
+			       "running"] } {
+			::cluster::start $vm
+		    }
+		} else {
+		    ::cluster::create $vm $token
+		}
+	    }
+	}
+    }
+    "info" {
+	# Dump out swarm master information
+	set master [::cluster::master $vms]
+	if { $master ne "" } {
+	    ::cluster::log NOTICE "Getting cluster info via\
+                                   [dict get $master -name]"
+	    ::cluster::Attach $master 1
+	    ::cluster::Run $CRT(-docker) info
+	}
+    }
+    "stop" -
+    "halt" {
+	# Halt one or several machines (or the whole cluster if no
+	# arguments)
+	if { [llength $argv] == 0 } {
+	    set argv [::cluster::names $cluster]
+	}
+	foreach nm $argv {
+	    set vm [::cluster::find $cluster $nm]
+	    if { $vm ne "" } {
+		::cluster::halt $vm
+	    }
+	}
+    }
+    "rm" -
+    "destroy" {
+	# Destroy one or several machines (or the whole cluster if no
+	# arguments).  The machines will be halted before removal.
+	if { [llength $argv] == 0 } {
+	    set argv [::cluster::names $cluster]
+	}
+	foreach nm $argv {
+	    set vm [::cluster::find $cluster $nm]
+	    if { $vm ne "" } {
+		::cluster::destroy $vm
+	    }
+	}
+    }
+    "ssh" {
+	# Execute one command in a running virtual machine.  This is
+	# mainly an alias to docker-machine ssh.
+	if { [llength $argv] == 0 } {
+	    log ERROR "Need at least the name of a machine"
+	}
+	set vm [::cluster::find $cluster [lindex $argv 0]]
+	set args [lrange $argv 1 end]
+	if { $vm ne "" } {
+	    eval [linsert $args 0 ::cluster::ssh $vm]
+	}
+    }
+    default {
+	::help:dump "$cmd is an unknown command!"
+    }
+}
+
