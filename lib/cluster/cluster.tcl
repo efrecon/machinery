@@ -29,7 +29,8 @@ namespace eval ::cluster {
 	# String separting prefix (if any) from machine name.
 	variable -separator "-"
 	# Allowed VM keys
-	variable -keys      {cpu size memory master ports labels driver options}
+	variable -keys      {cpu size memory master labels driver options \
+				 ports shares}
 	# Path to docker executables
 	variable -machine   docker-machine
 	variable -docker    docker
@@ -375,6 +376,11 @@ proc ::cluster::create { vm token } {
     if { $nm ne "" } {
 	# Tag virtual machine with labels.
 	tag $vm
+
+	# Open the ports and creates the shares
+	set vm [bind $vm]
+	ports $vm
+	shares $vm
     
 	# Test that machine is properly working by echoing its name
 	# using a busybox component and checking we get that name
@@ -470,8 +476,6 @@ proc ::cluster::scp { vm src_fname { dst_fname "" } } {
 # Side Effects:
 #       None.
 proc ::cluster::tag { vm { lbls {}}} {
-    global CRT
-
     # Get labels, either from parameters (overriding the VM object) or
     # from vm object.
     if { [string length $lbls] == 0 } {
@@ -513,7 +517,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Create a local temporary file with the new content.  This is far
     # from perfect, but should do as we are only creating one file and
     # will be removing it soon.
-    set fname /tmp/profile[expr {int(rand()*1000)}]
+    set fname [Temporary /tmp/profile]
     set fd [open $fname w]
     foreach a [array names DARGS] {
 	if { [string first " " $DARGS($a)] >= 0 } {
@@ -532,6 +536,165 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Cleanup and restart machine to make sure the labels get live.
     file delete -force -- $fname;      # Remove local file, not needed anymore
     Run ${vars::-machine} restart $nm; # Restart machine to activate tags
+}
+
+
+proc ::cluster::ports { vm { ports {}} } {
+    # Get ports, either from parameters (overriding the VM object) or
+    # from vm object.
+    if { [string length $ports] == 0 } {
+	if { ![dict exists $vm -ports] } {
+	    return
+	}
+	set ports [dict get $vm -ports]
+    }
+
+    # Convert xx:yy/proto constructs to pairs of ports, convert single
+    # ports to two ports (the same, on tcp) and append all these pairs
+    # to the list called opening.  Arrange for the list to only
+    # contain integers.
+    set opening {}
+    foreach pspec $ports {
+	set pspec [Ports $pspec];   # Extraction and syntax check
+	if { [llength $pspec] > 0 } {
+	    foreach {host mchn proto} $pspec break
+	    lappend opening $host $mchn $proto
+	}
+    }
+    
+    # Some nic'ish ouput of the ports and what we do.
+    set nm [dict get $vm -name]
+    set pspec ""
+    foreach {host mchn proto} $opening {
+	append pspec "${host}->${mchn}/$proto "
+    }
+    log NOTICE "Port forwarding for $nm as follows: [string trim $pspec]"
+
+    switch [dict get $vm -driver] {
+	"virtualbox" {
+	    if { [dict exists $vm state] \
+		     && [string equal -nocase [dict get $vm state] "running"]} {
+		foreach {host mchn proto} $opening {
+		    switch $proto {
+			"tcp" {
+			    Run VBoxManage controlvm $nm natpf1 \
+				"tcp-$host,tcp,,$host,,$mchn"
+			}
+			"udp" {
+			    Run VBoxManage controlvm $nm natpf1 \
+				"udp-$host,tcp,,$host,,$mchn"
+			}
+		    }
+		}
+	    } else {
+		foreach {host mchn proto} $opening {
+		    switch $proto {
+			"tcp" {
+			    Run VBoxManage modifyvm $nm --natpf1 \
+				"tcp-$host,tcp,,$host,,$mchn"
+			}
+			"udp" {
+			    Run VBoxManage modifyvm $nm --natpf1 \
+				"udp-$host,tcp,,$host,,$mchn"
+			}
+		    }
+		}
+	    }
+	}
+	default {
+	    log WARN "Cannot port forward with driver [dict get $vm -driver]"
+	}
+    }
+}
+
+
+proc ::cluster::shares { vm { shares {}} } {
+    # Get shares, either from parameters (overriding the VM object) or
+    # from vm object.
+    if { [string length $shares] == 0 } {
+	if { ![dict exists $vm -shares] } {
+	    return
+	}
+	set shares [dict get $vm -shares]
+    }
+
+    # Convert xx:yy constructs to pairs of shares, convert single
+    # shares to two shares (the same) and append all these pairs to
+    # the list called opening.  Arrange for the list to only contain
+    # resolved shares as we allow for environment variable resolution
+    set opening {}
+    foreach spec $shares {
+	set spec [Shares $spec];   # Extraction and syntax check
+	if { [llength $spec] > 0 } {
+	    foreach {host mchn} $spec break
+	    lappend opening $host $mchn
+	}
+    }
+    
+    # Some nic'ish ouput of the shares and what we do.
+    set nm [dict get $vm -name]
+    set spec ""
+    foreach {host mchn} $opening {
+	append spec "${host}->${mchn} "
+    }
+    log NOTICE "Mounting shares as follows for $nm: [string trim $spec]"
+
+    switch [dict get $vm -driver] {
+	"virtualbox" {
+	    # Halt the virtual machine if it was running, we cannot
+	    # seem to declare sharedfolders on running machines.
+	    if { [dict exists $vm state] \
+		     && [string equal -nocase [dict get $vm state] "running"]} {
+		halt $vm
+	    }
+	    # Create new shares within the guest machines, arrange to
+	    # keep the names that we generated, so we now have a list
+	    # with triplets and stored in sharing.
+	    set sharing {}
+	    foreach {host mchn} $opening {
+		set share [Temporary [file tail $host]]
+		Run VBoxManage sharedfolder add $nm \
+		    --name $share \
+		    --hostpath $host
+		lappend sharing $host $mchn $share
+	    }
+	    # Now start virtual machine as we will be manipulating the
+	    # runtime state of the machine.
+	    start $vm
+	    # Create directories within the guest machine, i.e. where
+	    # we want the share to be mounted.  We use a local copy of
+	    # the remote fstab file and arrange to append the
+	    # necessary information to the local copy before copying
+	    # it back.
+	    foreach {host mchn share} $sharing {
+		Run ${vars::-machine} ssh $nm "sudo mkdir -p $mchn"
+	    }
+	    # Modify /etc/fstab to contain references to the new shares
+	    set fstab [Run -return -- ${vars::-machine} ssh $nm cat /etc/fstab]
+	    set newtab [Temporary /tmp/fstab]
+	    set fd [open $newtab "w"]
+	    foreach l $fstab {
+		puts $fd $l
+	    }
+	    foreach {host mchn share} $sharing {
+		puts $fd "$share $mchn vboxsf defaults 0 0"
+	    }
+	    close $fd
+	    scp $vm $newtab
+	    Run ${vars::-machine} ssh $nm "sudo mv -f $newtab /etc/fstab"
+	    # Now that we have ensured that the shares will survive
+	    # the new reboot, we also want to make them live for this
+	    # session.  So mount manually once.
+	    foreach {host mchn share} $sharing {
+		Run ${vars::-machine} ssh $nm sudo mount $mchn
+	    }
+	    # And cleanup....
+	    file delete -force -- $newtab;    # Remove local fstab copy!
+	}
+	default {
+	    log WARN "Cannot port forward with driver [dict get $vm -driver]"
+	}
+    }
 }
 
 
@@ -791,6 +954,7 @@ proc ::cluster::parse { fname args } {
 
     return $vms
 }
+
 
 
 ####################################################################
@@ -1096,12 +1260,119 @@ proc ::cluster::Attach { vm { swarm 0 } } {
 }
 
 
+proc ::cluster::Detach {} {
+    log INFO "Detaching from vm..."
+    foreach e [list TLS_VERIFY CERT_PATH HOST] {
+	if { [info exists ::env(DOCKER_$e)] } {
+	    unset ::env(DOCKER_$e)
+	}
+    }
+}
+
+
+proc ::cluster::Ports { pspec } {
+    set host -1
+    set mchn -1
+    set proto tcp
+    if { [llength $pspec] >= 2 } {
+	foreach {host mchn proto} $pspec break
+    } else {
+	set slash [string first "/" $pspec]
+	if { $slash >= 0 } {
+	    set proto [string range [expr {$slash+1}] end]
+	    set pspec [string range 0 [expr {$slash-1}]]
+	}
+	set colon [string first ":" $pspec]
+	if { $colon >= 0 } {
+	    foreach {host mchn} [split $pspec ":"] break
+	} else {
+	    set host $pspec
+	}
+    }
+
+    if { $proto eq "" } {
+	set proto "tcp"
+    }
+    switch -nocase -- $proto {
+	"tcp" {
+	    set proto "tcp"
+	}
+	"udp" {
+	    set proto "udp"
+	}
+	default {
+	    log ERROR "Protocol $proto unknown, should be tcp or udp"
+	    return {}
+	}
+    }
+
+    if { [string is integer -strict $host] \
+	     && [string is integer -strict $mchn] } {
+	if { $mchn < 0 } {
+	    set mchn $host
+	}
+	return [list $host $mchn $proto]
+    } else {
+	log ERROR "One of $host or $mchn ports is not an integer!"
+    }
+    return {}
+}
+
+
+proc ::cluster::Shares { spec } {
+    set host ""
+    set mchn ""
+    if { [llength $spec] >= 2 } {
+	foreach {host mchn} $spec break
+    } else {
+	set colon [string first ":" $spec]
+	if { $colon >= 0 } {
+	    foreach {host mchn} [split $spec ":"] break
+	} else {
+	    set host $spec
+	}
+    }
+    
+    set host [EnvVar $host]
+    set mchn [EnvVar $mchn]
+    if { $mchn eq "" } {
+	set mchn $host
+    }
+    if { $host eq "" } {
+	log ERROR "No host path specified!"
+	return {}
+    } else {
+	if { [file isdirectory $host] } {
+	    return [list $host $mchn]
+	} else {
+	    log ERROR "$host is not a directory"
+	}
+    }
+    return {}
+}
+
+
+proc ::cluster::EnvVar { var } {
+    if { [string index $var 0] eq "$" } {
+	set v [string range $var 1 end]
+	if { [info exists ::env($v)] } {
+	    set var [set ::env($v)]
+	} else {
+	    log ERROR "$v is not an environment variable"
+	}
+    }
+    return $var
+}
+
+
 # ::cluster::Token -- Generate token
 #
 #       Generate a new swarm token through creating a temporary
 #       virtual machine in which we will run "docker-machine run swarm
 #       create".  The temporary machine is removed once the token has
-#       been generated.
+#       been generated.  When the driver is empty, this will create
+#       the swarm token using a local component, thus leaving an extra
+#       image on the local machine.
 #
 # Arguments:
 #	driver	Default driver to use for (temporary) VM creation.
@@ -1113,21 +1384,31 @@ proc ::cluster::Attach { vm { swarm 0 } } {
 #       Create a (temporary) virtual machine and component for swarm
 #       token creation.
 proc ::cluster::Token { {driver virtualbox} } {
-    # TODO: Implement directly ontop of docker (i.e. no temporary
-    # virtual machine?).
     set token ""
-    set nm tokeniser[expr {int(rand()*1000)}]
-    log NOTICE "Creating machine $nm for token creation"
-    set vm [dict create -name $nm -driver $driver]
-    if { [Create $vm] ne "" } {
-	Attach $vm
+    if { $driver eq "none" || $driver eq "" } {
+	Detach;   # Ensure we are running locally...
 	log INFO "Creating swarm token..."
 	set token [Run -return -- ${vars::-docker} run --rm swarm create]
 	log NOTICE "Created cluster token $token"
-	Run ${vars::-machine} kill $nm;   # We want to make this quick!
-	Run ${vars::-machine} rm $nm
+    } else {
+	set nm [Temporary "tokeniser"]
+	log NOTICE "Creating machine $nm for token creation"
+	set vm [dict create -name $nm -driver $driver]
+	if { [Create $vm] ne "" } {
+	    Attach $vm
+	    log INFO "Creating swarm token..."
+	    set token [Run -return -- ${vars::-docker} run --rm swarm create]
+	    log NOTICE "Created cluster token $token"
+	    Run ${vars::-machine} kill $nm;   # We want to make this quick!
+	    Run ${vars::-machine} rm $nm
+	}
     }
     return $token
+}
+
+proc ::cluster::Temporary { pfx } {
+    return ${pfx}-[pid]-[expr {int(rand()*1000)}]
+
 }
 
 

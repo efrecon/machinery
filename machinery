@@ -79,7 +79,7 @@ foreach {arg val dsc} $prg_args {
 }
 
 # Did we request for help? Output and goodbye
-if { [::cluster::getopt argv "-help"] } {
+if { [cluster getopt argv "-help"] } {
     ::help:dump
 }
 
@@ -88,14 +88,14 @@ if { [::cluster::getopt argv "-help"] } {
 for {set eaten ""} {$eaten ne $argv} {} {
     set eaten $argv
     foreach opt [array names CRT -*] {
-	::cluster::getopt argv $opt CRT($opt) $CRT($opt)
+	cluster getopt argv $opt CRT($opt) $CRT($opt)
     }
 }
 
 # Pass arguments from the command-line as the defaults for the cluster
 # module.
 foreach k [list -machine -docker -verbose] {
-    ::cluster::defaults $k $CRT($k)
+    cluster defaults $k $CRT($k)
 }
 
 # No Arguments remaining?? dump help and exit since we need a command
@@ -110,13 +110,13 @@ if { [llength $argv] <= 0 } {
 # the prefix for virtual machine names.  Also pass the default driver
 # for VM creation.
 if { $CRT(-cluster) eq "" } {
-    if { [catch {::cluster::parse cluster.yml \
+    if { [catch {cluster parse cluster.yml \
 		     -prefix "" -driver $CRT(-driver)} vms] } {
 	::help:dump $vms
     }
     set CRT(-cluster) cluster.yml
 } else {
-    if { [catch {::cluster::parse $CRT(-cluster) \
+    if { [catch {cluster parse $CRT(-cluster) \
 		     -driver $CRT(-driver)} vms] } {
 	::help:dump $vms
     }
@@ -126,9 +126,9 @@ if { $CRT(-cluster) eq "" } {
 # arrange for <cluster> to be the list of virtual machine descriptions
 # that represent the whole cluster that we should operate on.
 set cluster {}
-set state [::cluster::ls]
+set state [cluster ls]
 foreach vm $vms {
-    lappend cluster [::cluster::bind $vm $state]
+    lappend cluster [cluster bind $vm $state]
 }
 
 # Extract command (the first item of the remaining arguments) and
@@ -146,8 +146,9 @@ switch -nocase -- $cmd {
 	if { $CRT(-token) ne "" } {
 	    set token $CRT(-token)
 	} else {
-	    set force [::cluster::getopt argv -force]
-	    set token [::cluster::token $CRT(-cluster) $force $CRT(-driver)]
+	    set force [cluster getopt argv -force]
+	    #set token [cluster token $CRT(-cluster) $force $CRT(-driver)]
+	    set token [cluster token $CRT(-cluster) $force ""]
 	}
 	puts stdout $token
     }
@@ -159,30 +160,30 @@ switch -nocase -- $cmd {
 	if { $CRT(-token) ne "" } {
 	    set token $CRT(-token)
 	} else {
-	    set token [::cluster::token $CRT(-cluster) 0 $CRT(-driver)]
+	    set token [cluster token $CRT(-cluster) 0 $CRT(-driver)]
 	}
 	if { [llength $argv] == 0 } {
-	    set argv [::cluster::names $cluster]
+	    set argv [cluster names $cluster]
 	}
 	foreach nm $argv {
-	    set vm [::cluster::find $cluster $nm]
+	    set vm [cluster find $cluster $nm]
 	    if { $vm ne "" } {
 		if { [dict exists $vm state] } {
 		    if { ![string equal -nocase [dict get $vm state] \
 			       "running"] } {
-			::cluster::start $vm
+			cluster start $vm
 		    }
 		} else {
-		    ::cluster::create $vm $token
+		    cluster create $vm $token
 		}
 	    }
 	}
     }
     "info" {
 	# Dump out swarm master information
-	set master [::cluster::master $vms]
+	set master [cluster master $vms]
 	if { $master ne "" } {
-	    ::cluster::log NOTICE "Getting cluster info via\
+	    cluster log NOTICE "Getting cluster info via\
                                    [dict get $master -name]"
 	    ::cluster::Attach $master 1
 	    ::cluster::Run $CRT(-docker) info
@@ -193,12 +194,12 @@ switch -nocase -- $cmd {
 	# Halt one or several machines (or the whole cluster if no
 	# arguments)
 	if { [llength $argv] == 0 } {
-	    set argv [::cluster::names $cluster]
+	    set argv [cluster names $cluster]
 	}
 	foreach nm $argv {
-	    set vm [::cluster::find $cluster $nm]
+	    set vm [cluster find $cluster $nm]
 	    if { $vm ne "" } {
-		::cluster::halt $vm
+		cluster halt $vm
 	    }
 	}
     }
@@ -207,12 +208,12 @@ switch -nocase -- $cmd {
 	# Destroy one or several machines (or the whole cluster if no
 	# arguments).  The machines will be halted before removal.
 	if { [llength $argv] == 0 } {
-	    set argv [::cluster::names $cluster]
+	    set argv [cluster names $cluster]
 	}
 	foreach nm $argv {
-	    set vm [::cluster::find $cluster $nm]
+	    set vm [cluster find $cluster $nm]
 	    if { $vm ne "" } {
-		::cluster::destroy $vm
+		cluster destroy $vm
 	    }
 	}
     }
@@ -222,14 +223,13 @@ switch -nocase -- $cmd {
 	if { [llength $argv] == 0 } {
 	    log ERROR "Need at least the name of a machine"
 	}
-	set vm [::cluster::find $cluster [lindex $argv 0]]
+	set vm [cluster find $cluster [lindex $argv 0]]
 	set args [lrange $argv 1 end]
 	if { $vm ne "" } {
-	    eval [linsert $args 0 ::cluster::ssh $vm]
+	    eval [linsert $args 0 cluster ssh $vm]
 	}
     }
     default {
 	::help:dump "$cmd is an unknown command!"
     }
 }
-
