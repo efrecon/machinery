@@ -222,6 +222,13 @@ creation time if the driver does not support that option.
 used as labels for the docker machines that are created.  These labels can be
 used to schedule components on particular machines at a later time.
 
+#### `options`
+
+`options` should be itself a dictionary and contain a number of driver-specific
+options that will be blindly passed to the driver at machine creation.  The
+leading double-dash that precedes these options can be omitted to keep the
+syntax simpler.
+
 
 ## Comparison to Other Tools
 
@@ -229,3 +236,14 @@ used to schedule components on particular machines at a later time.
 evens provides a similar set of commands.  However, being built on top of
 `docker-machine` provides access to many more providers through all the existing
 Docker Machine [drivers](https://docs.docker.com/machine/#drivers).
+
+## Implementation
+
+`machinery` is written in [Tcl](http://www.tcl.tk/). It requires a recent
+version of Tcl (8.5 at least) and the `yaml` library to be able to parse YAML
+description files.  As the `yaml` library is part of the standard `tcllib`, the
+easiest is usually to install the whole library using your package manager.  For
+example, on ubuntu, running the following will suffice as Tcl is part of the
+core server and desktop installation.
+
+    apt-get install tcllib
