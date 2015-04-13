@@ -1,22 +1,23 @@
 # machinery
 
-`machinery` is a command-line tool to operate on a whole cluster of
-[Docker Machine](https://docs.docker.com/machine/) virtual machines.
-`machinery` uses a YAML definition of the whole cluster to create
-machines, bring them up or down, or remove them at will. In short,
-`machinery` is to `docker-machine` what `docker-compose` is to
-'docker'. `machinery` also provides [Docker
-Swarm](https://docs.docker.com/swarm/) integration.
+`machinery` is a command-line tool to operate on a whole cluster of [Docker
+Machine](https://docs.docker.com/machine/) virtual machines. `machinery` uses a
+YAML definition of the whole cluster to create machines, bring them up or down,
+or remove them at will. In short, `machinery` is to `docker-machine` what
+`docker-compose` is to 'docker'. `machinery` also provides [Docker
+Swarm](https://docs.docker.com/swarm/) integration and will automatically
+arrange for the created virtual machines to join the swarm cluster or generate
+the token as needed.
+
 
 ## Quick Tour
 
-`machinery` reads its default configuration from the file
-`cluster.yml` in the local directory. YAML definition files have a
-straightforward syntax.  For example, the following content would
-define three machines using the `virtualbox` driver, one with more
-memory, the other one with more disk than the defaults provided by
-`docker-machine` and the last one as the master of the cluster. The
-description also defines some labels that can be used by `swarm` to
+`machinery` reads its default configuration from the file `cluster.yml` in the
+local directory. YAML definition files have a straightforward syntax.  For
+example, the following content would define three machines using the
+`virtualbox` driver, one with more memory, the other one with more disk than the
+defaults provided by `docker-machine` and the last one as the master of the
+cluster. The description also defines some labels that can be used by `swarm` to
 schedule components on specific nodes.
 
     db:
@@ -35,14 +36,14 @@ schedule components on specific nodes.
       labels:
         role: core
 
-Given access to a cluster definition file such as the one described
-above, the following command would create all the configured machines
-and arrange for a swarm token to be created when first executed.
+Given access to a cluster definition file such as the one described above, the
+following command would create all the configured machines and arrange for a
+swarm token to be created when first executed.
 
     machinery up
 
-And the following command would gently bring the machine called `db`
-down and then destroy it.
+And the following command would gently bring the machine called `db` down and
+then destroy it.
 
     machinery destroy db
 
