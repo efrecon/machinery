@@ -13,13 +13,13 @@ the token as needed.
 ## Quick Tour
 
 `machinery` reads its default configuration from the file `cluster.yml` in the
-local directory. YAML definition files have a straightforward syntax.  For
-example, the following content would define three machines using the
-`virtualbox` driver, one with more memory, the other one with more disk than the
-defaults provided by `docker-machine` and the last one as the master of the
-cluster. The description also defines some labels that can be used by `swarm` to
-schedule components on specific nodes and arrange for the machine called `core`
-to have access to your home directory.
+local directory. [YAML](http://yaml.org/) definition files have a
+straightforward syntax.  For example, the following content would define three
+machines using the `virtualbox` driver, one with more memory, the other one with
+more disk than the defaults provided by `docker-machine` and the last one as the
+master of the cluster. The description also defines some labels that can be used
+by `swarm` to schedule components on specific nodes and arrange for the machine
+called `core` to have access to your home directory.
 
     db:
       driver: virtualbox
@@ -53,7 +53,7 @@ then destroy it.
 
 ## Operating on the cluster
 
- `machinery` takes a number of global options (dash-led) followed by a command.
+`machinery` takes a number of global options (dash-led) followed by a command.
 These commands can be followed by command-specific options and the names of one
 or several virtual machines, as specified in the YAML cluster description.
 
@@ -139,7 +139,7 @@ slightly change in that case.  Whenever started with the `-cluster` option
 pointing at another file than the default `cluster.yml`, `machinery` will create
 virtual machines which name uses the rootname (sans the directory path) of the
 cluster definition file as a prefix.  Supposed you had started `machinery` with
-a YAML file called mycluster.yml and that it contained the definition for a
+a YAML file called `mycluster.yml` and that it contained the definition for a
 machine called `db`, running `machinery -cluster mycluster.yml create db` would
 lead to the creation of a virtual machine called `mycluster-db`. Note that since
 the context is fully specified, you could mention a reference to that machine
@@ -280,11 +280,22 @@ a either a single path or a host path separated from a guest path using a colon.
 When there is a single path, this path will be used as both the host and the
 guest path.  In paths, any occurrence of the name of an environment variable
 preceded with the `$`-sign will be replaced by the value of that local variable.
+For example, specifying `$HOME` would arrange for the path to your home
+directory to be available at the same location within the guest machine; handy
+whenever you want to transfer development files or initiate components.
 
 At present, share mounting is only supported on virtualbox based machines.
 Shares are declared once within the virtual machine, but they will be mounted as
 soon as a machine has been brought up using a `mount` command executed in the
 guest machine at startup.
+
+#### `images`
+
+`images` should be a list of images to automatically pull from registries once a
+virtual machine has been created, initialised and verified.  This can be handy
+if you want to make sure images are already present when your machine is being
+put into action.  For example, `docker-compose` will sometimes timeout the first
+time that it schedules components as image downloading takes too long.
 
 ## Comparison to Other Tools
 

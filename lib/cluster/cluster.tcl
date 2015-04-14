@@ -31,7 +31,7 @@ namespace eval ::cluster {
 	variable -separator "-"
 	# Allowed VM keys
 	variable -keys      {cpu size memory master labels driver options \
-				 ports shares}
+				 ports shares images}
 	# Path to docker executables
 	variable -machine   docker-machine
 	variable -docker    docker
@@ -377,6 +377,9 @@ proc ::cluster::create { vm token } {
 	} else {
 	    log ERROR "Cannot test docker for $nm, check manually!"
 	}
+
+	# Now pull images if any
+	pull $vm
     }
 
     return $nm
@@ -752,6 +755,41 @@ proc ::cluster::ssh { vm args } {
 }
 
 
+# ::cluster::pull -- Pull one or several images
+#
+#       Attach to the virtual machine given as a parameter and pull
+#       one or several images.
+#
+# Arguments:
+#	vm	Virtual machine description
+#	images	List of images to pull, empty (default) for the ones from vm
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       None.
+proc ::cluster::pull { vm {images {}} } {
+    # Get images, either from parameters (overriding the VM object) or
+    # from vm object.
+    if { [string length $images] == 0 } {
+	if { ![dict exists $vm -images] } {
+	    return
+	}
+	set images [dict get $vm -images]
+    }
+
+    set nm [dict get $vm -name]
+    log NOTICE "Pulling images in $nm: $images"
+    if { [llength $images] > 0 } {
+	Attach $vm
+	foreach img $images {
+	    Run ${vars::-docker} pull $img
+	}
+    }
+}
+
+
 # ::cluster::destroy -- Destroy a machine
 #
 #       This procedure will irrevocably destroy a virtual machine from
@@ -951,7 +989,7 @@ proc ::cluster::parse { fname args } {
 #
 ####################################################################
 
-# ::LogLevel -- Convert log levels
+# ::cluster::LogLevel -- Convert log levels
 #
 #       For convenience, log levels can also be expressed using
 #       human-readable strings.  This procedure will convert from this
@@ -1315,8 +1353,8 @@ proc ::cluster::Ports { pspec } {
     } else {
 	set slash [string first "/" $pspec]
 	if { $slash >= 0 } {
-	    set proto [string range [expr {$slash+1}] end]
-	    set pspec [string range 0 [expr {$slash-1}]]
+	    set proto [string range $pspec [expr {$slash+1}] end]
+	    set pspec [string range $pspec 0 [expr {$slash-1}]]
 	}
 	set colon [string first ":" $pspec]
 	if { $colon >= 0 } {

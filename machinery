@@ -61,6 +61,7 @@ proc ::help:dump { { hdr "" } } {
     puts "COMMANDS:"
     puts "\tup\tCreate and bring up cluster and/or specific machines"
     puts "\thalt\tBring down cluster and/or specific machines"
+    puts "\trestart\tRestart whole cluster and/or specific machines"
     puts "\ttoken\tCreate (new) swarm token, force regeneration with -force"
     puts "\tdestroy\tDestroy cluster and/or specific machines"
     puts "\tswarm\tSwarm information for cluster"
@@ -208,6 +209,20 @@ switch -nocase -- $cmd {
 	    set vm [cluster find $cluster $nm]
 	    if { $vm ne "" } {
 		cluster halt $vm
+	    }
+	}
+    }
+    "restart" {
+	# Halt one or several machines (or the whole cluster if no
+	# arguments)
+	if { [llength $argv] == 0 } {
+	    set argv [cluster names $cluster]
+	}
+	foreach nm $argv {
+	    set vm [cluster find $cluster $nm]
+	    if { $vm ne "" } {
+		cluster halt $vm
+		cluster start $vm
 	    }
 	}
     }

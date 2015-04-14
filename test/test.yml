@@ -1,0 +1,16 @@
+test:
+    driver: virtualbox
+    memory: 512
+    size: 512
+    labels:
+        role: testing
+        target: dev
+    images:
+        - gliderlabs/alpine
+    ports:
+        - 8080:80
+        - 20514:514/udp
+        - 9090
+    shares:
+        - $HOME
+    master: on

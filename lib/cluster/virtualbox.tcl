@@ -1,3 +1,14 @@
+##################
+## Module Name     --  cluster::virtualbox
+## Original Author --  Emmanuel Frecon - emmanuel@sics.se
+## Description:
+##
+##      This module provides a (restricted) set of operations to
+##      modify, create and operate on virtual machines locally
+##      accessible.
+##
+##################
+
 namespace eval ::cluster::virtualbox {
     # Encapsulates variables global to this namespace under their own
     # namespace, an idea originating from http://wiki.tcl.tk/1489.
@@ -9,10 +20,43 @@ namespace eval ::cluster::virtualbox {
     }
 }
 
+# ::cluster::virtualbox::log -- Log output
+#
+#       Log message if current level is higher that the level of the
+#       message.  Currently, this simply bridges the logging facility
+#       available as part of the cluster module.
+#
+# Arguments:
+#	lvl	Logging level of the message
+#	msg	String content of the message.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       None.
 proc ::cluster::virtualbox::log { lvl msg } {
     [namespace parent]::log $lvl $msg
 }
 
+
+# ::cluster::virtualbox::info -- VM info
+#
+#       Return a dictionary describing a complete description of a
+#       given virtual machine.  The output will be a dictionary, more
+#       or less a straightforward translation of the output of
+#       VBoxManage showvminfo.  However, "arrays" in the output
+#       (i.e. keys with indices in-between parenthesis) will be
+#       translated to a proper list in order to ease parsing.
+#
+# Arguments:
+#	vm	Name or identifier of virtualbox guest machine.
+#
+# Results:
+#       Return a dictionary describing the machine
+#
+# Side Effects:
+#       None.
 proc ::cluster::virtualbox::info { vm } {
     log INFO "Getting info for guest $vm"
     foreach l [[namespace parent]::Run -return -- \
@@ -21,6 +65,8 @@ proc ::cluster::virtualbox::info { vm } {
 	if { $eq >= 0 } {
 	    set k [string trim [string range $l 0 [expr {$eq-1}]]]
 	    set v [string trim [string range $l [expr {$eq+1}] end]]
+	    # Convert arrays into list in the dictionary, otherwise
+	    # just create a key/value in the dictionary.
 	    if { [regexp {(.*)\([0-9]+\)} $k - mk] } {
 		dict lappend nfo $mk $v
 	    } else {
@@ -32,7 +78,21 @@ proc ::cluster::virtualbox::info { vm } {
 }
 
 
+# ::cluster::virtualbox::forward -- Establish port-forwarding
+#
+#       Description
+#
+# Arguments:
+#	arg1	descr
+#	arg2	descr
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       None.
 proc ::cluster::virtualbox::forward { vm args } {
+    # TODO: Don't redo if forwarding already exists...
     set running [expr {[Running $vm] ne ""}]
     foreach {host mchn proto} $args {
 	set proto [string tolower $proto]
@@ -52,7 +112,7 @@ proc ::cluster::virtualbox::forward { vm args } {
 
 proc ::cluster::virtualbox::Running { vm } {
     # Detect if machine is currently running.
-    log INFO "Detecting running state of $vm"
+    log DEBUG "Detecting running state of $vm"
     foreach l [[namespace parent]::Run -return -- ${vars::-manage} list \
 		   runningvms] {
 	foreach {nm id} $l {
@@ -103,7 +163,7 @@ proc ::cluster::virtualbox::Halt { vm { respit 15 } } {
     [namespace parent]::Run ${vars::-manage} controlvm $vm acpipowerbutton
 
     # Wait for VM to shutdown
-    log INFO "Waiting for $vm to shutdown..."
+    log NOTICE "Waiting for $vm to shutdown..."
     while {$respit >= 0} {
 	set id [Running $vm]
 	if { $id eq "" } {
