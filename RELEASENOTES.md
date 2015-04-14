@@ -12,13 +12,13 @@
   reduces generation time as we do not require the creation of a
   temporary virtual machine.
 
-* Support port forwarding and share mounting on top of the virtuablbox
+* Support port forwarding and share mounting on top of the virtualbox
   driver.
 
 * Adding support for application versioning (to make files like this
   one more meaninfull!).
 
-* Renamed machinery info to machinery swarm to make it more explicit.
+* Renamed `machinery info` to `machinery swarm` to make it more explicit.
 
 ## v 0.1
 

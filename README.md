@@ -18,7 +18,8 @@ example, the following content would define three machines using the
 `virtualbox` driver, one with more memory, the other one with more disk than the
 defaults provided by `docker-machine` and the last one as the master of the
 cluster. The description also defines some labels that can be used by `swarm` to
-schedule components on specific nodes.
+schedule components on specific nodes and arrange for the machine called `core`
+to have access to your home directory.
 
     db:
       driver: virtualbox
@@ -35,6 +36,8 @@ schedule components on specific nodes.
       master: on
       labels:
         role: core
+      shares:
+        - $HOME
 
 Given access to a cluster definition file such as the one described above, the
 following command would create all the configured machines and arrange for a
@@ -66,6 +69,12 @@ if necessary during that process.  More details are available in the section on
 the supported YAML format.  Note that instead of `up`, machinery also supports
 the synonym `start`.
 
+`machinery` is able to mount local host shares within the virtual machines that
+runs the virtualbox driver.  Mounting is performed at each machine start,
+meaning that from that point of view running `machinery up` with an existing
+machine as an argument is not equivalent to running `docker-machine start` with
+the same machine as an argument.
+
 #### halt
 
 The command `halt` will bring down one or several machines, which names would
@@ -79,9 +88,9 @@ The command `destroy` will destroy entirely and irrevocably one or several
 machines, which names would follow on the command line.  If no machines are
 specified, `machinery` will destroy all machines in the cluster.
 
-#### info
+#### swarm
 
-The command `info` will contact the swarm master in the cluster and print out
+The command `swarm` will contact the swarm master in the cluster and print out
 its current status, i.e. the virtual machines that are registered within the
 master and their details.
 
@@ -96,11 +105,10 @@ further automation.  If a token for the cluster can be found in the cache, it
 will be returned directly.  To force regeneration of the token, you can specify
 the option `-force` to the command.
 
-Whenever a token needs to be generated, `machinery` will use the default driver
-(which is virtualbox) to create a temporary virtual machine, run `swarm create`
-in a component in that machine and then completely delete the virtual machine.
-This is as of the instructions from the official tutorials and might changed in
-further versions, e.g. via using `docker` on the local host instead.
+Whenever a token needs to be generated, `machinery` will run `swarm create` in a
+component on the local machine.  The component is automatically removed once the
+token has been generated.  However, the image that might have been downloaded
+will remain on the local machine.
 
 #### ssh
 
@@ -108,7 +116,13 @@ The command `ssh` will execute a command within a virtual machine of the cluster
 and print out its result on the standard output.  The machine needs to be
 started for the command to succeed.
 
-### Interaction with `docker-machine`
+#### version
+
+Print out the current version of the program on the standard output and exit.
+
+### Interaction with system components
+
+#### Interaction with `docker-machine`
 
 At a meta-level, `machinery` is simply a high-level interface to
 `docker-machine`.  It will indeed call `docker-machine` for most of its under
@@ -133,6 +147,23 @@ with the name `db` at the command-line.  However, calling `docker-machine ls`
 will show up its real name, i.e. `mycluster-db`.  This behaviour will help you
 managing several clusters from the same directory, for example when staging or
 when running sub-sets of your architecture for development.
+
+#### Interaction with `VBoxManage`
+
+`machinery` supports a number of extra features when creating virtualbox-based
+machines.  This requires proper access to the `VBoxManage` command on the host
+machine.  These features are port forwarding and the ability to mount host path
+into the guest machines.  The mounting of shares is not persistent as
+`/etc/fstab` is read-only in boot2docker. Instead mounting operations will be
+performed each time the virtual machines are started.  Technically, the
+implementation generates unique names for the shares and declare those using
+`VBoxManage sharedfolder add` the first time they are needed.  Then, each time
+the machine is started, a mount operation will be performed using an
+`docker-machine ssh`.
+
+In practice, mounting of shares should be transparent to you as long as you
+start machines that use this feature using `machinery` (as opposed to manually
+using `docker-machine start`).
 
 ### Global Options
 
@@ -229,6 +260,31 @@ options that will be blindly passed to the driver at machine creation.  The
 leading double-dash that precedes these options can be omitted to keep the
 syntax simpler.
 
+#### `ports`
+
+`ports` should be a list of port forwarding specifications.  A specification is
+either a single port or a host port separated from a guest port using a colon.
+When there is a single port, this port will be used as both the host and the
+guest port. It can also contain a trailing protocol specification following a
+slash, that defaults to tcp.  So `8080:80` would forward the local host port
+`8080` onto the guest port `80`.  And `20514:514/udp` would forward port `20514`
+onto the standard syslog port `514` on UDP.
+
+At present, port forwarding is only meaningful and supported on virtualbox based
+machines.
+
+#### `shares`
+
+`shares` should be a list of share mounting specifications.  A specification is
+a either a single path or a host path separated from a guest path using a colon.
+When there is a single path, this path will be used as both the host and the
+guest path.  In paths, any occurrence of the name of an environment variable
+preceded with the `$`-sign will be replaced by the value of that local variable.
+
+At present, share mounting is only supported on virtualbox based machines.
+Shares are declared once within the virtual machine, but they will be mounted as
+soon as a machine has been brought up using a `mount` command executed in the
+guest machine at startup.
 
 ## Comparison to Other Tools
 
