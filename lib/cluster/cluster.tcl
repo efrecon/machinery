@@ -1392,7 +1392,7 @@ proc ::cluster::Shares { spec } {
 	    set host $spec
 	}
     }
-    
+
     # Resolve (local) environement variables to the values.
     set host [Resolve $host]
     set mchn [Resolve $mchn]
@@ -1418,8 +1418,9 @@ proc ::cluster::Shares { spec } {
 # ::cluster::Resolve -- Environement variable resolution
 #
 #       This procedure will resolve every occurence of a construct
-#       %name% where name is the name of an environment variable to
-#       the value of that variable, as long as it exists.
+#       $name where name is the name of an environment variable to the
+#       value of that variable, as long as it exists.  It also
+#       recognises ${name}.
 #
 # Arguments:
 #	str	Incoming string
@@ -1433,9 +1434,10 @@ proc ::cluster::Shares { spec } {
 proc ::cluster::Resolve { str } {
     set mapper {}
     foreach e [array names ::env] {
-	lappend mapper %$e% [set ::env($e)]
+	lappend mapper \$${e} [set ::env($e)]
+	lappend mapper \$\{${e}\} [set ::env($e)]
     }
-    return [string map $str $mapper]
+    return [string map $mapper $str]
 }
 
 
