@@ -18,6 +18,8 @@
 * Adding support for application versioning (to make files like this
   one more meaninfull!).
 
+* Renamed machinery info to machinery swarm to make it more explicit.
+
 ## v 0.1
 
 First official version pushed out to github.  This provides a
