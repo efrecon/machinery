@@ -18,6 +18,7 @@
 ##
 ##################
 package require yaml;   # This is found in tcllib
+package require cluster::virtualbox
 
 namespace eval ::cluster {
     # Encapsulates variables global to this namespace under their own
@@ -44,6 +45,8 @@ namespace eval ::cluster {
 	variable -ext       .tkn
 	# File descriptor to dump log messages to
 	variable -log       stderr
+	# Date log output
+	variable -date      "%Y%m%d %H%M%S"
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -120,7 +123,8 @@ proc ::cluster::getopt {_argv name {_var ""} {dft ""}} {
 #       level 6.  Level 0 will therefor turn off ALL debugging.
 #       Logging happens on the standard error, but this can be changed
 #       through the -log option to the module.  Logging is pretty
-#       printed using ANSI codes on the destination channel.
+#       printed using ANSI codes when the destination channel is a
+#       terminal.
 #
 # Arguments:
 #	lvl	Logging level of the message
@@ -139,33 +143,13 @@ proc ::cluster::log { lvl msg } {
     # If we should output (i.e. level of message is below the global
     # module level), pretty print and output.
     if { ${vars::-verbose} >= $lvl } {
-	# Format the tagger so that they all have the same size,
-	# i.e. the size of the longest level (in words)
-	array set TAGGER $vars::verboseTags
-	if { [info exists TAGGER($lvl)] } {
-	    set lbl [format %.8s "$TAGGER($lvl)        "]
-	} else {
-	    set lbl [format %.8s "$lvl        "]
-	}
-	# Start by appending a human-readable level, using colors to
-	# rank the levels. (see the + procedure below)
-	set line "\["
-	array set LABELER { 3 yellow 2 red 1 purple 4 bold 6 light }
-	if { [info exists LABELER($lvl)] } {
-	    append line [+ $LABELER($lvl)]$lbl[+ normal]
-	} else {
-	    append line $lbl
-	}
-	append line "\] "
-	# Append the message itself, colorised again
-	array set COLORISER { 3 yellow 2 red 1 purple 4 bold 6 light }
-	if { [info exists COLORISER($lvl)] } {
-	    append line [+ $COLORISER($lvl)]$msg[+ normal]
-	} else {
-	    append line $msg
-	}
+	set toTTY [dict exists [fconfigure ${vars::-log}] -mode]
 	# Output the whole line.
-	puts ${vars::-log} $line
+	if { $toTTY } {	
+	    puts ${vars::-log} [LogTerminal $lvl $msg]
+	} else {
+	    puts ${vars::-log} [LogStandard $lvl $msg]
+	}
     }
 }
 
@@ -539,6 +523,35 @@ proc ::cluster::tag { vm { lbls {}}} {
 }
 
 
+# ::cluster::ports -- Port forwarding
+#
+#       This procedure will arrange for port forwarding to be
+#       established so specific port on the host will be forwarded to
+#       ports within the virtual machines.  This is only implemented
+#       on top of the virtualbox driver at present.
+#
+#       The format of the list of ports forwarding is understood as
+#       follows.  Single ports (an integer) will be forwarded onto the
+#       same guest port and forwarding will be for tcp.  A forwarding
+#       specification can also be a triplet (i.e. a list itself!)
+#       composed of a host port, a guest port and a default protocol.
+#       The default protocol is tcp, and the only recognised protocols
+#       are tcp and udp.  Finally, a forwarding specification can also
+#       have the form host:guest/proto where host and guest should be
+#       two integer ports and the protocol (and the slash) are
+#       optional and default to tcp.
+#
+# Arguments:
+#	vm	Virtual machine description dictionary
+#	ports	List of port forwardings, empty to use the list from the
+#               VM description
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       Will use the Virtual box commands to request for port
+#       forwarding.
 proc ::cluster::ports { vm { ports {}} } {
     # Get ports, either from parameters (overriding the VM object) or
     # from vm object.
@@ -572,34 +585,7 @@ proc ::cluster::ports { vm { ports {}} } {
 
     switch [dict get $vm -driver] {
 	"virtualbox" {
-	    if { [dict exists $vm state] \
-		     && [string equal -nocase [dict get $vm state] "running"]} {
-		foreach {host mchn proto} $opening {
-		    switch $proto {
-			"tcp" {
-			    Run VBoxManage controlvm $nm natpf1 \
-				"tcp-$host,tcp,,$host,,$mchn"
-			}
-			"udp" {
-			    Run VBoxManage controlvm $nm natpf1 \
-				"udp-$host,tcp,,$host,,$mchn"
-			}
-		    }
-		}
-	    } else {
-		foreach {host mchn proto} $opening {
-		    switch $proto {
-			"tcp" {
-			    Run VBoxManage modifyvm $nm --natpf1 \
-				"tcp-$host,tcp,,$host,,$mchn"
-			}
-			"udp" {
-			    Run VBoxManage modifyvm $nm --natpf1 \
-				"udp-$host,tcp,,$host,,$mchn"
-			}
-		    }
-		}
-	    }
+	    eval [linsert $opening 0 virtualbox::forward $nm]
 	}
 	default {
 	    log WARN "Cannot port forward with driver [dict get $vm -driver]"
@@ -608,6 +594,31 @@ proc ::cluster::ports { vm { ports {}} } {
 }
 
 
+# ::cluster::shares -- Shares mounting
+#
+#       This procedure will arrange for shares to be mounted between
+#       the host machine and the guest machine.  This is only
+#       implemented on top of the virtualbox driver at present.
+#
+#       The format of the list of shares is understood as follows.  A
+#       single path will be shared at the same location than the host
+#       within the guest.  A share specification can also be a pair
+#       (i.e. a list itself!)  composed of a host path and a guest
+#       path.  Finally, a share specification can also have the form
+#       host:guest where host and guest should the path on the local
+#       host and where to mount it on the guest.
+#
+# Arguments:
+#	vm	Virtual machine description dictionary
+#	shares	List of share mounts, empty to use the list from the
+#               VM description
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       Will use the Virtual box commands to request for port
+#       forwarding.
 proc ::cluster::shares { vm { shares {}} } {
     # Get shares, either from parameters (overriding the VM object) or
     # from vm object.
@@ -638,61 +649,37 @@ proc ::cluster::shares { vm { shares {}} } {
 	append spec "${host}->${mchn} "
     }
     log NOTICE "Mounting shares as follows for $nm: [string trim $spec]"
-
+    
     switch [dict get $vm -driver] {
 	"virtualbox" {
-	    # Halt the virtual machine if it was running, we cannot
-	    # seem to declare sharedfolders on running machines.
-	    if { [dict exists $vm state] \
-		     && [string equal -nocase [dict get $vm state] "running"]} {
-		halt $vm
-	    }
-	    # Create new shares within the guest machines, arrange to
-	    # keep the names that we generated, so we now have a list
-	    # with triplets and stored in sharing.
+	    # Add shares as necessary.  This might halt the virtual
+	    # machine if they do not exist yet, so we gather their
+	    # names together with host and guest path information in a
+	    # new list called sharing.  This allows us to halt the
+	    # machine as little as possible.
 	    set sharing {}
 	    foreach {host mchn} $opening {
-		set share [Temporary [file tail $host]]
-		Run VBoxManage sharedfolder add $nm \
-		    --name $share \
-		    --hostpath $host
-		lappend sharing $host $mchn $share
+		set share [virtualbox::addshare $nm $host]
+		if { $share ne "" } {
+		    lappend sharing $host $mchn $share
+		}
 	    }
+
 	    # Now start virtual machine as we will be manipulating the
-	    # runtime state of the machine.
+	    # runtime state of the machine.  This should only starts
+	    # the machines if it is not running already.
 	    start $vm
-	    # Create directories within the guest machine, i.e. where
-	    # we want the share to be mounted.  We use a local copy of
-	    # the remote fstab file and arrange to append the
-	    # necessary information to the local copy before copying
-	    # it back.
+
+	    # And arrange for the destination directories to exist
+	    # within the guest and perform the mount.
 	    foreach {host mchn share} $sharing {
 		Run ${vars::-machine} ssh $nm "sudo mkdir -p $mchn"
+		Run ${vars::-machine} ssh $nm \
+		    "sudo mount -t vboxsf $share $mchn"
 	    }
-	    # Modify /etc/fstab to contain references to the new shares
-	    set fstab [Run -return -- ${vars::-machine} ssh $nm cat /etc/fstab]
-	    set newtab [Temporary /tmp/fstab]
-	    set fd [open $newtab "w"]
-	    foreach l $fstab {
-		puts $fd $l
-	    }
-	    foreach {host mchn share} $sharing {
-		puts $fd "$share $mchn vboxsf defaults 0 0"
-	    }
-	    close $fd
-	    scp $vm $newtab
-	    Run ${vars::-machine} ssh $nm "sudo mv -f $newtab /etc/fstab"
-	    # Now that we have ensured that the shares will survive
-	    # the new reboot, we also want to make them live for this
-	    # session.  So mount manually once.
-	    foreach {host mchn share} $sharing {
-		Run ${vars::-machine} ssh $nm sudo mount $mchn
-	    }
-	    # And cleanup....
-	    file delete -force -- $newtab;    # Remove local fstab copy!
 	}
 	default {
-	    log WARN "Cannot port forward with driver [dict get $vm -driver]"
+	    log WARN "Cannot mount shares with driver [dict get $vm -driver]"
 	}
     }
 }
@@ -1201,13 +1188,28 @@ proc ::cluster::Run { args } {
     set fd [open $pipe]
     while {![eof $fd]} {
 	set line [gets $fd]
-	# Parse and analyse output of docker-machine.  Maybe should we
-	# translate log levels here??
+	set outlvl INFO
+	# Parse and analyse output of docker-machine. Do some
+	# translation of the loglevels between logrus and our internal
+	# levels.
 	if { [lindex $args 0] eq ${vars::-machine} } {
 	    foreach {k v} [string map {"=" " "} $line] {
 		if { $k eq "msg" } {
 		    set line $v
 		    break
+		}
+		# Translate between loglevels from logrus to internal
+		# levels.
+		if { $k eq "level" } {
+		    foreach { gl lvl } [list info INFO \
+					    warn NOTICE \
+					    error WARN \
+					    fatal ERROR \
+					    panic CRITICAL] {
+			if { [string equal -nocase $v $gl] } {
+			    set outlvl $lvl
+			}
+		    }
 		}
 	    }
 	}
@@ -1217,7 +1219,7 @@ proc ::cluster::Run { args } {
 		log DEBUG "Appending $line to result"
 		lappend ret $line
 	    } else {
-		log INFO "  $line"
+		log $outlvl "  $line"
 	    }
 	}
     }
@@ -1260,6 +1262,21 @@ proc ::cluster::Attach { vm { swarm 0 } } {
 }
 
 
+# ::cluster::Detach -- Detach from VM
+#
+#       Detach from a VM that we might have attached to using the
+#       Attach procedure.  This will clear out the set of environment
+#       variables that is usually set by docker-machine env.
+#
+# Arguments:
+#       None.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       Modify current environment so as to be able to clear out
+#       docker context.
 proc ::cluster::Detach {} {
     log INFO "Detaching from vm..."
     foreach e [list TLS_VERIFY CERT_PATH HOST] {
@@ -1270,10 +1287,29 @@ proc ::cluster::Detach {} {
 }
 
 
+# ::cluster::Ports -- Parse port forwarding specification
+#
+#       This procedure will parse a port forwarding specification
+#       (either integer, list of host guest (and perhaps proto) or
+#       host:guest/proto (with optional proto)), verify that the ports
+#       are integers and return either an empty list on errors, or a
+#       list of exactly three items: the host port, the guest port and
+#       the protocol to use for the forwarding.
+#
+# Arguments:
+#	pspec	Port forwarding specification, see above
+#
+# Results:
+#       Return an empty list or the parsed forwarding specification
+#
+# Side Effects:
+#       None.
 proc ::cluster::Ports { pspec } {
+    # Defaults
     set host -1
     set mchn -1
     set proto tcp
+    # Segregate list from string formatting and parse.
     if { [llength $pspec] >= 2 } {
 	foreach {host mchn proto} $pspec break
     } else {
@@ -1290,9 +1326,12 @@ proc ::cluster::Ports { pspec } {
 	}
     }
 
+    # Arrange for an empty protocol to be tcp
     if { $proto eq "" } {
 	set proto "tcp"
     }
+
+    # And make sure we only have udp or tcp as a port.
     switch -nocase -- $proto {
 	"tcp" {
 	    set proto "tcp"
@@ -1306,6 +1345,7 @@ proc ::cluster::Ports { pspec } {
 	}
     }
 
+    # Scream whenever ports are not integer and return.
     if { [string is integer -strict $host] \
 	     && [string is integer -strict $mchn] } {
 	if { $mchn < 0 } {
@@ -1319,9 +1359,29 @@ proc ::cluster::Ports { pspec } {
 }
 
 
+# ::cluster::Shares -- Parse share mount specification
+#
+#       This procedure will parse a share mount specification (either
+#       a path, a list of host and guest path or host:guest), convert
+#       environment variables to their values in the paths, check that
+#       the host path exists and return either an empty list on
+#       errors, or a list of exactly three items: the host port, the
+#       guest port and the protocol to use for the forwarding.
+#       Description
+#
+# Arguments:
+#	arg1	descr
+#	arg2	descr
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       None.
 proc ::cluster::Shares { spec } {
     set host ""
     set mchn ""
+    # Segragates list from the string representation of shares.
     if { [llength $spec] >= 2 } {
 	foreach {host mchn} $spec break
     } else {
@@ -1333,11 +1393,14 @@ proc ::cluster::Shares { spec } {
 	}
     }
     
-    set host [EnvVar $host]
-    set mchn [EnvVar $mchn]
+    # Resolve (local) environement variables to the values.
+    set host [Resolve $host]
+    set mchn [Resolve $mchn]
     if { $mchn eq "" } {
 	set mchn $host
     }
+
+    # Scream on errors and return
     if { $host eq "" } {
 	log ERROR "No host path specified!"
 	return {}
@@ -1352,16 +1415,27 @@ proc ::cluster::Shares { spec } {
 }
 
 
-proc ::cluster::EnvVar { var } {
-    if { [string index $var 0] eq "$" } {
-	set v [string range $var 1 end]
-	if { [info exists ::env($v)] } {
-	    set var [set ::env($v)]
-	} else {
-	    log ERROR "$v is not an environment variable"
-	}
+# ::cluster::Resolve -- Environement variable resolution
+#
+#       This procedure will resolve every occurence of a construct
+#       %name% where name is the name of an environment variable to
+#       the value of that variable, as long as it exists.
+#
+# Arguments:
+#	str	Incoming string
+#
+# Results:
+#       String where environment variables have been resolved to their
+#       values.
+#
+# Side Effects:
+#       None.
+proc ::cluster::Resolve { str } {
+    set mapper {}
+    foreach e [array names ::env] {
+	lappend mapper %$e% [set ::env($e)]
     }
-    return $var
+    return [string map $str $mapper]
 }
 
 
@@ -1406,10 +1480,97 @@ proc ::cluster::Token { {driver virtualbox} } {
     return $token
 }
 
+
+# ::cluster::LogTerminal -- Create log line for terminal output
+#
+#       Pretty print a log message for output on the terminal.  This
+#       will use ANSI colour codings to improve readability (and will
+#       omit the timestamps).
+#
+# Arguments:
+#	lvl	Log level (an integer)
+#	msg     Log message
+#
+# Results:
+#       Line to output on terminal
+#
+# Side Effects:
+#       None.
+proc ::cluster::LogTerminal { lvl msg } {
+    # Format the tagger so that they all have the same size,
+    # i.e. the size of the longest level (in words)
+    array set TAGGER $vars::verboseTags
+    if { [info exists TAGGER($lvl)] } {
+	set lbl [format %.8s "$TAGGER($lvl)        "]
+    } else {
+	set lbl [format %.8s "$lvl        "]
+    }
+    # Start by appending a human-readable level, using colors to
+    # rank the levels. (see the + procedure below)
+    set line "\["
+    array set LABELER { 3 yellow 2 red 1 purple 4 blue 6 light }
+    if { [info exists LABELER($lvl)] } {
+	append line [+ $LABELER($lvl)]$lbl[+ normal]
+    } else {
+	append line $lbl
+    }
+    append line "\] "
+    # Append the message itself, colorised again
+    array set COLORISER { 3 yellow 2 red 1 purple 4 bold 6 light }
+    if { [info exists COLORISER($lvl)] } {
+	append line [+ $COLORISER($lvl)]$msg[+ normal]
+    } else {
+	append line $msg
+    }
+
+    return $line
+}
+
+
+# ::cluster::LogTerminal -- Create log line for file output
+#
+#       Pretty print a log message for output to a file descriptor.
+#       This will add a timestamp to ease future introspection.
+#
+# Arguments:
+#	lvl	Log level (an integer)
+#	msg     Log message
+#
+# Results:
+#       Line to output on file
+#
+# Side Effects:
+#       None.
+proc ::cluster::LogStandard { lvl msg } {
+    array set TAGGER $vars::verboseTags
+    if { [info exists TAGGER($lvl)] } {
+	set lbl $TAGGER($lvl)
+    } else {
+	set lbl $lvl
+    }
+    set dt [clock format [clock seconds] -format ${vars::-date}]
+    return "\[$dt\] \[$lbl\] $msg"
+}
+
+
+# ::cluster::Temporary -- Temporary name
+#
+#       Generate a rather unique temporary name (to be used, for
+#       example, when creating temporary files).
+#
+# Arguments:
+#	pfx	Prefix before unicity taggers
+#
+# Results:
+#       A string that is made unique through the process identifier
+#       and some randomness.
+#
+# Side Effects:
+#       None.
 proc ::cluster::Temporary { pfx } {
     return ${pfx}-[pid]-[expr {int(rand()*1000)}]
 
 }
 
 
-package provide cluster 0.1
+package provide cluster 0.2
