@@ -168,7 +168,8 @@ switch -nocase -- $cmd {
 	if { $CRT(-token) ne "" } {
 	    set token $CRT(-token)
 	} else {
-	    set token [cluster token $CRT(-cluster) 0 $CRT(-driver)]
+	    #set token [cluster token $CRT(-cluster) 0 $CRT(-driver)]
+	    set token [cluster token $CRT(-cluster) 0 ""]
 	}
 	if { [llength $argv] == 0 } {
 	    set argv [cluster names $cluster]

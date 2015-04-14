@@ -1,5 +1,12 @@
 # Release Notes
 
+
+## v 0.2.1
+
+* Adding YAML syntax for automatically pull a number of repositories once a
+  machine has been created and initiated.
+
+
 ## v 0.2
 
 * Intelligent logging, will behave differently when logging to a
@@ -19,6 +26,7 @@
   one more meaninfull!).
 
 * Renamed `machinery info` to `machinery swarm` to make it more explicit.
+
 
 ## v 0.1
 
