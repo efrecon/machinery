@@ -31,4 +31,4 @@
 ## v 0.1
 
 First official version pushed out to github.  This provides a
-restricted but working set of features.
+reduced but working set of features.

@@ -80,17 +80,18 @@ proc ::cluster::virtualbox::info { vm } {
 
 # ::cluster::virtualbox::forward -- Establish port-forwarding
 #
-#       Description
+#       Arrange for a number of NAT port forwardings to be applied
+#       between the host and a guest machine.
 #
 # Arguments:
-#	arg1	descr
-#	arg2	descr
+#	vm	Name or identifier of virtualbox guest machine.
+#	args	Repeatedly host port, guest port, protocol in a list.
 #
 # Results:
 #       None.
 #
 # Side Effects:
-#       None.
+#       Perform port forwarding on the guest machine
 proc ::cluster::virtualbox::forward { vm args } {
     # TODO: Don't redo if forwarding already exists...
     set running [expr {[Running $vm] ne ""}]
@@ -110,6 +111,19 @@ proc ::cluster::virtualbox::forward { vm args } {
 }
 
 
+# ::cluster::virtualbox::Running -- Is a machine running?
+#
+#       Check if a virtual machine is running and returns its identifier.
+#
+# Arguments:
+#	vm	Name or identifier of virtualbox guest machine.
+#
+# Results:
+#       Return the identifier of the machine if it is running,
+#       otherwise an empty string.
+#
+# Side Effects:
+#       None.
 proc ::cluster::virtualbox::Running { vm } {
     # Detect if machine is currently running.
     log DEBUG "Detecting running state of $vm"
@@ -127,6 +141,23 @@ proc ::cluster::virtualbox::Running { vm } {
 }
 
 
+# ::cluster::virtualbox::addshare -- Add a mountable share
+#
+#       Arrange for a local directory path to be mountable from within
+#       a guest virtual machine.  This will generate a unique
+#       identifier for the share.
+#
+# Arguments:
+#	vm	Name or identifier of virtualbox guest machine.
+#	path	Path to EXISTING directory
+#
+# Results:
+#       Return the identifier for the share, or an empty string on
+#       errors.
+#
+# Side Effects:
+#       Will turn off the machine if it is running as it is not
+#       possible to add shares to live machines.
 proc ::cluster::virtualbox::addshare { vm path } {
     # Refuse to add directories that do not exist (and anything else
     # that would not be a directory).
@@ -136,7 +167,7 @@ proc ::cluster::virtualbox::addshare { vm path } {
     }
 
     # Lookup the share so we'll only add once.
-    set nm [FindShare $vm $path]
+    set nm [share $vm $path]
 
     # If if it did not exist, add the shared folder definition to the
     # virtual machine.  Generate a unique name that has some
@@ -145,7 +176,7 @@ proc ::cluster::virtualbox::addshare { vm path } {
 	# Halt the machine if it is running, since we cannot add
 	# shared folders to running machines.
 	if { [Running $vm] ne "" } {
-	    Halt $vm
+	    halt $vm
 	}
 	# Generate a unique name and add the share
 	set nm [[namespace parent]::Temporary [file tail $path]]
@@ -158,7 +189,22 @@ proc ::cluster::virtualbox::addshare { vm path } {
 }
 
 
-proc ::cluster::virtualbox::Halt { vm { respit 15 } } {
+# ::cluster::virtualbox::halt -- Halt a machine
+#
+#       Halt a virtual machine by simulating first a press on the
+#       power button and then by powering it off completely if it had
+#       not shutdown properly after a respit period.
+#
+# Arguments:
+#	vm	Name or identifier of virtualbox guest machine.
+#	respit	Respit period, in seconds.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       Will block while waiting for the machine to gently shutdown.
+proc ::cluster::virtualbox::halt { vm { respit 15 } } {
     # Do a nice shutdown and wait for end of machine
     [namespace parent]::Run ${vars::-manage} controlvm $vm acpipowerbutton
 
@@ -181,7 +227,22 @@ proc ::cluster::virtualbox::Halt { vm { respit 15 } } {
 }
 
 
-proc ::cluster::virtualbox::FindShare { vm path } {
+# ::cluster::virtualbox::share -- Find a share
+#
+#       Given a local host path, find if there is an existing share
+#       declared within a guest and return its identifier.
+#
+# Arguments:
+#	vm	Name or identifier of virtualbox guest machine.
+#	path	Local host path
+#
+# Results:
+#       Return the identifier of the share if it existed, an empty
+#       string otherwise
+#
+# Side Effects:
+#       None.
+proc ::cluster::virtualbox::share { vm path } {
     set nfo [info $vm]
     foreach k [dict keys $nfo SharedFolderPathMachineMapping*] {
 	if { [dict get $nfo $k] eq $path } {
