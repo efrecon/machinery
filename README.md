@@ -50,6 +50,8 @@ then destroy it.
 
     machinery destroy db
 
+Do you want to try for yourself at once? Jump to the bottom of this
+documentation and read and try the example section.
 
 ## Operating on the cluster
 
@@ -296,6 +298,91 @@ virtual machine has been created, initialised and verified.  This can be handy
 if you want to make sure images are already present when your machine is being
 put into action.  For example, `docker-compose` will sometimes timeout the first
 time that it schedules components as image downloading takes too long.
+
+## Giving it a quick test
+
+The directory `test` contains a test cluster with a single machine.  Try for
+yourself by running the following command from the main directory of the
+repository.
+
+    ./machinery -cluster test/test.yml up
+
+You should see an output similar to the following one on the terminal.
+Actually, what *you* will see is a colourised output without timestamps.
+`machinery` automatically segregates terminals from regular file descriptor and
+the following was captured using a file redirection.
+
+    [20150414 204739] [NOTICE] Generating new token
+    [20150414 204739] [INFO] Detaching from vm...
+    [20150414 204739] [INFO] Creating swarm token...
+    [20150414 204740] [NOTICE] Created cluster token 87c9e52eb6be5d0c794afa7053462667
+    [20150414 204740] [INFO] Token for cluster definition at test/test.yml is 87c9e52eb6be5d0c794afa7053462667
+    [20150414 204740] [NOTICE] Creating machine test-test
+    [20150414 204741] [INFO]   Creating SSH key...
+    [20150414 204741] [INFO]   Creating VirtualBox VM...
+    [20150414 204743] [INFO]   Starting VirtualBox VM...
+    [20150414 204743] [INFO]   Waiting for VM to start...
+    [20150414 204829] [INFO]   Configuring Swarm...
+    [20150414 204849] [INFO]   "test-test" has been created and is now the active machine.
+    [20150414 204849] [INFO]   To point your Docker client at it, run this in your shell: $(docker-machine env test-test)
+    [20150414 204849] [INFO] SSH to test-test working properly
+    [20150414 204849] [NOTICE] Tagging test-test with role=testing target=dev
+    [20150414 204849] [NOTICE] Copying local /tmp/profile-11494-395 to test-test:/tmp/profile-11494-395
+    [20150414 204856] [INFO]   Waiting for VM to start...
+    [20150414 204928] [NOTICE] Port forwarding for test-test as follows: 8080->80/tcp 20514->514/udp 9090->9090/tcp
+    [20150414 204929] [NOTICE] Mounting shares as follows for test-test: /home/emmanuel->/home/emmanuel
+    [20150414 204929] [INFO] Getting info for guest test-test
+    [20150414 204929] [NOTICE] Waiting for test-test to shutdown...
+    [20150414 204934] [NOTICE] Bringing up machine test-test...
+    [20150414 204935] [INFO]   Waiting for VM to start...
+    [20150414 205007] [INFO] Attaching to test-test
+    [20150414 205012] [INFO] Docker setup properly on test-test
+    [20150414 205012] [NOTICE] Pulling images in test-test: gliderlabs/alpine
+    [20150414 205012] [INFO] Attaching to test-test
+    [20150414 205013] [INFO]   Pulling repository gliderlabs/alpine
+    [20150414 205015] [INFO]   a5b60fe97da5: Pulling image (latest) from gliderlabs/alpine
+    [20150414 205015] [INFO]   a5b60fe97da5: Pulling image (latest) from gliderlabs/alpine, endpoint: https://registry-1.docker.io/v1/
+    [20150414 205016] [INFO]   a5b60fe97da5: Pulling dependent layers
+    [20150414 205016] [INFO]   511136ea3c5a: Download complete
+    [20150414 205016] [INFO]   a5b60fe97da5: Pulling metadata
+    [20150414 205017] [INFO]   a5b60fe97da5: Pulling fs layer
+    [20150414 205019] [INFO]   a5b60fe97da5: Download complete
+    [20150414 205019] [INFO]   a5b60fe97da5: Download complete
+    [20150414 205019] [INFO]   Status: Downloaded newer image for gliderlabs/alpine:latest
+
+To check around, you could run the following command to check that the machine
+`test-test` has really been created:
+
+    docker-machine ls
+
+You could also jump into the created machine using the following command:
+
+    docker-machine ssh test-test
+
+At the prompt, you can perhaps get a list of the docker components that have
+been started in the machine using the following command and verify that there
+are two running components: one swarm master component and one swarm agent.
+
+    docker ps
+
+You can also check which images have been downloaded using the following
+command.  That should list at least 3 images: one for `swarm`, one for `busybox`
+(which is used to verify that `docker` runs properly at the end of the machine
+creation process) and finally one for Alpine Linux, which is downloaded as part
+of the test cluster definition file.
+
+    docker images
+
+Finally, you can check that you can access your home directory at its usual
+place, as it is automatically mounted as part of the test cluster definition.  A
+final note: jumping into the machine was not a necessary process, you would have
+been able to execute thos commands directly from the host command prompt after
+having run `$(docker-machine env test-test)`.  
+
+Once done, return to the host prompt and run the following to clean everything
+up:
+
+    ./machinery -cluster test/test.yml destroy
 
 ## Comparison to Other Tools
 
