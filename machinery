@@ -45,14 +45,15 @@ package require cluster;   # This implements the core of our routines!
 # Side Effects:
 #       exit program!!
 proc ::help:dump { { hdr "" } } {
-    global appname
+    global appname CRT
 
     if { $hdr ne "" } {
 	puts $hdr
 	puts ""
     }
     puts "NAME:"
-    puts "\t$appname - Cluster creation and management via docker-machine"
+    puts "\t$appname v$CRT(version) -\
+          Cluster creation and management via docker-machine"
     puts ""
     puts "USAGE"
     puts "\t${appname}.tcl \[global options\] command \[command options\]"
@@ -76,6 +77,9 @@ proc ::help:dump { { hdr "" } } {
 # initialised into CRT.
 foreach {arg val dsc} $prg_args {
     set CRT($arg) $val
+}
+array set CRT {
+    version     0.2
 }
 
 # Did we request for help? Output and goodbye
@@ -137,6 +141,9 @@ foreach vm $vms {
 set cmd [string tolower [lindex $argv 0]]
 set argv [lrange $argv 1 end]
 switch -nocase -- $cmd {
+    "version" {
+	puts stdout $CRT(version)
+    }
     "help" {
 	::help:dump
     }

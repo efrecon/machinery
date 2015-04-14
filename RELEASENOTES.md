@@ -1,0 +1,24 @@
+# Release Notes
+
+## v 0.2
+
+* Intelligent logging, will behave differently when logging to a
+  terminal or to a regular file descriptor.
+
+* Convert between logrus (and thus docker-machine) log levels and
+  internal log levels for an improved output.
+
+* Now creates cluster token using a local docker component, which
+  reduces generation time as we do not require the creation of a
+  temporary virtual machine.
+
+* Support port forwarding and share mounting on top of the virtuablbox
+  driver.
+
+* Adding support for application versioning (to make files like this
+  one more meaninfull!).
+
+## v 0.1
+
+First official version pushed out to github.  This provides a
+restricted but working set of features.
