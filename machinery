@@ -63,7 +63,7 @@ proc ::help:dump { { hdr "" } } {
     puts "\thalt\tBring down cluster and/or specific machines"
     puts "\ttoken\tCreate (new) swarm token, force regeneration with -force"
     puts "\tdestroy\tDestroy cluster and/or specific machines"
-    puts "\tinfo\tSwarm information for cluster"
+    puts "\tswarm\tSwarm information for cluster"
     puts ""
     puts "GLOBAL OPTIONS:"
     foreach { arg val dsc } $::prg_args {
@@ -186,7 +186,7 @@ switch -nocase -- $cmd {
 	    }
 	}
     }
-    "info" {
+    "swarm" {
 	# Dump out swarm master information
 	set master [cluster master $vms]
 	if { $master ne "" } {
@@ -196,6 +196,7 @@ switch -nocase -- $cmd {
 	    ::cluster::Run $CRT(-docker) info
 	}
     }
+    "down" -
     "stop" -
     "halt" {
 	# Halt one or several machines (or the whole cluster if no
