@@ -4,11 +4,12 @@
 Machine](https://docs.docker.com/machine/) virtual machines. `machinery` uses a
 YAML definition of the whole cluster to create machines, bring them up or down,
 or remove them at will. In short, `machinery` is to `docker-machine` what
-`docker-compose` is to 'docker'. `machinery` also provides [Docker
+`docker-compose` is to 'docker'. In addition, `machinery` provides [Docker
 Swarm](https://docs.docker.com/swarm/) integration and will automatically
 arrange for the created virtual machines to join the swarm cluster or generate
-the token as needed.
-
+the token as needed.  Finally, `machinery` also integrates with
+[Compose](https://docs.docker.com/compose/) and can automatically bring up
+specific project files onto machines that it controls.
 
 ## Quick Tour
 
@@ -19,13 +20,18 @@ machines using the `virtualbox` driver, one with more memory, the other one with
 more disk than the defaults provided by `docker-machine` and the last one as the
 master of the cluster. The description also defines some labels that can be used
 by `swarm` to schedule components on specific nodes and arrange for the machine
-called `core` to have access to your home directory.
+called `core` to have access to your home directory. Finally, it arranges for
+the components pinpointed by a relative `compose` project file to automatically
+be started up when `db` is brought up and created.
 
     db:
       driver: virtualbox
       size: 20000
       labels:
         role: db
+      compose:
+        -
+          file: ../compose/backend/db.yml
     wk01:
       driver: virtualbox
       memory:2048
@@ -298,6 +304,18 @@ virtual machine has been created, initialised and verified.  This can be handy
 if you want to make sure images are already present when your machine is being
 put into action.  For example, `docker-compose` will sometimes timeout the first
 time that it schedules components as image downloading takes too long.
+
+#### `compose`
+
+`compose` should be a list of dictionaries that will, each, reference a
+`docker-compose` project file.  Each dictionary must have a key called `file`
+that contains the path to the compose project file.  A relative path will be
+understood as relative to the directory containing the YAML description file,
+thus allowing you to easily copy and/or transfer entire hierarchies of files.
+Additionally, a key called `options` can be specified and it will contain a list
+of additional options that will be passed to `docker-compose up`.  By default,
+all project files are brought up with the option `-d` to start their components
+in the background.
 
 ## Giving it a quick test
 
