@@ -57,7 +57,10 @@ then destroy it.
     machinery destroy db
 
 Do you want to try for yourself at once? Jump to the bottom of this
-documentation and read and try the example section.
+documentation and read and try the example section.  You might want to
+download a "compiled" [linux
+binary](https://github.com/efrecon/machinery/releases/download/v0.3/machinery-0.3-linux-x86_64)
+to avoid solving dependencies.
 
 ## Operating on the cluster
 
