@@ -31,16 +31,17 @@ namespace eval ::cluster {
 	variable -separator "-"
 	# Allowed VM keys
 	variable -keys      {cpu size memory master labels driver options \
-				 ports shares images}
+				 ports shares images compose}
 	# Path to docker executables
 	variable -machine   docker-machine
 	variable -docker    docker
+	variable -compose   docker-compose
 	# Current verbosity level
 	variable -verbose   NOTICE
 	# Location of boot2docker profile
 	variable -profile   /var/lib/boot2docker/profile
 	# Mapping from integer to string representation of verbosity levels
-	variable verboseTags {1 CRITICAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG}
+	variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG}
 	# Extension for token storage files
 	variable -ext       .tkn
 	# File descriptor to dump log messages to
@@ -118,8 +119,8 @@ proc ::cluster::getopt {_argv name {_var ""} {dft ""}} {
 #
 #       Conditionally output the message passed as an argument
 #       depending on the current module debug level.  The level can
-#       either be an integer or one of CRITICAL ERROR WARN NOTICE INFO
-#       DEBUG, where CRITICAL corresponds to level 1 and DEBUG to
+#       either be an integer or one of FATAL ERROR WARN NOTICE INFO
+#       DEBUG, where FATAL corresponds to level 1 and DEBUG to
 #       level 6.  Level 0 will therefor turn off ALL debugging.
 #       Logging happens on the standard error, but this can be changed
 #       through the -log option to the module.  Logging is pretty
@@ -379,9 +380,62 @@ proc ::cluster::create { vm token } {
 
 	# Now pull images if any
 	pull $vm
+
+	# And iteratively run compose
+	compose $vm
     }
 
     return $nm
+}
+
+
+proc ::cluster::compose { vm { projects {} } } {
+    # Get projects, either from parameters (overriding the VM object) or
+    # from vm object.
+    if { [string length $projects] == 0 } {
+	if { ![dict exists $vm -compose] } {
+	    return
+	}
+	set projects [dict get $vm -compose]
+    }
+    
+    set nm [dict get $vm -name]
+    set composed {}
+    set maindir [pwd]
+    foreach project $projects {
+	if { [dict exists $project file] } {
+	    set fpath [dict get $project file]
+	    # Resolve with initial location of YAML description to
+	    # make sure we can have relative paths.
+	    if { [dict exists $vm origin] } {
+		set dirname [file dirname [dict get $vm origin]]
+		log DEBUG "Joining $dirname and $fpath to get final path"
+		set fpath [file join $dirname $fpath]
+	    }
+	    set fpath [file normalize $fpath]
+	    if { [file exists $fpath] } {
+		log NOTICE "Starting up components from $fpath in $nm"
+		# Change dir to solve relative access to env files.
+		cd [file dirname $fpath]
+		set cmd [list Compose --file $fpath up -d]
+		if { [dict exists $project options] } {
+		    foreach o [dict get $project options] {
+			lappend cmd $o
+		    }
+		}
+		eval $cmd
+		lappend composed $fpath
+		cd $maindir
+	    } else {
+		log WARN "Cannot find compose file at $fpath"
+	    }
+	}
+    }
+
+    if { [llength $composed] > 0 } {
+	log INFO "Machine $nm now running the following components"
+	Docker ps
+    }
 }
 
 
@@ -577,11 +631,7 @@ proc ::cluster::ports { vm { ports {}} } {
     
     # Some nic'ish ouput of the ports and what we do.
     set nm [dict get $vm -name]
-    set pspec ""
-    foreach {host mchn proto} $opening {
-	append pspec "${host}->${mchn}/$proto "
-    }
-    log NOTICE "Port forwarding for $nm as follows: [string trim $pspec]"
+    log NOTICE "Forwarding ports for $nm..."
 
     switch [dict get $vm -driver] {
 	"virtualbox" {
@@ -644,14 +694,11 @@ proc ::cluster::shares { vm { shares {}} } {
     
     # Some nic'ish ouput of the shares and what we do.
     set nm [dict get $vm -name]
-    set spec ""
-    foreach {host mchn} $opening {
-	append spec "${host}->${mchn} "
-    }
-    log NOTICE "Mounting shares as follows for $nm: [string trim $spec]"
+    log NOTICE "Mounting shares for $nm..."
     
     switch [dict get $vm -driver] {
 	"virtualbox" {
+	    log INFO "Mounting $host onto ${nm}:${mchn}"
 	    # Add shares as necessary.  This might halt the virtual
 	    # machine if they do not exist yet, so we gather their
 	    # names together with host and guest path information in a
@@ -879,10 +926,12 @@ proc ::cluster::parse { fname args } {
     set d [::yaml::yaml2dict -file $fname]
     foreach m [dict keys $d] {
 	# Create vm "object" with proper name, i.e. using the prefix.
+	# We also make sure that we keep a reference to the name of
+	# the file that the machine was originally read from.
 	if { $pfx eq "" } {
-	    set vm [dict create -name $m]
+	    set vm [dict create -name $m origin $fname]
 	} else {
-	    set vm [dict create -name ${pfx}${vars::-separator}$m]
+	    set vm [dict create -name ${pfx}${vars::-separator}$m origin $fname]
 	}
 
 	# Check validity of keys and insert them as dash-led.  Arrange
@@ -1105,7 +1154,7 @@ proc ::cluster::Create { vm { token "" } } {
     if { [Machine -return -- ssh $nm echo "$nm"] eq "$nm" } {
 	log INFO "SSH to $nm working properly"
     } else {
-	log CRITICAL "Cannot log into $nm!"
+	log FATAL "Cannot log into $nm!"
 	return ""
     }
 
@@ -1182,7 +1231,7 @@ proc ::cluster::Run { args } {
 					    warn NOTICE \
 					    error WARN \
 					    fatal ERROR \
-					    panic CRITICAL] {
+					    panic FATAL] {
 			if { [string equal -nocase $v $gl] } {
 			    set outlvl $lvl
 			}
@@ -1221,6 +1270,26 @@ proc ::cluster::Docker { args } {
 	set args [linsert $args 0 --debug]
     }
     return [eval Run $opts -- ${vars::-docker} $args]
+}
+
+
+proc ::cluster::Compose { args } {
+    # Isolate -- that will separate options to procedure from options
+    # that would be for command.  Using -- is MANDATORY if you want to
+    # specify options to the procedure.
+    set sep [lsearch $args "--"]
+    if { $sep >= 0 } {
+	set opts [lrange $args 0 [expr {$sep-1}]]
+	set args [lrange $args [expr {$sep+1}] end]
+    } else {
+	set opts [list]
+    }
+    
+    # Put docker in debug mode when we are ourselves at debug level.
+    if { [LogLevel ${vars::-verbose}] >= 6 } {
+	set args [linsert $args 0 --verbose]
+    }
+    return [eval Run $opts -- ${vars::-compose} $args]
 }
 
 
@@ -1479,9 +1548,9 @@ proc ::cluster::LogTerminal { lvl msg } {
     # i.e. the size of the longest level (in words)
     array set TAGGER $vars::verboseTags
     if { [info exists TAGGER($lvl)] } {
-	set lbl [format %.8s "$TAGGER($lvl)        "]
+	set lbl [format %.6s "$TAGGER($lvl)        "]
     } else {
-	set lbl [format %.8s "$lvl        "]
+	set lbl [format %.6s "$lvl        "]
     }
     # Start by appending a human-readable level, using colors to
     # rank the levels. (see the + procedure below)

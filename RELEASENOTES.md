@@ -1,5 +1,10 @@
 # Release Notes
 
+## v 0.3
+
+* Added support for automatically run `docker-compose up` against a given
+  machine.  This allows to bypass swarm (for development purposes), or to
+  schedule components on globally.
 
 ## v 0.2.2
 

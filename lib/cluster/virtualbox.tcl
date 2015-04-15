@@ -80,7 +80,8 @@ proc ::cluster::virtualbox::forward { vm args } {
     foreach {host mchn proto} $args {
 	set proto [string tolower $proto]
 	if { $proto eq "tcp" || $proto eq "udp" } {
-	    log DEBUG "Forwarding host port $host onto guest $mchn for $proto"
+	    log INFO "[string toupper $proto] port forwarding\
+                      localhost:$host -> ${vm}:$mchn"
 	    if { $running } {
 		Manage controlvm $vm natpf1 \
 		    "${proto}-$host,$proto,,$host,,$mchn"
@@ -132,6 +133,7 @@ proc ::cluster::virtualbox::addshare { vm path } {
 	}
 	# Generate a unique name and add the share
 	set nm [[namespace parent]::Temporary [file tail $path]]
+	log INFO "Adding share ${vm}:${nm} for localhost:$path"
 	Manage sharedfolder add $vm \
 	    --name $nm \
 	    --hostpath $path \
