@@ -1,6 +1,19 @@
 # Release Notes
 
 
+## v 0.2.2
+
+* Refactoring of the code to move out all swarm-related code to a separate
+  (internal) package.
+
+* Introduces two new (internal) commands to call `docker` and `docker-machine`
+  so as to ensure standardised behaviour.  These also place both commands in
+  debug mode whenever the current verbosity level is greater than DEBUG.
+
+* Fixed mounting of shares so docker user inside the virtual box guest can also
+  write to files.
+
+
 ## v 0.2.1
 
 * Adding YAML syntax for automatically pull a number of repositories once a

@@ -179,7 +179,7 @@ proc ::cluster::ls { {machines *} } {
     # Get current state of cluster and arrange for cols to be the list
     # of keys (this is the first line of docker-machine ls output,
     # meaning the header).
-    set state [Run -return -- ${vars::-machine} ls]
+    set state [Machine -return -- ls]
     set cols [lindex $state 0]
     # Arrange for indices to contain the character index at which each
     # column of the output starts (in same order as the list of keys
@@ -371,8 +371,7 @@ proc ::cluster::create { vm token } {
 	# back.
 	log DEBUG "Testing that machine $vm has a working docker via busybox"
 	Attach $vm
-	if { [Run -return -- ${vars::-docker} run --rm busybox \
-		  echo $nm] eq "$nm" } {
+	if { [Docker -return -- run --rm busybox echo $nm] eq "$nm" } {
 	    log INFO "Docker setup properly on $nm"
 	} else {
 	    log ERROR "Cannot test docker for $nm, check manually!"
@@ -417,8 +416,7 @@ proc ::cluster::scp { vm src_fname { dst_fname "" } } {
     # machine.  This assumes docker-machine output the ssh command
     # onto the stderr.
     log DEBUG "Detecting SSH command into $nm"
-    set sshinfo [Run -return -stderr -- ${vars::-machine} --debug \
-		     ssh $nm echo ""]
+    set sshinfo [Machine -return -stderr -- --debug ssh $nm echo ""]
     set ssh [string first ssh $sshinfo];  # Lookup the string 'ssh': START
     set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
     set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
@@ -484,8 +482,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # trimming away leading and ending quotes, skipping comments and
     # empty lines.  The result is an array.
     log DEBUG "Getting current boot2docker profile"
-    foreach l [Run -return -- ${vars::-machine} ssh $nm \
-		   cat ${vars::-profile}] {
+    foreach l [Machine -return -- ssh $nm cat ${vars::-profile}] {
 	set l [string trim $l]
 	if { $l ne "" && [string index $l 0] ne "\#" } {
 	    set equal [string first "=" $l]
@@ -522,7 +519,7 @@ proc ::cluster::tag { vm { lbls {}}} {
 
     # Cleanup and restart machine to make sure the labels get live.
     file delete -force -- $fname;      # Remove local file, not needed anymore
-    Run ${vars::-machine} restart $nm; # Restart machine to activate tags
+    Machine restart $nm;               # Restart machine to activate tags
 }
 
 
@@ -673,12 +670,31 @@ proc ::cluster::shares { vm { shares {}} } {
 	    # the machines if it is not running already.
 	    start $vm
 
+	    # Find out id of main user on virtual machine to be able
+	    # to mount shares under that UID.
+	    set idinfo [string map [list "=" " "] \
+			    [lindex [Machine -return -- ssh $nm id] 0]]
+	    set uid ""
+	    if { [dict exists $idinfo uid] } {
+		if { [regexp {\d+} [dict get $idinfo uid] uid] } {
+		    log DEBUG "User identifier in machine is $uid"
+		}
+	    }
+	    
 	    # And arrange for the destination directories to exist
 	    # within the guest and perform the mount.
 	    foreach {host mchn share} $sharing {
-		Run ${vars::-machine} ssh $nm "sudo mkdir -p $mchn"
-		Run ${vars::-machine} ssh $nm \
-		    "sudo mount -t vboxsf $share $mchn"
+		# Make the directory
+		if { $uid eq "" } {
+		    Machine ssh $nm "sudo mkdir -p $mchn"
+		    Machine ssh $nm \
+			"sudo mount -t vboxsf -o uid=$uid $share $mchn"
+		} else {
+		    Machine ssh $nm "sudo mkdir -p $mchn"
+		    Machine ssh $nm "sudo chown $uid $mchn"
+		    Machine ssh $nm \
+			"sudo mount -t vboxsf -o uid=$uid $share $mchn"
+		}
 	    }
 	}
 	default {
@@ -710,7 +726,7 @@ proc ::cluster::halt { vm } {
     if { [dict exists $vm state] \
 	     && [string equal -nocase [dict get $vm state] "running"] } {
 	log INFO "Attempting graceful shutdown of $nm"
-	Run ${vars::-machine} stop $nm
+	Machine stop $nm
     }
     # Ask state of cluster again and if the machine still isn't
     # stopped, force a kill.
@@ -718,7 +734,7 @@ proc ::cluster::halt { vm } {
     if { [dict exists $state state] \
 	     && ![string equal -nocase [dict get $vm state] "stopped"] } {
 	log NOTICE "Forcing stop of $nm"
-	Run ${vars::-machine} kill $nm
+	Machine kill $nm
     }
 }
 
@@ -741,8 +757,7 @@ proc ::cluster::ssh { vm args } {
     set nm [dict get $vm -name]
     log NOTICE "Entering machine $nm..."
     if { [llength $args] > 0 } {
-	set res [eval [linsert $args 0 Run -return -keepblanks -- \
-			   ${vars::-machine} ssh $nm]]
+	set res [eval [linsert $args 0 Machine -return -keepblanks -- ssh $nm]]
 	foreach l [lrange $res 0 end-1] {
 	    puts stdout $l
 	}
@@ -784,7 +799,7 @@ proc ::cluster::pull { vm {images {}} } {
     if { [llength $images] > 0 } {
 	Attach $vm
 	foreach img $images {
-	    Run ${vars::-docker} pull $img
+	    Docker pull $img
 	}
     }
 }
@@ -807,7 +822,7 @@ proc ::cluster::destroy { vm } {
     halt $vm
     set nm [dict get $vm -name]
     log NOTICE "Removing machine $nm..."
-    Run ${vars::-machine} rm $nm
+    Machine rm $nm
 }
 
 
@@ -826,83 +841,7 @@ proc ::cluster::destroy { vm } {
 proc ::cluster::start { vm } {
     set nm [dict get $vm -name]
     log NOTICE "Bringing up machine $nm..."
-    Run ${vars::-machine} start $nm
-}
-
-
-# ::cluster::master -- Master description
-#
-#       This procedure looks up the swarm master out of a cluster
-#       description and returns its vm description.
-#
-# Arguments:
-#	cluster	List of machine description dictionaries.
-#
-# Results:
-#       Virtual machine description of swarm master, empty if none.
-#
-# Side Effects:
-#       None.
-proc ::cluster::master { cluster } {
-    foreach vm $cluster {
-	if { [dict exists $vm -master] } {
-	    if { [string is true [dict get $vm -master]] } {
-		return $vm
-	    }
-	}
-    }
-    return {}
-}
-
-
-# ::cluster::token -- Generate a token
-#
-#       This procedure will generate a swarm token cluster if
-#       necessary and return it.  The token is stored in a hidden file
-#       under the same directory as the YAML description file, and
-#       with the .tkn extension.  When the token needs to be
-#       generated, this is done through the creation of a temporary
-#       virtual machine.
-#
-# Arguments:
-#	yaml	Path to YAML description for cluster
-#	force	Force token (re)generation
-#	driver	Driver to use for token generation
-#
-# Results:
-#       None.
-#
-# Side Effects:
-#       None.
-proc ::cluster::token { yaml { force 0 } { driver virtualbox } } {
-    set token ""
-
-    # Generate file name for token caching out of yaml path.
-    set rootname [file rootname [file tail $yaml]]
-    set dirname [file dirname $yaml]
-    set tkn_path [file join $dirname \
-		      ".$rootname.[string trimleft ${vars::-ext} .]"]
-
-    # Read from cache if we have a cache and force is not on.
-    # Otherwise, generate a new token and cache it.
-    if { [file exists $tkn_path] && [string is false $force] } {
-	log NOTICE "Reading token from $tkn_path"
-	set fd [open $tkn_path]
-	set token [string trim [read $fd]]
-	close $fd
-    } else {
-	# Generate and cache.
-	log NOTICE "Generating new token"
-	set token [Token $driver]
-	if { $token ne "" } {
-	    log DEBUG "Storing new generated token in $tkn_path"
-	    set fd [open $tkn_path "w"]
-	    puts -nonewline $fd $token
-	    close $fd
-	}
-    }
-    log INFO "Token for cluster definition at $yaml is $token"
-    return $token
+    Machine start $nm
 }
 
 
@@ -1072,7 +1011,7 @@ proc ::cluster::Create { vm { token "" } } {
     # machine creation: first insert creation command with proper
     # driver.
     set driver [dict get $vm -driver]
-    set cmd [list ${vars::-machine} create -d $driver]
+    set cmd [list Machine create -d $driver]
 
     # Now translate the standard memory (in MB), size (in MB) and cpu
     # (in numbers) options into options that are specific to the
@@ -1157,13 +1096,13 @@ proc ::cluster::Create { vm { token "" } } {
     # Finalise command by adding to it the name of the machine that we
     # want to create and run it.
     lappend cmd $nm
-    eval [linsert $cmd 0 Run]
+    eval $cmd
 
     # Test SSH connection by echoing the name of the machine in the
     # machine using ssh.  This seems to be necessary to make
     # docker-machine happy, but is also a "good thing to check" (TM).
     log DEBUG "Testing SSH connection to $nm"
-    if { [Run -return -- ${vars::-machine} ssh $nm echo "$nm"] eq "$nm" } {
+    if { [Machine -return -- ssh $nm echo "$nm"] eq "$nm" } {
 	log INFO "SSH to $nm working properly"
     } else {
 	log CRITICAL "Cannot log into $nm!"
@@ -1265,6 +1204,47 @@ proc ::cluster::Run { args } {
     return $ret
 }
 
+proc ::cluster::Docker { args } {
+    # Isolate -- that will separate options to procedure from options
+    # that would be for command.  Using -- is MANDATORY if you want to
+    # specify options to the procedure.
+    set sep [lsearch $args "--"]
+    if { $sep >= 0 } {
+	set opts [lrange $args 0 [expr {$sep-1}]]
+	set args [lrange $args [expr {$sep+1}] end]
+    } else {
+	set opts [list]
+    }
+    
+    # Put docker in debug mode when we are ourselves at debug level.
+    if { [LogLevel ${vars::-verbose}] >= 6 } {
+	set args [linsert $args 0 --debug]
+    }
+    return [eval Run $opts -- ${vars::-docker} $args]
+}
+
+
+proc ::cluster::Machine { args } {
+    # Isolate -- that will separate options to procedure from options
+    # that would be for command.  Using -- is MANDATORY if you want to
+    # specify options to the procedure.
+    set sep [lsearch $args "--"]
+    if { $sep >= 0 } {
+	set opts [lrange $args 0 [expr {$sep-1}]]
+	set args [lrange $args [expr {$sep+1}] end]
+    } else {
+	set opts [list]
+    }
+
+    # Put docker-machine in debug mode when we are ourselves at debug
+    # level.
+    if { [LogLevel ${vars::-verbose}] >= 6 } {
+	set args [linsert $args 0 --debug]
+    }
+    
+    return [eval Run $opts -- ${vars::-machine} $args]
+}
+
 
 # ::cluster::Attach -- Attach to vm
 #
@@ -1288,11 +1268,11 @@ proc ::cluster::Attach { vm { swarm 0 } } {
     set nm [dict get $vm -name]
     log INFO "Attaching to $nm"
     if { $swarm } {
-	set cmd [list ${vars::-machine} env --swarm $nm]
+	set cmd [list Machine -return -- env --swarm $nm]
     } else {
-	set cmd [list ${vars::-machine} env $nm]
+	set cmd [list Machine -return -- env $nm]
     }
-    foreach l [eval [linsert $cmd 0 Run -return --]] {
+    foreach l [eval $cmd] {
 	foreach {k v} [split [string map [list "export " ""] $l] "="] {
 	    set ::env($k) $v
 	}
@@ -1476,48 +1456,6 @@ proc ::cluster::Resolve { str } {
 	lappend mapper \$\{${e}\} [set ::env($e)]
     }
     return [string map $mapper $str]
-}
-
-
-# ::cluster::Token -- Generate token
-#
-#       Generate a new swarm token through creating a temporary
-#       virtual machine in which we will run "docker-machine run swarm
-#       create".  The temporary machine is removed once the token has
-#       been generated.  When the driver is empty, this will create
-#       the swarm token using a local component, thus leaving an extra
-#       image on the local machine.
-#
-# Arguments:
-#	driver	Default driver to use for (temporary) VM creation.
-#
-# Results:
-#       Generated token
-#
-# Side Effects:
-#       Create a (temporary) virtual machine and component for swarm
-#       token creation.
-proc ::cluster::Token { {driver virtualbox} } {
-    set token ""
-    if { $driver eq "none" || $driver eq "" } {
-	Detach;   # Ensure we are running locally...
-	log INFO "Creating swarm token..."
-	set token [Run -return -- ${vars::-docker} run --rm swarm create]
-	log NOTICE "Created cluster token $token"
-    } else {
-	set nm [Temporary "tokeniser"]
-	log NOTICE "Creating machine $nm for token creation"
-	set vm [dict create -name $nm -driver $driver]
-	if { [Create $vm] ne "" } {
-	    Attach $vm
-	    log INFO "Creating swarm token..."
-	    set token [Run -return -- ${vars::-docker} run --rm swarm create]
-	    log NOTICE "Created cluster token $token"
-	    Run ${vars::-machine} kill $nm;   # We want to make this quick!
-	    Run ${vars::-machine} rm $nm
-	}
-    }
-    return $token
 }
 
 

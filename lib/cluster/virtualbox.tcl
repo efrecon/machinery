@@ -18,25 +18,8 @@ namespace eval ::cluster::virtualbox {
     namespace eval vars {
 	variable -manage    VBoxManage
     }
-}
-
-# ::cluster::virtualbox::log -- Log output
-#
-#       Log message if current level is higher that the level of the
-#       message.  Currently, this simply bridges the logging facility
-#       available as part of the cluster module.
-#
-# Arguments:
-#	lvl	Logging level of the message
-#	msg	String content of the message.
-#
-# Results:
-#       None.
-#
-# Side Effects:
-#       None.
-proc ::cluster::virtualbox::log { lvl msg } {
-    [namespace parent]::log $lvl $msg
+    namespace export {[a-z]*}
+    namespace path [namespace parent]
 }
 
 
@@ -59,8 +42,7 @@ proc ::cluster::virtualbox::log { lvl msg } {
 #       None.
 proc ::cluster::virtualbox::info { vm } {
     log INFO "Getting info for guest $vm"
-    foreach l [[namespace parent]::Run -return -- \
-		   ${vars::-manage} showvminfo $vm --machinereadable --details] {
+    foreach l [Manage -return -- showvminfo $vm --machinereadable --details] {
 	set eq [string first "=" $l]
 	if { $eq >= 0 } {
 	    set k [string trim [string range $l 0 [expr {$eq-1}]]]
@@ -100,44 +82,14 @@ proc ::cluster::virtualbox::forward { vm args } {
 	if { $proto eq "tcp" || $proto eq "udp" } {
 	    log DEBUG "Forwarding host port $host onto guest $mchn for $proto"
 	    if { $running } {
-		[namespace parent]::Run VBoxManage controlvm $vm natpf1 \
+		Manage controlvm $vm natpf1 \
 		    "${proto}-$host,$proto,,$host,,$mchn"
 	    } else {
-		[namespace parent]::Run VBoxManage modifyvm $vm --natpf1 \
+		Manage modifyvm $vm --natpf1 \
 		    "${proto}-${host},$proto,,$host,,$mchn"
 	    }
 	}	
     }
-}
-
-
-# ::cluster::virtualbox::Running -- Is a machine running?
-#
-#       Check if a virtual machine is running and returns its identifier.
-#
-# Arguments:
-#	vm	Name or identifier of virtualbox guest machine.
-#
-# Results:
-#       Return the identifier of the machine if it is running,
-#       otherwise an empty string.
-#
-# Side Effects:
-#       None.
-proc ::cluster::virtualbox::Running { vm } {
-    # Detect if machine is currently running.
-    log DEBUG "Detecting running state of $vm"
-    foreach l [[namespace parent]::Run -return -- ${vars::-manage} list \
-		   runningvms] {
-	foreach {nm id} $l {
-	    set id [string trim $id "\{\}"]
-	    if { [string equal $nm $vm] || [string equal $id $vm] } {
-		log DEBUG "$vm is running, id: $id"
-		return $id
-	    }
-	}
-    }
-    return ""
 }
 
 
@@ -180,7 +132,7 @@ proc ::cluster::virtualbox::addshare { vm path } {
 	}
 	# Generate a unique name and add the share
 	set nm [[namespace parent]::Temporary [file tail $path]]
-	[namespace parent]::Run ${vars::-manage} sharedfolder add $vm \
+	Manage sharedfolder add $vm \
 	    --name $nm \
 	    --hostpath $path \
 	    --automount
@@ -206,7 +158,7 @@ proc ::cluster::virtualbox::addshare { vm path } {
 #       Will block while waiting for the machine to gently shutdown.
 proc ::cluster::virtualbox::halt { vm { respit 15 } } {
     # Do a nice shutdown and wait for end of machine
-    [namespace parent]::Run ${vars::-manage} controlvm $vm acpipowerbutton
+    Manage controlvm $vm acpipowerbutton
 
     # Wait for VM to shutdown
     log NOTICE "Waiting for $vm to shutdown..."
@@ -222,7 +174,7 @@ proc ::cluster::virtualbox::halt { vm { respit 15 } } {
     # Power it off if it was still on.
     if { $id ne "" } {
 	log NOTICE "Forcing powering off for $vm"
-	[namespace parent]::Run ${vars::-manage} controlvm $vm poweroff
+	Manage controlvm $vm poweroff
     }
 }
 
@@ -251,6 +203,58 @@ proc ::cluster::virtualbox::share { vm path } {
     }
     return ""
 }
+
+####################################################################
+#
+# Procedures below are internal to the implementation, they shouldn't
+# be changed unless you wish to help...
+#
+####################################################################
+
+# ::cluster::virtualbox::Running -- Is a machine running?
+#
+#       Check if a virtual machine is running and returns its identifier.
+#
+# Arguments:
+#	vm	Name or identifier of virtualbox guest machine.
+#
+# Results:
+#       Return the identifier of the machine if it is running,
+#       otherwise an empty string.
+#
+# Side Effects:
+#       None.
+proc ::cluster::virtualbox::Running { vm } {
+    # Detect if machine is currently running.
+    log DEBUG "Detecting running state of $vm"
+    foreach l [Manage -return -- list runningvms] {
+	foreach {nm id} $l {
+	    set id [string trim $id "\{\}"]
+	    if { [string equal $nm $vm] || [string equal $id $vm] } {
+		log DEBUG "$vm is running, id: $id"
+		return $id
+	    }
+	}
+    }
+    return ""
+}
+
+
+proc ::cluster::virtualbox::Manage { args } {
+    # Isolate -- that will separate options to procedure from options
+    # that would be for command.  Using -- is MANDATORY if you want to
+    # specify options to the procedure.
+    set sep [lsearch $args "--"]
+    if { $sep >= 0 } {
+	set opts [lrange $args 0 [expr {$sep-1}]]
+	set args [lrange $args [expr {$sep+1}] end]
+    } else {
+	set opts [list]
+    }
+    
+    return [eval [namespace parent]::Run $opts -- ${vars::-manage} $args]
+}
+
 
 
 package provide cluster::virtualbox 0.1

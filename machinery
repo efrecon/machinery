@@ -28,6 +28,7 @@ set dirname [file dirname [file normalize [info script]]]
 set appname [file rootname [file tail [info script]]]
 lappend auto_path [file join $dirname lib]
 package require cluster;   # This implements the core of our routines!
+package require cluster::swarm;
 
 
 # ::help:dump -- Dump help
@@ -80,7 +81,7 @@ foreach {arg val dsc} $prg_args {
     set CRT($arg) $val
 }
 array set CRT {
-    version     0.2.1
+    version     0.2.2
 }
 
 # Did we request for help? Output and goodbye
@@ -156,7 +157,7 @@ switch -nocase -- $cmd {
 	} else {
 	    set force [cluster getopt argv -force]
 	    #set token [cluster token $CRT(-cluster) $force $CRT(-driver)]
-	    set token [cluster token $CRT(-cluster) $force ""]
+	    set token [swarm token $CRT(-cluster) $force ""]
 	}
 	puts stdout $token
     }
@@ -169,7 +170,7 @@ switch -nocase -- $cmd {
 	    set token $CRT(-token)
 	} else {
 	    #set token [cluster token $CRT(-cluster) 0 $CRT(-driver)]
-	    set token [cluster token $CRT(-cluster) 0 ""]
+	    set token [swarm token $CRT(-cluster) 0 ""]
 	}
 	if { [llength $argv] == 0 } {
 	    set argv [cluster names $cluster]
@@ -189,14 +190,7 @@ switch -nocase -- $cmd {
 	}
     }
     "swarm" {
-	# Dump out swarm master information
-	set master [cluster master $vms]
-	if { $master ne "" } {
-	    cluster log NOTICE "Getting cluster info via\
-                                   [dict get $master -name]"
-	    ::cluster::Attach $master 1
-	    ::cluster::Run $CRT(-docker) info
-	}
+	swarm info $cluster
     }
     "down" -
     "stop" -
