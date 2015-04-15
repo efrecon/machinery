@@ -631,7 +631,7 @@ proc ::cluster::ports { vm { ports {}} } {
     
     # Some nic'ish ouput of the ports and what we do.
     set nm [dict get $vm -name]
-    log NOTICE "Forwarding ports for $nm..."
+    log NOTICE "Forwarding [expr {[llength $opening]/3}] port(s) for $nm..."
 
     switch [dict get $vm -driver] {
 	"virtualbox" {
@@ -694,11 +694,10 @@ proc ::cluster::shares { vm { shares {}} } {
     
     # Some nic'ish ouput of the shares and what we do.
     set nm [dict get $vm -name]
-    log NOTICE "Mounting shares for $nm..."
+    log NOTICE "Mounting [expr {[llength $opening]/2}] share(s) for $nm..."
     
     switch [dict get $vm -driver] {
 	"virtualbox" {
-	    log INFO "Mounting $host onto ${nm}:${mchn}"
 	    # Add shares as necessary.  This might halt the virtual
 	    # machine if they do not exist yet, so we gather their
 	    # names together with host and guest path information in a
@@ -731,6 +730,7 @@ proc ::cluster::shares { vm { shares {}} } {
 	    # And arrange for the destination directories to exist
 	    # within the guest and perform the mount.
 	    foreach {host mchn share} $sharing {
+		log INFO "Mounting $host onto ${nm}:${mchn}"
 		# Make the directory
 		if { $uid eq "" } {
 		    Machine ssh $nm "sudo mkdir -p $mchn"

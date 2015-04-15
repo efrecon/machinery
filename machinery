@@ -14,6 +14,7 @@ set prg_args {
     -verbose   5                "Verbosity level \[0-6\]"
     -machine   "docker-machine" "Path to docker-machine"
     -docker    "docker"         "Path to docker"
+    -compose   "docker-compose" "Path to docker-compose"
     -token     ""               "Override token for cluster"
     -cluster   ""               "YAML description, empty for cluster.yml"
     -driver    "virtualbox"     "Default driver for VM creation"
@@ -100,7 +101,7 @@ for {set eaten ""} {$eaten ne $argv} {} {
 
 # Pass arguments from the command-line as the defaults for the cluster
 # module.
-foreach k [list -machine -docker -verbose] {
+foreach k [list -machine -docker -compose -verbose] {
     cluster defaults $k $CRT($k)
 }
 
