@@ -82,7 +82,7 @@ foreach {arg val dsc} $prg_args {
     set CRT($arg) $val
 }
 array set CRT {
-    version     0.2.3
+    version     0.3
 }
 
 # Did we request for help? Output and goodbye
@@ -112,31 +112,39 @@ if { [llength $argv] <= 0 } {
 }
 
 
-# Parse cluster description from YAML file.  We take the default one
-# if nothing specified.  When specified, we will use the rootname as
-# the prefix for virtual machine names.  Also pass the default driver
-# for VM creation.
-if { $CRT(-cluster) eq "" } {
-    if { [catch {cluster parse cluster.yml \
-		     -prefix "" -driver $CRT(-driver)} vms] } {
-	::help:dump $vms
+proc ::init {} {
+    global CRT
+
+    # Parse cluster description from YAML file.  We take the default
+    # one if nothing specified.  When specified, we will use the
+    # rootname as the prefix for virtual machine names.  Also pass the
+    # default driver for VM creation.
+    if { $CRT(-cluster) eq "" } {
+	if { [catch {cluster parse cluster.yml \
+			 -prefix "" -driver $CRT(-driver)} vms] } {
+	    ::help:dump $vms
+	}
+	set CRT(-cluster) cluster.yml
+    } else {
+	if { [catch {cluster parse $CRT(-cluster) \
+			 -driver $CRT(-driver)} vms] } {
+	    ::help:dump $vms
+	}
     }
-    set CRT(-cluster) cluster.yml
-} else {
-    if { [catch {cluster parse $CRT(-cluster) \
-		     -driver $CRT(-driver)} vms] } {
-	::help:dump $vms
+
+    # Recap with current state of cluster as seen from docker-machine
+    # and arrange for <cluster> to be the list of virtual machine
+    # descriptions that represent the whole cluster that we should
+    # operate on.
+    set cluster {}
+    set state [cluster ls]
+    foreach vm $vms {
+	lappend cluster [cluster bind $vm $state]
     }
+    
+    return $cluster
 }
 
-# Recap with current state of cluster as seen from docker-machine and
-# arrange for <cluster> to be the list of virtual machine descriptions
-# that represent the whole cluster that we should operate on.
-set cluster {}
-set state [cluster ls]
-foreach vm $vms {
-    lappend cluster [cluster bind $vm $state]
-}
 
 # Extract command (the first item of the remaining arguments) and
 # leave the remaining arguments to be parsed by each command
@@ -156,6 +164,7 @@ switch -nocase -- $cmd {
 	if { $CRT(-token) ne "" } {
 	    set token $CRT(-token)
 	} else {
+	    set cluster [init]
 	    set force [cluster getopt argv -force]
 	    #set token [cluster token $CRT(-cluster) $force $CRT(-driver)]
 	    set token [swarm token $CRT(-cluster) $force ""]
@@ -167,6 +176,7 @@ switch -nocase -- $cmd {
 	# Start up one or several machines (or the whole cluster if no
 	# arguments), the machines will be created if they did not
 	# exists
+	set cluster [init]
 	if { $CRT(-token) ne "" } {
 	    set token $CRT(-token)
 	} else {
@@ -191,6 +201,7 @@ switch -nocase -- $cmd {
 	}
     }
     "swarm" {
+	set cluster [init]
 	swarm info $cluster
     }
     "down" -
@@ -198,6 +209,7 @@ switch -nocase -- $cmd {
     "halt" {
 	# Halt one or several machines (or the whole cluster if no
 	# arguments)
+	set cluster [init]
 	if { [llength $argv] == 0 } {
 	    set argv [cluster names $cluster]
 	}
@@ -211,6 +223,7 @@ switch -nocase -- $cmd {
     "restart" {
 	# Halt one or several machines (or the whole cluster if no
 	# arguments)
+	set cluster [init]
 	if { [llength $argv] == 0 } {
 	    set argv [cluster names $cluster]
 	}
@@ -226,6 +239,7 @@ switch -nocase -- $cmd {
     "destroy" {
 	# Destroy one or several machines (or the whole cluster if no
 	# arguments).  The machines will be halted before removal.
+	set cluster [init]
 	if { [llength $argv] == 0 } {
 	    set argv [cluster names $cluster]
 	}
@@ -239,6 +253,7 @@ switch -nocase -- $cmd {
     "ssh" {
 	# Execute one command in a running virtual machine.  This is
 	# mainly an alias to docker-machine ssh.
+	set cluster [init]
 	if { [llength $argv] == 0 } {
 	    log ERROR "Need at least the name of a machine"
 	}
