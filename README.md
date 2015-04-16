@@ -4,12 +4,16 @@
 Machine](https://docs.docker.com/machine/) virtual machines. `machinery` uses a
 YAML definition of the whole cluster to create machines, bring them up or down,
 or remove them at will. In short, `machinery` is to `docker-machine` what
-`docker-compose` is to 'docker'. In addition, `machinery` provides [Docker
+`docker-compose` is to `docker`. In addition, `machinery` provides [Docker
 Swarm](https://docs.docker.com/swarm/) integration and will automatically
 arrange for the created virtual machines to join the swarm cluster or generate
 the token as needed.  Finally, `machinery` also integrates with
 [Compose](https://docs.docker.com/compose/) and can automatically bring up
-specific project files onto machines that it controls.
+specific project files onto machines that it controls. `machinery` is able to
+substitute the value of local environment variables in the compose project files
+before bringing the components up.  Together with conventions for the dynamic
+construction of network-related environment variables, this provides for a
+simple mechanism for service discovery.
 
 ## Quick Tour
 
