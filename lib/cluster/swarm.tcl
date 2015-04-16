@@ -78,10 +78,7 @@ proc ::cluster::swarm::token { yaml { force 0 } { driver virtualbox } } {
     set token ""
 
     # Generate file name for token caching out of yaml path.
-    set rootname [file rootname [file tail $yaml]]
-    set dirname [file dirname $yaml]
-    set tkn_path [file join $dirname \
-		      ".$rootname.[string trimleft ${vars::-ext} .]"]
+    set tkn_path [[namespace parent]::CacheFile $yaml ${vars::-ext}]
 
     # Read from cache if we have a cache and force is not on.
     # Otherwise, generate a new token and cache it.

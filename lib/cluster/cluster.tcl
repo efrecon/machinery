@@ -42,8 +42,8 @@ namespace eval ::cluster {
 	variable -profile   /var/lib/boot2docker/profile
 	# Mapping from integer to string representation of verbosity levels
 	variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG}
-	# Extension for token storage files
-	variable -ext       .tkn
+	# Extension for env storage cache files
+	variable -ext       .env
 	# File descriptor to dump log messages to
 	variable -log       stderr
 	# Date log output
@@ -378,10 +378,19 @@ proc ::cluster::create { vm token } {
 	    log ERROR "Cannot test docker for $nm, check manually!"
 	}
 
+	# Poor man's discovery: write down a description of all the
+	# network interfaces existing on the virtual machines,
+	# including the most important one (e.g. the one returned by
+	# docker-machine ip) as environment variable declaration in a
+	# file.
+	Discovery $vm
+
 	# Now pull images if any
 	pull $vm
 
-	# And iteratively run compose
+	# And iteratively run compose.  Compose will get the complete
+	# description of the discovery status in the form of
+	# environment variables.
 	compose $vm
     }
 
@@ -389,6 +398,26 @@ proc ::cluster::create { vm token } {
 }
 
 
+# ::cluster::compose -- Run compose for a machine
+#
+#       Automatically start up one or several compose project within a
+#       virtual machine.  Note that the implementation is able to
+#       substitute the value of local environment variables before
+#       running compose, which binds nicely to the discovery
+#       mechanisms implemented as part of machinery.  However, as this
+#       is not standard, you will have to explicitely set a flag to
+#       true to perform substitution.
+#
+# Arguments:
+#	vm	Dictionary description of machine (must be bound to live state)
+#	projects	List of projects, empty to take from vm.
+#
+# Results:
+#       Return the list of compose files that were effectively run and
+#       brought up
+#
+# Side Effects:
+#       None.
 proc ::cluster::compose { vm { projects {} } } {
     # Get projects, either from parameters (overriding the VM object) or
     # from vm object.
@@ -398,7 +427,19 @@ proc ::cluster::compose { vm { projects {} } } {
 	}
 	set projects [dict get $vm -compose]
     }
-    
+
+    # Pass the discovery variables to compose in case they were needed
+    # there...
+    if { [dict exists $vm origin] } {
+	set environment \
+	    [EnvRead [CacheFile [dict get $vm origin] ${vars::-ext}]]
+	dict for {k v} $environment {
+	    set ::env($k) $v
+	}
+    } else {
+	set environment {}
+    }
+
     set nm [dict get $vm -name]
     set composed {}
     set maindir [pwd]
@@ -416,26 +457,73 @@ proc ::cluster::compose { vm { projects {} } } {
 	    if { [file exists $fpath] } {
 		log NOTICE "Starting up components from $fpath in $nm"
 		# Change dir to solve relative access to env files.
+		# This is ugly, but there does not seem to be any
+		# other solution at this point.
 		cd [file dirname $fpath]
-		set cmd [list Compose --file $fpath up -d]
+
+		# Perform substituion of environment variables if
+		# requested from the VM description (and thus the YAML
+		# file).
+		set tmp_fpath ""
+		if { [dict exists $project substitution] \
+			 && [string is true [dict get $project substitution]]} {
+		    # Read content of project file and resolve
+		    # environment variables to their values in one go.
+		    # This supports defaults whenever a variable does
+		    # not exist, e.g. ${VARNAME:defaultValue}.
+		    set fd [open $fpath]
+		    set yaml [Resolve [read $fd]]
+		    close $fd
+
+		    # Copy resolved result to temporary file
+		    set projname [file rootname [file tail $fpath]]
+		    set tmp_fpath [Temporary /tmp/$projname].yml
+		    set fd [open $tmp_fpath w]
+		    puts -nonewline $fd $yaml
+		    close $fd
+
+		    # Arrange for compose to pick up the temporary
+		    # file, but still use the proper project name.
+		    set cmd [list Compose -stderr -- \
+				 --file $tmp_fpath --project-name $projname \
+				 up -d]
+		} else {
+		    set cmd [list Compose -stderr -- --file $fpath up -d]
+		}
+		# Blindly add compose options if we had some.
 		if { [dict exists $project options] } {
 		    foreach o [dict get $project options] {
 			lappend cmd $o
 		    }
 		}
+		# Run compose and return to the main directory at
+		# once.
 		eval $cmd
-		lappend composed $fpath
 		cd $maindir
+		
+		# Remember success by adding file to list of composed
+		# files and cleanup.
+		lappend composed $fpath
+		if { $tmp_fpath ne "" } {
+		    file delete -force -- $tmp_fpath
+		}
 	    } else {
 		log WARN "Cannot find compose file at $fpath"
 	    }
 	}
     }
 
+    # Clean away environment to avoid pollution.
+    dict for {k v} $environment {
+	unset ::env($k)
+    }
+
     if { [llength $composed] > 0 } {
 	log INFO "Machine $nm now running the following components"
 	Docker ps
     }
+
+    return $composed
 }
 
 
@@ -556,15 +644,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # from perfect, but should do as we are only creating one file and
     # will be removing it soon.
     set fname [Temporary /tmp/profile]
-    set fd [open $fname w]
-    foreach a [array names DARGS] {
-	if { [string first " " $DARGS($a)] >= 0 } {
-	    puts $fd "$a='$DARGS($a)'"
-	} else {
-	    puts $fd "$a=$DARGS($a)"
-	}
-    }
-    close $fd
+    EnvWrite $fname [array get DARGS] "'"
 
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
@@ -783,6 +863,8 @@ proc ::cluster::halt { vm } {
 	log NOTICE "Forcing stop of $nm"
 	Machine kill $nm
     }
+
+    Discovery [bind $vm]
 }
 
 
@@ -870,6 +952,7 @@ proc ::cluster::destroy { vm } {
     set nm [dict get $vm -name]
     log NOTICE "Removing machine $nm..."
     Machine rm $nm
+    Discovery [bind $vm]
 }
 
 
@@ -889,6 +972,7 @@ proc ::cluster::start { vm } {
     set nm [dict get $vm -name]
     log NOTICE "Bringing up machine $nm..."
     Machine start $nm
+    Discovery [bind $vm]
 }
 
 
@@ -1253,6 +1337,22 @@ proc ::cluster::Run { args } {
     return $ret
 }
 
+
+# ::cluster::Docker -- Run docker binary
+#
+#       Run the docker binary registered as part as the global library
+#       options under the control of this program.  This wrapper will
+#       turn on extra debbuggin in docker itself whenever the
+#       verbosity level of the library is greated or equal than DEBUG.
+#
+# Arguments:
+#	args	Arguments to docker command (compatible with Run)
+#
+# Results:
+#       Result of command.
+#
+# Side Effects:
+#       None.
 proc ::cluster::Docker { args } {
     # Isolate -- that will separate options to procedure from options
     # that would be for command.  Using -- is MANDATORY if you want to
@@ -1273,6 +1373,22 @@ proc ::cluster::Docker { args } {
 }
 
 
+# ::cluster::Compose -- Run compose binary
+#
+#       Run the compose binary registered as part as the global
+#       library options under the control of this program.  This
+#       wrapper will turn on extra debbuggin in compose itself
+#       whenever the verbosity level of the library is greated or
+#       equal than DEBUG.
+#
+# Arguments:
+#	args	Arguments to compose command (compatible with Run)
+#
+# Results:
+#       Result of command.
+#
+# Side Effects:
+#       None.
 proc ::cluster::Compose { args } {
     # Isolate -- that will separate options to procedure from options
     # that would be for command.  Using -- is MANDATORY if you want to
@@ -1293,6 +1409,22 @@ proc ::cluster::Compose { args } {
 }
 
 
+# ::cluster::Machine -- Run machine binary
+#
+#       Run the docker machine binary registered as part as the global
+#       library options under the control of this program.  This
+#       wrapper will turn on extra debbuggin in machine itself
+#       whenever the verbosity level of the library is greated or
+#       equal than DEBUG.
+#
+# Arguments:
+#	args	Arguments to machine command (compatible with Run)
+#
+# Results:
+#       Result of command.
+#
+# Side Effects:
+#       None.
 proc ::cluster::Machine { args } {
     # Isolate -- that will separate options to procedure from options
     # that would be for command.  Using -- is MANDATORY if you want to
@@ -1457,11 +1589,11 @@ proc ::cluster::Ports { pspec } {
 #       Description
 #
 # Arguments:
-#	arg1	descr
-#	arg2	descr
+#	spec	Share mount specification
 #
 # Results:
-#       None.
+#       Return a pair compose of the host path and the guest path, or
+#       an empty list on error.
 #
 # Side Effects:
 #       None.
@@ -1502,12 +1634,297 @@ proc ::cluster::Shares { spec } {
 }
 
 
+# ::cluster::Interfaces -- Gather network interfaces
+#
+#       Collects address information for all relevant network
+#       interfaces of a virtual machine.  This is basically a wrapper
+#       around ifconfig.
+#
+# Arguments:
+#	vm	Virtual machine description dictionary
+#
+# Results:
+#       Return a list of dictionaries.  Each dictionary should have a
+#       key called interface with the name of the interface
+#       (e.g. eth1, docker0, etc.).  There might also be a key called
+#       inet and another called inet6 (self-explanatory).
+#
+# Side Effects:
+#       Will call ifconfig on the target machine
+proc ::cluster::Interfaces { vm } {
+    set nm [dict get $vm -name]
+    log INFO "Detecting network interfaces of $nm"
+    set interfaces {}
+    set iface ""
+    foreach l [Machine -return -- ssh $nm ifconfig] {
+	# The output of ifconfig is formatted so that each new
+	# interface is described with a line without leading
+	# whitespaces, while extra information for that interface
+	# happens on lines starting with whitespaces.  The code below
+	# uses this fact to segragate between interfaces.
+	if { [string index $l 0] ni [list " " "\t"] } {
+	    if { $iface ne "" && ![string match "v*" $iface] } {
+  		# We skip interfaces which name starts with v (for
+		# virtual).
+		lappend interfaces [dict create \
+					interface $iface \
+					inet $inet \
+					inet6 $inet6]
+	    }
+	    set iface [lindex $l 0]
+	    set inet ""
+	    set inet6 ""
+	} elseif { [string first "addr" $l] >= 0 } {
+	    # Try to be slightly intelligent when collecting the
+	    # address, but this might break.
+	    foreach {k v} [InterfaceLine $l] {
+		if { [string equal -nocase "inet6 addr" $k] } {
+		    set inet6 $v
+		}
+		if { [string equal -nocase "inet addr" $k] } {
+		    set inet $v
+		}
+	    }
+	}
+    }
+    # Don't forget the last one!
+    if { ![string match "v*" $iface] } {
+	# We skip interfaces which name starts with v (for virtual).
+	lappend interfaces [dict create \
+				interface $iface \
+				inet $inet \
+				inet6 $inet6]
+    }
+
+    return $interfaces
+}
+
+
+# ::cluster::InterfaceLine -- Parse ifconfig details
+#
+#       Details lines as output from ifconfig have a formatting that
+#       isn't perfect for automated reading.  Keys are separted from
+#       their values using a : sign, but spaces are allowed in keys
+#       and before and/or after the colon sign.  This procedure
+#       attempts to parse in a robust way and will return a dictionary
+#       of key and values with what was extracted from the line.
+#
+# Arguments:
+#	l	Line to parse
+#
+# Results:
+#       A dictionary of keys and value with line information.
+#
+# Side Effects:
+#       None.
+proc ::cluster::InterfaceLine { l } {
+    # Initiate with an empty dictionary and the fact that we now
+    # expect a key to start.
+    set dict [dict create]
+    set k ""
+    set v ""
+    set key 1
+    # Parse the line character by character, this is going to be slow,
+    # but allows us to cover all corner cases.
+    foreach c [split [string trim $l] ""] {
+	if { $key } {
+	    # We are parsing the key, wait for the : to mark the end
+	    # of the key (and the start of the value).
+	    if { $c eq ":" } {
+		set key 0
+	    } else {
+		if { $k eq "" } {
+		    # skip whitespaces that might occur before a key
+		    # starts
+		    if { ![string is space $c] } {
+			append k $c
+		    }
+		} else {
+		    # As soon as we've started to find a key, copy all
+		    # characters (which includes whitespaces!).
+		    append k $c
+		}
+	    }
+	} else {
+	    # We are parsing the value, wait for a space which will
+	    # mark the end of the value, but also wait for the value
+	    # to start in the first place since there might be spaces
+	    # after the : sign and before the content of the value.
+	    if { [string is space $c] } {
+		if { $v ne "" } {
+		    # We have parse a value, add to dictionary and
+		    # reinitialise to start parsing next key.
+		    dict set dict $k $v
+		    set key 1
+		    set k ""
+		    set v ""
+		}
+	    } else {
+		# Add character to current value.
+		append v $c
+	    }
+	}
+    }
+    # Don't forget the last pair of key/value!
+    if { $v ne "" } {
+	dict set dict $k $v
+    }
+
+    # Done!
+    return $dict
+}
+
+
+
+# ::cluster::Discovery -- Poor man's discovery
+#
+#       Arrange for a cache file to contain all network information
+#       for the machine passed as a parameter.  The file is shared
+#       amongst all machines of the same cluster, so that it will
+#       provide for a snapshot of the current cluster state.  The file
+#       declares environment variables.  For a given machine name
+#       (e.g. myproj_myvm), all variables will start with the prefix
+#       MACHINERY_MYPROJ_MYVM_ (so MACHINERY_ prepended to the name of
+#       the maching in uppercase and an underscore).  Then for each
+#       interface there will be, for each IP address found NAME_INET
+#       and NAME_INET6 appended to the variable (where NAME is the
+#       name of the interface in uppercase).  There will also be a IP
+#       appened to the prefix, with a variable that contains the main
+#       IP address for the machine (as of docker-machine ip).
+#
+# Arguments:
+#	vm	Virtual machine description dictionary
+#
+# Results:
+#       Return current state of the whole cluster as a dictionary.
+#
+# Side Effects:
+#       None.
+proc ::cluster::Discovery { vm } {
+    set nm [dict get $vm -name]
+    set pfx "MACHINERY_[string map [list - _] [string toupper $nm]]"
+    if { [dict exists $vm origin] } {
+	# Get current discovery values for this machine from the cache.
+	set env_path [CacheFile [dict get $vm origin] ${vars::-ext}]
+	set environment [EnvRead $env_path]
+
+	# Remove all keys that are associated to this machine's name,
+	# we are going to override (or won't have any if it was
+	# stopped!)
+	dict for {k v} $environment {
+	    if { [string first $pfx $k] == 0 } {
+		dict unset environment $k
+	    }
+	}
+
+	# If the machine is running, go get all information we can
+	# about its network interfaces and its (main) IP address.
+	if { [dict exists $vm state] \
+		 && [string equal -nocase [dict get $vm state] "running"] } {
+	    # Get complete network interface description (except the
+	    # virtual interfaces)
+	    foreach itf [Interfaces $vm] {
+		set k ${pfx}_[string toupper [dict get $itf interface]]
+		if { [dict exists $itf inet] } {
+		    dict set environment ${k}_INET [dict get $itf inet]
+		}
+		if { [dict exists $itf inet6] } {
+		    dict set environment ${k}_INET6 [dict get $itf inet6]
+		}
+	    }
+	    # Add the official IP address, as this is what will be
+	    # usefull most of the time.
+	    set ip [lindex [Machine -return -- ip $nm] 0]
+	    if { $ip ne "" } {
+		dict set environment ${pfx}_IP $ip
+	    }
+	}
+
+	# Dump the (modified) environment to the cache.
+	log INFO "Writing network information for $nm to $env_path"
+	EnvWrite $env_path $environment
+	
+	return $environment
+    }
+    return {}
+}
+
+
+# ::cluster::EnvRead -- Read an environment file
+#
+#       Read the content of an environment file, such as the ones used
+#       for declaring defaults in /etc (or for our discovery cache).
+#       This isn't a perfect parser, but is able to skip comments and
+#       blank lines.
+#
+# Arguments:
+#	fpath	Full path to file to read
+#
+# Results:
+#       Content of file as a dictionary
+#
+# Side Effects:
+#       None.
+proc ::cluster::EnvRead { fpath } {
+    set d [dict create]
+    if { [file exists $fpath] } {
+	log INFO "Reading environment description file at $fpath"
+	set fd [open $fpath]
+	while {![eof $fd]} {
+	    set line [string trim [gets $fd]]
+	    if { $line ne "" || [string index $line 0] ne "\#" } {
+		set eql [string first "=" $line]
+		if { $eql >= 0 } {
+		    set k [string range $line 0 [expr {$eql-1}]]
+		    set v [string range $line [expr {$eql+1}] end]
+		    dict set d \
+			[string trim $k] \
+			[string trim [string trim [string trim $v] "'\""]]
+		}
+	    }
+	}
+	close $fd
+    }
+
+    return $d
+}
+
+
+# ::cluster::EnvWrite -- Write an environment file
+#
+#       Write the content of a dictionary to an environment file.
+#
+# Arguments:
+#	fpath	Full path to file to write to.
+#	enviro	Environment to write
+#	quote	Character to quote values containing spaces with
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       None.
+proc ::cluster::EnvWrite { fpath enviro { quote "\""} } {
+    set fd [open $fpath "w"]
+    dict for {k v} $enviro {
+	if { [string first " " $v] < 0 } {
+	    puts $fd "${k}=${v}"
+	} else {
+	    puts $fd "${k}=${quote}${v}${quote}"
+	}
+    }
+    close $fd
+}
+
+
 # ::cluster::Resolve -- Environement variable resolution
 #
 #       This procedure will resolve every occurence of a construct
 #       $name where name is the name of an environment variable to the
 #       value of that variable, as long as it exists.  It also
-#       recognises ${name}.
+#       recognises ${name} and ${name:default} (i.e. replace by the
+#       content of the variable if it exists, or by the default value
+#       if the variable does not exist).
 #
 # Arguments:
 #	str	Incoming string
@@ -1519,12 +1936,47 @@ proc ::cluster::Shares { spec } {
 # Side Effects:
 #       None.
 proc ::cluster::Resolve { str } {
+    # Do a quick string mapping for $VARNAME and ${VARNAME} and store
+    # result in variable called quick.
     set mapper {}
     foreach e [array names ::env] {
 	lappend mapper \$${e} [set ::env($e)]
 	lappend mapper \$\{${e}\} [set ::env($e)]
     }
-    return [string map $mapper $str]
+    set quick [string map $mapper $str]
+
+    # Iteratively modify quick for replacing occurences of
+    # ${name:default} constructs.  We do this until there are no
+    # match.
+    set done 0
+    # The regexp below using varnames as bash seems to be considering
+    # them.
+    set exp "\\$\{(\[a-zA-Z_\]+\[a-zA-Z0-9_\]*):(\[^\}\]*?)\}"
+    while { !$done } {
+	# Look for the expression and if we have a match, extract the
+	# name of the variable.
+	set rpl [regexp -inline -indices -- $exp $quick]
+	if { [llength $rpl] >= 3 } {
+	    foreach {range var dft} $rpl break
+	    foreach {range_start range_stop} $range break
+	    foreach {var_start var_stop} $var break
+	    set var [string range $quick $var_start $var_stop]
+	    # If that variable is declared and exist, replace by its
+	    # value, otherwise replace with the default value.
+	    if { [info exists ::env($var)] } {
+		set quick [string replace $quick $range_start $range_stop \
+			       [set ::env($var)]]
+	    } else {
+		foreach {dft_start dft_stop} $dft break
+		set quick [string replace $quick $range_start $range_stop \
+			       [string range $quick $dft_start $dft_stop]]
+	    }
+	} else {
+	    set done 1
+	}
+    }
+
+    return $quick
 }
 
 
@@ -1620,4 +2072,30 @@ proc ::cluster::Temporary { pfx } {
 }
 
 
-package provide cluster 0.2
+# ::cluster::CacheFile -- Good name for a cache file
+#
+#       Generates a dotted (therefor hidden) filename to use for
+#       caching various values.  The cache file will use the same
+#       rootname in the same directory as the original YAML file, but
+#       with a different extension.
+#
+# Arguments:
+#	yaml	Original full path to YAML description file.
+#	ext	Extension to use.
+#
+# Results:
+#       An hidden file path for caching values.
+#
+# Side Effects:
+#       None.
+proc ::cluster::CacheFile { yaml ext } {
+    set dirname [file dirname $yaml]
+    set rootname [file rootname [file tail $yaml]]
+    set path [file join $dirname \
+		  ".$rootname.[string trimleft $ext .]"]
+
+    return $path
+}
+
+
+package provide cluster 0.3

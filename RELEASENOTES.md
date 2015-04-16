@@ -1,10 +1,27 @@
 # Release Notes
 
+## v 0.3.1
+
+* Added support for substitution of (local) environment variables as a
+  workaround for this
+  [highly-requested](https://github.com/docker/compose/issues/495) missing
+  feature of compose.  However, this means that, when crafting compose project
+  files to use the feature, you will not be able to use them directly outside of
+  `machinery`, unless you run them through
+  [envsubst](https://www.gnu.org/software/gettext/manual/html_node/envsubst-Invocation.html)
+
+* Adding support for "poor man's discovery".  `machinery` automatically declares
+  and caches environment variables with network information for the created
+  machines.  These variables can be, for example, used when starting components
+  through compose (see above).
+
+
 ## v 0.3
 
 * Added support for automatically run `docker-compose up` against a given
   machine.  This allows to bypass swarm (for development purposes), or to
   schedule components on globally.
+  
 
 ## v 0.2.2
 
