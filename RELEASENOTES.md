@@ -15,13 +15,17 @@
   machines.  These variables can be, for example, used when starting components
   through compose (see above).
 
+* Adding support for logging in at one or several registries at the `docker`
+  daemon running within a specific virtual machine.  Note that you will have to
+  start the components under the same user than the one that was automatically
+  logged in. 
 
 ## v 0.3
 
 * Added support for automatically run `docker-compose up` against a given
   machine.  This allows to bypass swarm (for development purposes), or to
   schedule components on globally.
-  
+
 
 ## v 0.2.2
 

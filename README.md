@@ -15,15 +15,21 @@ specific project files onto machines that it controls.
 
 `machinery` reads its default configuration from the file `cluster.yml` in the
 local directory. [YAML](http://yaml.org/) definition files have a
-straightforward syntax.  For example, the following content would define three
-machines using the `virtualbox` driver, one with more memory, the other one with
-more disk than the defaults provided by `docker-machine` and the last one as the
+straightforward syntax.  For example, the following content would define 3
+machines using the `virtualbox` driver, one with more memory and ready to be
+duplicated through using the YAML anchoring facilities, another one with more
+disk than the defaults provided by `docker-machine` and the last one as the
 master of the cluster. The description also defines some labels that can be used
 by `swarm` to schedule components on specific nodes and arrange for the machine
 called `core` to have access to your home directory. Finally, it arranges for
 the components pinpointed by a relative `compose` project file to automatically
 be started up when `db` is brought up and created.
 
+    wk01: &worker
+      driver: virtualbox
+      memory:2048
+      labels:
+        role: worker
     db:
       driver: virtualbox
       size: 20000
@@ -32,11 +38,6 @@ be started up when `db` is brought up and created.
       compose:
         -
           file: ../compose/backend/db.yml
-    wk01:
-      driver: virtualbox
-      memory:2048
-      labels:
-        role: worker
     core:
       driver: virtualbox
       master: on
@@ -86,6 +87,11 @@ meaning that from that point of view running `machinery up` with an existing
 machine as an argument is not equivalent to running `docker-machine start` with
 the same machine as an argument.
 
+In addition, `machinery` keeps a hidden environment file with the networking
+information for all the machines of the cluster ([see below](#netinfo)).  This
+file will have the same root name as the cluster YAML file, but with a leading `.`
+to hide it and the extension `.env`.
+
 #### halt
 
 The command `halt` will bring down one or several machines, which names would
@@ -133,6 +139,38 @@ Print out the current version of the program on the standard output and exit.
 
 ### Interaction with system components
 
+#### Networking Information <a name="netinfo" />
+
+`machinery` keeps a hidden environment file with the networking information for
+all the machines of the cluster.  This file will have the same root name as the
+cluster YAML file, but with a leading `.` to hide it and the extension `.env`.
+The file defines a number of environment variables.  Given the full name of a
+machine, e.g. `mycluster-mymachine`, a whole uppercase prefix will be
+constructed by prefixing `MACHINERY_` to the name of the machine in uppercase,
+followed by another `_`.  So, the previous example  would lead to the prefix:
+`MACHINERY_MYCLUSTER_MYMACHINE_` (note that the dash has been replaced by an
+`_`).  This prefix will be prepend to the following strings:
+
+* `IP`, the main IPv4 address of the virtual machine.
+
+* And, for each relevant network interface name, e.g. `if`, at maximum two
+  variables with the name of the interface in uppercase followed by a `_` will
+  be constructed: one for the IPv4 address (suffix INET) and one for the IPv6
+  address (suffix INET6), when they are present.
+
+To wrap it up, and for the same machine name example as above, you might find
+the following in the environment file:
+
+    MACHINERY_MYCLUSTER_MYMACHINE_DOCKER0_INET=172.17.42.1
+    MACHINERY_MYCLUSTER_MYMACHINE_DOCKER0_INET6=fe80::5484:7aff:fefe:9799/64
+    MACHINERY_MYCLUSTER_MYMACHINE_ETH0_INET=10.0.2.15
+    MACHINERY_MYCLUSTER_MYMACHINE_ETH0_INET6=fe80::a00:27ff:fec2:ea1/64
+    MACHINERY_MYCLUSTER_MYMACHINE_ETH1_INET=192.168.99.111
+    MACHINERY_MYCLUSTER_MYMACHINE_ETH1_INET6=fe80::a00:27ff:fe58:c217/64
+    MACHINERY_MYCLUSTER_MYMACHINE_LO_INET=127.0.0.1
+    MACHINERY_MYCLUSTER_MYMACHINE_LO_INET6=::1/128
+    MACHINERY_MYCLUSTER_MYMACHINE_IP=192.168.99.111
+
 #### Interaction with `docker-machine`
 
 At a meta-level, `machinery` is simply a high-level interface to
@@ -158,6 +196,27 @@ with the name `db` at the command-line.  However, calling `docker-machine ls`
 will show up its real name, i.e. `mycluster-db`.  This behaviour will help you
 managing several clusters from the same directory, for example when staging or
 when running sub-sets of your architecture for development.
+
+#### Interaction with `docker-compose` <a name="docker-compose" />
+
+The combination of `machinery`, `docker-machine` and `docker-compose` enables a
+single control point for an entire cluster.  This eases service discovery as it
+makes possible to pass information between components and machines of the
+cluster.  `machinery` provides a solution to this through extending the YAML
+format for `docker-compose`.  When substitution is turned on for a YAML compose
+project file, any occurrence of a *local* environment variable will be replaced
+by its value before being passed to `docker-compose`.  The syntax also provides
+for default values, e.g. `${MYVAR:default}` will be replaced by the content of
+the environment variable `MYVAR` if it existed, or by `default` if it did not
+exist.  The implementation will perform local substitution into a temporary file
+that will be passed to `docker-compose`.  In particular, all the environment
+variables described [above](#netinfo) will be available for substitution prior
+to `docker-compose`.
+
+Authoring YAML files this way does not follow the official syntax, but you
+should still be able to pass your files to `docker-compose` after having fed
+them through
+[envsubst](https://www.gnu.org/software/gettext/manual/html_node/envsubst-Invocation.html).
 
 #### Interaction with `VBoxManage`
 
@@ -308,6 +367,15 @@ if you want to make sure images are already present when your machine is being
 put into action.  For example, `docker-compose` will sometimes timeout the first
 time that it schedules components as image downloading takes too long.
 
+#### `registries`
+
+`registries` should be a list of dictionaries specifying (private) registries at
+which to login upon machine creation.  These dictionaries should contain values
+for the following keys: `server`, `username`, `password` and `email`, where
+server is the URL to the registry and the other fields are self-explanatory.
+`machinery` will log into all specified registries before attempting to
+pre-download images as explained above.
+
 #### `compose`
 
 `compose` should be a list of dictionaries that will, each, reference a
@@ -315,10 +383,16 @@ time that it schedules components as image downloading takes too long.
 that contains the path to the compose project file.  A relative path will be
 understood as relative to the directory containing the YAML description file,
 thus allowing you to easily copy and/or transfer entire hierarchies of files.
+
 Additionally, a key called `options` can be specified and it will contain a list
 of additional options that will be passed to `docker-compose up`.  By default,
 all project files are brought up with the option `-d` to start their components
 in the background.
+
+Finally, a kay called `substitution` can be set to a boolean.  When `true`, the
+YAML compose file will be substituted for local environment variables before
+being parsed by `docker-compose`.  See [above](#docker-compose) for more
+information.
 
 ## Giving it a quick test
 

@@ -31,7 +31,7 @@ namespace eval ::cluster {
 	variable -separator "-"
 	# Allowed VM keys
 	variable -keys      {cpu size memory master labels driver options \
-				 ports shares images compose}
+				 ports shares images compose registries}
 	# Path to docker executables
 	variable -machine   docker-machine
 	variable -docker    docker
@@ -48,6 +48,8 @@ namespace eval ::cluster {
 	variable -log       stderr
 	# Date log output
 	variable -date      "%Y%m%d %H%M%S"
+	# name of VM that we are attached to
+	variable attached   ""
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -386,6 +388,7 @@ proc ::cluster::create { vm token } {
 	Discovery $vm
 
 	# Now pull images if any
+	login $vm
 	pull $vm
 
 	# And iteratively run compose.  Compose will get the complete
@@ -441,6 +444,7 @@ proc ::cluster::compose { vm { projects {} } } {
     }
 
     set nm [dict get $vm -name]
+    Attach $vm
     set composed {}
     set maindir [pwd]
     foreach project $projects {
@@ -476,19 +480,25 @@ proc ::cluster::compose { vm { projects {} } } {
 		    close $fd
 
 		    # Copy resolved result to temporary file
+		    set projdirname [file tail [file dirname $fpath]]
 		    set projname [file rootname [file tail $fpath]]
 		    set tmp_fpath [Temporary /tmp/$projname].yml
 		    set fd [open $tmp_fpath w]
 		    puts -nonewline $fd $yaml
 		    close $fd
 
+		    log NOTICE "Substituting environment variables in\
+                                compose project at $fpath via $tmp_fpath"
+
 		    # Arrange for compose to pick up the temporary
 		    # file, but still use the proper project name.
 		    set cmd [list Compose -stderr -- \
-				 --file $tmp_fpath --project-name $projname \
+				 --file $tmp_fpath --project-name $projdirname \
 				 up -d]
+		    lappend composed $tmp_fpath
 		} else {
 		    set cmd [list Compose -stderr -- --file $fpath up -d]
+		    lappend composed $fpath
 		}
 		# Blindly add compose options if we had some.
 		if { [dict exists $project options] } {
@@ -501,9 +511,7 @@ proc ::cluster::compose { vm { projects {} } } {
 		eval $cmd
 		cd $maindir
 		
-		# Remember success by adding file to list of composed
-		# files and cleanup.
-		lappend composed $fpath
+		# Cleanup.
 		if { $tmp_fpath ne "" } {
 		    file delete -force -- $tmp_fpath
 		}
@@ -895,6 +903,38 @@ proc ::cluster::ssh { vm args } {
 	}
     } else {
 	# NYI
+    }
+}
+
+
+proc ::cluster::login { vm {regs {}} } {
+    # Get login information, either from parameters (overriding the VM
+    # object) or from the VM object.
+    if { [string length $regs] == 0 } {
+	if { ![dict exists $vm -registries] } {
+	    return
+	}
+	set regs [dict get $vm -registries]
+    }
+
+    set nm [dict get $vm -name]
+    log NOTICE "Logging in within $nm"
+    Attach $vm
+    foreach reg $regs {
+	if { [dict exists $reg server] && [dict exists $reg username] } {
+	    log INFO "Logging in as [dict get $reg username]\
+                      at [dict get $reg server]"
+	    set cmd [list Docker login]
+	    foreach {o k} [list -u username -p password -e email] {
+		if { [dict exists $reg $k] } {
+		    lappend cmd $o [dict get $reg $k]
+		} else {
+		    lappend cmd $o ""
+		}
+	    }
+	    lappend cmd [dict get $reg server]
+	    eval $cmd
+	}
     }
 }
 
@@ -1467,16 +1507,20 @@ proc ::cluster::Machine { args } {
 #       to docker on next call.
 proc ::cluster::Attach { vm { swarm 0 } } {
     set nm [dict get $vm -name]
-    log INFO "Attaching to $nm"
-    if { $swarm } {
-	set cmd [list Machine -return -- env --swarm $nm]
-    } else {
-	set cmd [list Machine -return -- env $nm]
-    }
-    foreach l [eval $cmd] {
-	foreach {k v} [split [string map [list "export " ""] $l] "="] {
-	    set ::env($k) $v
+    if { $nm ne [lindex $vars::attached 0] \
+	     || $swarm != [lindex $vars::attached 1] } {
+	log INFO "Attaching to $nm"
+	if { $swarm } {
+	    set cmd [list Machine -return -- env --swarm $nm]
+	} else {
+	    set cmd [list Machine -return -- env $nm]
 	}
+	foreach l [eval $cmd] {
+	    foreach {k v} [split [string map [list "export " ""] $l] "="] {
+		set ::env($k) $v
+	    }
+	}
+	set vars::attached [list $nm $swarm]
     }
 }
 
@@ -1503,6 +1547,7 @@ proc ::cluster::Detach {} {
 	    unset ::env(DOCKER_$e)
 	}
     }
+    set vars::attached {}
 }
 
 
@@ -1826,22 +1871,28 @@ proc ::cluster::Discovery { vm } {
 	    foreach itf [Interfaces $vm] {
 		set k ${pfx}_[string toupper [dict get $itf interface]]
 		if { [dict exists $itf inet] } {
+		    log DEBUG "inet addr for [dict get $itf interface]\
+                               is [dict get $itf inet]"
 		    dict set environment ${k}_INET [dict get $itf inet]
 		}
 		if { [dict exists $itf inet6] } {
+		    log DEBUG "inet6 addr for [dict get $itf interface]\
+                               is [dict get $itf inet6]"
 		    dict set environment ${k}_INET6 [dict get $itf inet6]
 		}
 	    }
 	    # Add the official IP address, as this is what will be
 	    # usefull most of the time.
 	    set ip [lindex [Machine -return -- ip $nm] 0]
-	    if { $ip ne "" } {
+	    if { $ip ne "" \
+		     && [regexp {\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}} $ip] } {
 		dict set environment ${pfx}_IP $ip
 	    }
 	}
 
 	# Dump the (modified) environment to the cache.
-	log INFO "Writing network information for $nm to $env_path"
+	log INFO "Writing cluster network information ($nm accounted)\
+                  to $env_path"
 	EnvWrite $env_path $environment
 	
 	return $environment
@@ -1868,7 +1919,7 @@ proc ::cluster::Discovery { vm } {
 proc ::cluster::EnvRead { fpath } {
     set d [dict create]
     if { [file exists $fpath] } {
-	log INFO "Reading environment description file at $fpath"
+	log DEBUG "Reading environment description file at $fpath"
 	set fd [open $fpath]
 	while {![eof $fd]} {
 	    set line [string trim [gets $fd]]
@@ -1905,6 +1956,8 @@ proc ::cluster::EnvRead { fpath } {
 # Side Effects:
 #       None.
 proc ::cluster::EnvWrite { fpath enviro { quote "\""} } {
+    log DEBUG "Writing [llength [dict keys $enviro]] variable(s) to\
+               description file at $fpath"
     set fd [open $fpath "w"]
     dict for {k v} $enviro {
 	if { [string first " " $v] < 0 } {
