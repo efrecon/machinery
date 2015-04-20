@@ -211,7 +211,14 @@ switch -nocase -- $cmd {
 	# on specific machines.
 	# ALT: one YAML file that references compose project files?
 	set cluster [init]
-	swarm info $cluster
+	if { [llength $argv] == 0 } {
+	    swarm info $cluster
+	} else {
+	    set master [swarm master $cluster]
+	    foreach fpath $argv {
+		cluster swarm $master $fpath
+	    }
+	}
     }
     "down" -
     "stop" -

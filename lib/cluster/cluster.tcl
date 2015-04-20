@@ -403,6 +403,31 @@ proc ::cluster::create { vm token } {
 }
 
 
+proc ::cluster::swarm { master fpath } {
+    # Make sure we resolve in proper directory.
+    if { [dict exists $msater origin] } {
+	set dirname [file dirname [dict get $master origin]]
+	log DEBUG "Joining $dirname and $fpath to get final path"
+	set fpath [file join $dirname $fpath]
+    }
+    set fpath [file normalize $fpath]
+    
+    #XXX: Check that file exists!
+    log NOTICE "Reading projects from $fpath"
+    set pinfo [::yaml::yaml2dict -file $fpath]
+
+    log INFO "Detecting content of $fpath: indirection or compose projects?"
+    set first [lindex $pinfo 0]
+    if { [dict exists $first file] } {
+	log INFO "$fpath contains indirections to compose projects"
+	compose $master 1 $pinfo
+    } else {
+	log INFO "$fpath is a compose project file"
+	Project $fpath 1
+    }
+}
+
+
 # ::cluster::compose -- Run compose for a machine
 #
 #       Automatically start up one or several compose project within a
@@ -423,7 +448,7 @@ proc ::cluster::create { vm token } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::compose { vm { projects {} } } {
+proc ::cluster::compose { vm {swarm 0} { projects {} } } {
     # Get projects, either from parameters (overriding the VM object) or
     # from vm object.
     if { [string length $projects] == 0 } {
@@ -446,7 +471,7 @@ proc ::cluster::compose { vm { projects {} } } {
     }
 
     set nm [dict get $vm -name]
-    Attach $vm
+    Attach $vm $swarm
     set composed {}
     set maindir [pwd]
     foreach project $projects {
@@ -462,65 +487,16 @@ proc ::cluster::compose { vm { projects {} } } {
 	    set fpath [file normalize $fpath]
 	    if { [file exists $fpath] } {
 		log NOTICE "Starting up components from $fpath in $nm"
-		# Change dir to solve relative access to env files.
-		# This is ugly, but there does not seem to be any
-		# other solution at this point for compose < 1.2
-		if { ![VersionGreaterOrEqual [Version compose] 1.2] } {
-		    cd [file dirname $fpath]
+		set substitution 0
+		if { [dict exists $project substitution] } {
+		    set substitution \
+			[string is true [dict get $project substitution]]
 		}
-
-		# Perform substituion of environment variables if
-		# requested from the VM description (and thus the YAML
-		# file).
-		set tmp_fpath ""
-		if { [dict exists $project substitution] \
-			 && [string is true [dict get $project substitution]]} {
-		    # Read content of project file and resolve
-		    # environment variables to their values in one go.
-		    # This supports defaults whenever a variable does
-		    # not exist, e.g. ${VARNAME:defaultValue}.
-		    set fd [open $fpath]
-		    set yaml [Resolve [read $fd]]
-		    close $fd
-
-		    # Copy resolved result to temporary file
-		    set projdirname [file tail [file dirname $fpath]]
-		    set projname [file rootname [file tail $fpath]]
-		    set tmp_fpath [Temporary /tmp/$projname].yml
-		    set fd [open $tmp_fpath w]
-		    puts -nonewline $fd $yaml
-		    close $fd
-
-		    log NOTICE "Substituting environment variables in\
-                                compose project at $fpath via $tmp_fpath"
-
-		    # Arrange for compose to pick up the temporary
-		    # file, but still use the proper project name.
-		    set cmd [list Compose -stderr -- \
-				 --file $tmp_fpath --project-name $projdirname \
-				 up -d]
-		    lappend composed $tmp_fpath
-		} else {
-		    set cmd [list Compose -stderr -- --file $fpath up -d]
-		    lappend composed $fpath
-		}
-		# Blindly add compose options if we had some.
+		set options {}
 		if { [dict exists $project options] } {
-		    foreach o [dict get $project options] {
-			lappend cmd $o
-		    }
+		    set options [dict get $project options]
 		}
-		# Run compose and return to the main directory at
-		# once for older versions of compose
-		eval $cmd
-		if { ![VersionGreaterOrEqual [Version compose] 1.2] } {
-		    cd $maindir
-		}
-		
-		# Cleanup.
-		if { $tmp_fpath ne "" } {
-		    file delete -force -- $tmp_fpath
-		}
+		Project $fpath $substitution $options
 	    } else {
 		log WARN "Cannot find compose file at $fpath"
 	    }
@@ -586,7 +562,6 @@ proc ::cluster::scp { vm src_fname { dst_fname "" } } {
     foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
 	set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
     }
-    puts ">>> $cmd"
     set dst [lindex $cmd end];   # Extract out user@hostname, last in
 				 # (ssh)command
     set scp [lrange $cmd 0 end-1]
@@ -1678,6 +1653,66 @@ proc ::cluster::Ports { pspec } {
 }
 
 
+proc ::cluster::Project { fpath {substitution 0} {options {}}} {
+    # Change dir to solve relative access to env files.
+    # This is ugly, but there does not seem to be any
+    # other solution at this point for compose < 1.2
+    if { ![VersionGreaterOrEqual [Version compose] 1.2] } {
+	cd [file dirname $fpath]
+    }
+
+    # Perform substituion of environment variables if
+    # requested from the VM description (and thus the YAML
+    # file).
+    set tmp_fpath ""
+    if { $substitution } {
+	# Read content of project file and resolve
+	# environment variables to their values in one go.
+	# This supports defaults whenever a variable does
+	# not exist, e.g. ${VARNAME:defaultValue}.
+	set fd [open $fpath]
+	set yaml [Resolve [read $fd]]
+	close $fd
+
+	# Copy resolved result to temporary file
+	set projdirname [file tail [file dirname $fpath]]
+	set projname [file rootname [file tail $fpath]]
+	set tmp_fpath [Temporary /tmp/$projname].yml
+	set fd [open $tmp_fpath w]
+	puts -nonewline $fd $yaml
+	close $fd
+
+	log NOTICE "Substituting environment variables in\
+                                compose project at $fpath via $tmp_fpath"
+
+	# Arrange for compose to pick up the temporary
+	# file, but still use the proper project name.
+	set cmd [list Compose -stderr -- \
+		     --file $tmp_fpath --project-name $projdirname \
+		     up -d]
+	lappend composed $tmp_fpath
+    } else {
+	set cmd [list Compose -stderr -- --file $fpath up -d]
+	lappend composed $fpath
+    }
+    # Blindly add compose options if we had some.
+    foreach o $options {
+	lappend cmd $o
+    }
+    # Run compose and return to the main directory at
+    # once for older versions of compose
+    eval $cmd
+    if { ![VersionGreaterOrEqual [Version compose] 1.2] } {
+	cd $maindir
+    }
+    
+    # Cleanup.
+    if { $tmp_fpath ne "" } {
+	file delete -force -- $tmp_fpath
+    }
+}
+
+
 # ::cluster::Shares -- Parse share mount specification
 #
 #       This procedure will parse a share mount specification (either
@@ -2284,10 +2319,10 @@ proc ::cluster::Version { tool } {
 	compose -
 	machine -
 	docker {
-	    if { [dict get $vars::versions] eq "" } {
-		dict set vars::versions [VersionQuery $tool]
+	    if { [dict get $vars::versions $tool] eq "" } {
+		dict set vars::versions $tool [VersionQuery $tool]
 	    }
-	return [dict get $vars::versions]
+	    return [dict get $vars::versions $tool]
 	}
     }
     return ""
