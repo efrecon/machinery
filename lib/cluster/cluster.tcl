@@ -50,6 +50,8 @@ namespace eval ::cluster {
 	variable -date      "%Y%m%d %H%M%S"
 	# name of VM that we are attached to
 	variable attached   ""
+	# version numbers for our tools (on demand)
+	variable versions   {docker "" compose "" machine ""}
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -462,8 +464,10 @@ proc ::cluster::compose { vm { projects {} } } {
 		log NOTICE "Starting up components from $fpath in $nm"
 		# Change dir to solve relative access to env files.
 		# This is ugly, but there does not seem to be any
-		# other solution at this point.
-		cd [file dirname $fpath]
+		# other solution at this point for compose < 1.2
+		if { ![VersionGreaterOrEqual [Version compose] 1.2] } {
+		    cd [file dirname $fpath]
+		}
 
 		# Perform substituion of environment variables if
 		# requested from the VM description (and thus the YAML
@@ -507,9 +511,11 @@ proc ::cluster::compose { vm { projects {} } } {
 		    }
 		}
 		# Run compose and return to the main directory at
-		# once.
+		# once for older versions of compose
 		eval $cmd
-		cd $maindir
+		if { ![VersionGreaterOrEqual [Version compose] 1.2] } {
+		    cd $maindir
+		}
 		
 		# Cleanup.
 		if { $tmp_fpath ne "" } {
@@ -566,7 +572,8 @@ proc ::cluster::scp { vm src_fname { dst_fname "" } } {
     # machine.  This assumes docker-machine output the ssh command
     # onto the stderr.
     log DEBUG "Detecting SSH command into $nm"
-    set sshinfo [Machine -return -stderr -- --debug ssh $nm echo ""]
+    # Skip to last line since newer versions output more when debug is on...
+    set sshinfo [lindex [Machine -return -stderr -- --debug ssh $nm echo ""] end]
     set ssh [string first ssh $sshinfo];  # Lookup the string 'ssh': START
     set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
     set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
@@ -579,6 +586,7 @@ proc ::cluster::scp { vm src_fname { dst_fname "" } } {
     foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
 	set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
     }
+    puts ">>> $cmd"
     set dst [lindex $cmd end];   # Extract out user@hostname, last in
 				 # (ssh)command
     set scp [lrange $cmd 0 end-1]
@@ -990,8 +998,12 @@ proc ::cluster::pull { vm {images {}} } {
 proc ::cluster::destroy { vm } {
     halt $vm
     set nm [dict get $vm -name]
-    log NOTICE "Removing machine $nm..."
-    Machine rm $nm
+    if { [dict exists $vm state] } {
+	log NOTICE "Removing machine $nm..."
+	Machine rm $nm
+    } else {
+	log INFO "Machine $nm does not exist, nothing to do"
+    }
     Discovery [bind $vm]
 }
 
@@ -1092,6 +1104,45 @@ proc ::cluster::parse { fname args } {
     return $vms
 }
 
+
+proc ::cluster::env { cluster {force 0} {fd ""} } {
+    # Nothing to do on an empty cluster...
+    if { [llength $cluster] == 0 } {
+	return
+    }
+
+    set vm [lindex $cluster 0]
+    if { [dict exists $vm origin] } {
+	set env_path [CacheFile [dict get $vm origin] ${vars::-ext}]
+    } else {
+	# Should not happen
+	log WARN "Cannot discover where cluster originates from!"
+	return
+    }
+
+    # Remove the cache file and recreate
+    if { [string is true $force] } {
+	file delete -force -- $env_path
+	foreach vm $cluster {
+	    Discovery $vm
+	}
+    }
+    
+    # Either return content of environment file as a dictionary, or
+    # return so it contains exporting variables commands.
+    if { $fd ne "" } {
+	set e [open $env_path]
+	while { ![eof $e] } {
+	    set l [gets $e]
+	    if { $l ne "" } {
+		puts $fd "export $l"
+	    }
+	}
+	close $e
+    } else {
+	return [EnvRead $env_path]
+    }
+}
 
 
 ####################################################################
@@ -1212,6 +1263,10 @@ proc ::cluster::Create { vm { token "" } } {
 	    softlayer --softlayer-cpu
 	    vmwarevcloudair --vmwarevcloudair-cpu-count
 	    vmwarevsphere --vmwarevsphere-cpu-count
+	}
+	# Setting the number of CPUs works with machine >= 0.2
+	if { [VersionGreaterOrEqual [Version machine] 0.2] } {
+	    set COPT(virtualbox) --virtualbox-cpu-count
 	}
 	if { [info exist COPT($driver)] } {
 	    lappend cmd $COPT($driver) [dict get $vm -cpu]
@@ -1733,7 +1788,7 @@ proc ::cluster::Interfaces { vm } {
 	}
     }
     # Don't forget the last one!
-    if { ![string match "v*" $iface] } {
+    if { $iface ne "" && ![string match "v*" $iface] } {
 	# We skip interfaces which name starts with v (for virtual).
 	lappend interfaces [dict create \
 				interface $iface \
@@ -2150,5 +2205,92 @@ proc ::cluster::CacheFile { yaml ext } {
     return $path
 }
 
+
+proc ::cluster::VersionGreaterOrEqual { current base } {
+    # Split version numbers on dots.
+    set l_current [split $current .]
+    set l_base [split $base .]
+
+    # Compute their respective lengths and arrange for having two
+    # lists of exactly the same length (with 0 added).  The variable
+    # len will be the common length.
+    set len_current [llength $l_current]
+    set len_base [llength $l_base]
+    if { $len_current > $len_base } {
+	while { [llength $l_base] < $len_current } {
+	    lappend l_base 0
+	}
+	set len $len_current
+    } elseif { $len_base > $len_current } {
+	while { [llength $l_current] < $len_base } {
+	    lappend l_current 0
+	}
+	set len $len_base
+    } else {
+	set len $len_current
+    }
+
+    for {set i 0} {$i < $len} {incr i} {
+	if { [lindex $current $i] < [lindex $base $i] } {
+	    return 0
+	}
+    }
+    return 1
+}
+
+
+# ::cluster::VersionQuery -- Version of underlying tools
+#
+#       Query and return the version number of one of the underlying
+#       tools that we support.  This will call the appropriate tool
+#       with the proper arguments to get the version number.
+#
+# Arguments:
+#	tool	Tool to query, a string, one of: docker, machine or compose
+#
+# Results:
+#       Return the version number or an empty string.
+#
+# Side Effects:
+#       None.
+proc ::cluster::VersionQuery { tool } {
+    set vline ""
+    switch -nocase -- $tool {
+	docker {
+	    set vline [lindex [Docker -return -- --version] 0]
+	}
+	machine {
+	    set vline [lindex [Machine -return -- -version] 0]
+	}
+	compose {
+	    set vline [lindex [Compose -return -- --version] 0]
+	}
+	default {
+	    log WARN "$tool isn't a tool that we can query the version for"
+	}
+    }
+    if { $vline ne "" } {
+	if { [regexp {\d+(\.\d+)*\.\d+} $vline version] } {
+	    return $version
+	} else {
+	    log WARN "Cannot extract a version number out of '$vline'!"
+	}
+    }
+    return "";    # Catch all for errors
+}
+
+proc ::cluster::Version { tool } {
+    switch -nocase -- $tool {
+	compose -
+	machine -
+	docker {
+	    if { [dict get $vars::versions] eq "" } {
+		dict set vars::versions [VersionQuery $tool]
+	    }
+	return [dict get $vars::versions]
+	}
+    }
+    return ""
+}
 
 package provide cluster 0.3

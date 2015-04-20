@@ -54,11 +54,14 @@ proc ::help:dump { { hdr "" } } {
 	puts ""
     }
     puts "NAME:"
-    puts "\t$appname v$CRT(version) -\
+    puts "\t$appname -\
           Cluster creation and management via docker-machine"
     puts ""
     puts "USAGE"
-    puts "\t${appname}.tcl \[global options\] command \[command options\]"
+    puts "\t${appname} \[global options\] command \[command options\] \[arguments...\]"
+    puts ""
+    puts "VERSION"
+    puts "\t$CRT(version)"
     puts ""
     puts "COMMANDS:"
     puts "\tup\tCreate and bring up cluster and/or specific machines"
@@ -201,6 +204,12 @@ switch -nocase -- $cmd {
 	}
     }
     "swarm" {
+	# TODO: If there is one or several arguments after the
+	# command, these should be compose project files to start up.
+	# The files are substituted, so we get discovery to work
+	# properly and they can use environment commands to schedule
+	# on specific machines.
+	# ALT: one YAML file that references compose project files?
 	set cluster [init]
 	swarm info $cluster
     }
@@ -249,6 +258,10 @@ switch -nocase -- $cmd {
 		cluster destroy $vm
 	    }
 	}
+    }
+    "env" {
+	set cluster [init]
+	cluster env $cluster [cluster getopt argv -force] stdout
     }
     "ssh" {
 	# Execute one command in a running virtual machine.  This is

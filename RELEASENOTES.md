@@ -20,6 +20,8 @@
   start the components under the same user than the one that was automatically
   logged in. 
 
+* Adapting to new versions of `docker`, `docker-machine` and `docker-compose`.
+
 ## v 0.3
 
 * Added support for automatically run `docker-compose up` against a given
