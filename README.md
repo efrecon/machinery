@@ -419,10 +419,14 @@ of additional options that will be passed to `docker-compose up`.  By default,
 all project files are brought up with the option `-d` to start their components
 in the background.
 
-Finally, a kay called `substitution` can be set to a boolean.  When `true`, the
-YAML compose file will be substituted for local environment variables before
-being parsed by `docker-compose`.  See [above](#docker-compose) for more
-information.
+Another optional key called `substitution` can be set to a boolean.  When
+`true`, the YAML compose file will be substituted for local environment
+variables before being parsed by `docker-compose`.  See [above](#docker-compose)
+for more information.
+
+Finally a key called `project` can be set and is a string.  It will contain the
+name of the compose project and will replace the one that usually is extracted
+from the directory name.
 
 ## Giving it a quick test
 
