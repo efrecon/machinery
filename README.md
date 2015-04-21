@@ -5,15 +5,20 @@ Machine](https://docs.docker.com/machine/) virtual machines. `machinery` uses a
 YAML definition of the whole cluster to create machines, bring them up or down,
 or remove them at will. In short, `machinery` is to `docker-machine` what
 `docker-compose` is to `docker`. In addition, `machinery` provides [Docker
-Swarm](https://docs.docker.com/swarm/) integration and will automatically
-arrange for the created virtual machines to join the swarm cluster or generate
-the token as needed.  Finally, `machinery` also integrates with
-[Compose](https://docs.docker.com/compose/) and can automatically bring up
-specific project files onto machines that it controls. `machinery` is able to
-substitute the value of local environment variables in the compose project files
-before bringing the components up.  Together with conventions for the dynamic
-construction of network-related environment variables, this provides for a
-simple mechanism for service discovery.
+Swarm](https://docs.docker.com/swarm/) and
+[Compose](https://docs.docker.com/compose/) integration. It will automatically
+arrange for the created virtual machines to join the swarm cluster, generate the
+token as needed or even schedule several compose projects to be run on the
+cluster. `machinery` can automatically bring up specific project files onto
+machines that it controls. `machinery` is able to substitute the value of local
+environment variables in the compose project files before bringing the
+components up.  Together with conventions for the dynamic construction of
+network-related environment variables, this provides for a simple mechanism for
+service discovery.
+
+In short `machinery` provides you with an at-a-glance view of your whole
+cluster, from all the (virtual) machines that build it up, to all the components
+that should be run, and on which machine(s).
 
 ## Quick Tour
 
@@ -94,7 +99,7 @@ the same machine as an argument.
 In addition, `machinery` keeps a hidden environment file with the networking
 information for all the machines of the cluster ([see below](#netinfo)).  This
 file will have the same root name as the cluster YAML file, but with a leading `.`
-to hide it and the extension `.env`.
+to hide it and the extension `.env` (see `env` [command description](#env)).
 
 #### halt
 
@@ -111,9 +116,22 @@ specified, `machinery` will destroy all machines in the cluster.
 
 #### swarm
 
-The command `swarm` will contact the swarm master in the cluster and print out
-its current status, i.e. the virtual machines that are registered within the
-master and their details.
+The command `swarm` will either schedule components to be run in the cluster or
+print out its current status.  When called without arguments, `swarm` will print
+out current cluster status i.e. the virtual machines that are registered within
+the master and their details.
+
+Arguments to `swarm` should be one or several path to YAML files.  `machinery`
+recognises automatically two kinds of YAML files:
+
+* Compose projects files will be substituted for environment variables and sent
+  to the master of the cluster.  You will have to use labels or other scheduling
+  techniques if you want to pinpoint specific machines where to run these
+  components.
+
+* `machinery` also recognises list of indirections to compose project files.
+  These have exactly the same syntax as the [`compose` keys](#compose) of the
+  regular YAML syntax.
 
 #### token
 
@@ -130,6 +148,14 @@ Whenever a token needs to be generated, `machinery` will run `swarm create` in a
 component on the local machine.  The component is automatically removed once the
 token has been generated.  However, the image that might have been downloaded
 will remain on the local machine.
+
+#### env <a name="env" />
+
+The command `env` will output all necessary bash commands to declare the
+environment variables for network discovery.  In other words, running `eval
+$(machinery env)` at the shell should set up a number of environment variables
+starting with the prefix `MACHINERY_` and describing the network details of all
+existing machines in the cluster.
 
 #### ssh
 
@@ -380,7 +406,7 @@ server is the URL to the registry and the other fields are self-explanatory.
 `machinery` will log into all specified registries before attempting to
 pre-download images as explained above.
 
-#### `compose`
+#### `compose` <a name="compose" />
 
 `compose` should be a list of dictionaries that will, each, reference a
 `docker-compose` project file.  Each dictionary must have a key called `file`

@@ -1,6 +1,6 @@
 # Release Notes
 
-## v 0.3.1
+## v 0.4
 
 * Added support for substitution of (local) environment variables as a
   workaround for this
@@ -18,9 +18,28 @@
 * Adding support for logging in at one or several registries at the `docker`
   daemon running within a specific virtual machine.  Note that you will have to
   start the components under the same user than the one that was automatically
-  logged in. 
+  logged in.
 
 * Adapting to new versions of `docker`, `docker-machine` and `docker-compose`.
+
+* Automatically trying to update a machine to the latest   `boot2docker.iso`
+  when the installed version of `docker` is lower than the one of the local
+  installation.
+
+* Arrange for the temporary files created for performing environment variable
+  substitution to point back correctly to the source files when using extending
+  services with compose.
+
+* Adding an `env` command to export all machinery network details to shell.
+
+* Extending the `swarm` command so it takes a list of compose project files, or
+  indirections to compose project file in a format similar to the `compose` key
+  of the YAML syntax.  These projects will be sent to the swarm master for
+  creation.
+
+* Adding a `reinit` command to trigger some of the machine initialisation steps,
+  such as image downloading or component creation.
+
 
 ## v 0.3
 

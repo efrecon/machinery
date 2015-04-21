@@ -19,6 +19,7 @@
 ##################
 package require yaml;   # This is found in tcllib
 package require cluster::virtualbox
+package require cluster::vcompare
 
 namespace eval ::cluster {
     # Encapsulates variables global to this namespace under their own
@@ -48,6 +49,8 @@ namespace eval ::cluster {
 	variable -log       stderr
 	# Date log output
 	variable -date      "%Y%m%d %H%M%S"
+	# Temporary directory
+	variable -tmp       "/tmp"
 	# name of VM that we are attached to
 	variable attached   ""
 	# version numbers for our tools (on demand)
@@ -382,48 +385,62 @@ proc ::cluster::create { vm token } {
 	    log ERROR "Cannot test docker for $nm, check manually!"
 	}
 
-	# Poor man's discovery: write down a description of all the
-	# network interfaces existing on the virtual machines,
-	# including the most important one (e.g. the one returned by
-	# docker-machine ip) as environment variable declaration in a
-	# file.
-	Discovery $vm
-
-	# Now pull images if any
-	login $vm
-	pull $vm
-
-	# And iteratively run compose.  Compose will get the complete
-	# description of the discovery status in the form of
-	# environment variables.
-	compose $vm
+	init $vm
     }
 
     return $nm
 }
 
 
+proc ::cluster::init { vm {steps {registries images compose}} } {
+    # Poor man's discovery: write down a description of all the
+    # network interfaces existing on the virtual machines,
+    # including the most important one (e.g. the one returned by
+    # docker-machine ip) as environment variable declaration in a
+    # file.
+    Discovery $vm
+    
+    # Now pull images if any
+    if { [lsearch -nocase $steps registries] >= 0 } {
+	login $vm
+    }
+    if { [lsearch -nocase $steps images] >= 0 } {
+	pull $vm
+    }
+    
+    # And iteratively run compose.  Compose will get the complete
+    # description of the discovery status in the form of
+    # environment variables.
+    if { [lsearch -nocase $steps compose] >= 0 } {
+	compose $vm
+    }
+}
+
+
 proc ::cluster::swarm { master fpath } {
     # Make sure we resolve in proper directory.
-    if { [dict exists $msater origin] } {
+    if { [dict exists $master origin] } {
 	set dirname [file dirname [dict get $master origin]]
 	log DEBUG "Joining $dirname and $fpath to get final path"
 	set fpath [file join $dirname $fpath]
     }
     set fpath [file normalize $fpath]
     
-    #XXX: Check that file exists!
-    log NOTICE "Reading projects from $fpath"
-    set pinfo [::yaml::yaml2dict -file $fpath]
-
-    log INFO "Detecting content of $fpath: indirection or compose projects?"
-    set first [lindex $pinfo 0]
-    if { [dict exists $first file] } {
-	log INFO "$fpath contains indirections to compose projects"
-	compose $master 1 $pinfo
+    if { [file exists $fpath] } {
+	log NOTICE "Reading projects from $fpath"
+	set pinfo [::yaml::yaml2dict -file $fpath]
+	
+	# Detect type of YAML project file and schedule
+	set first [lindex $pinfo 0]
+	if { [dict exists $first file] } {
+	    log INFO "Scheduling compose projects pointed by $fpath in cluster"
+	    compose $master 1 $pinfo
+	} else {
+	    log INFO "Scheduling compose project $fpath in cluster"
+	    Project $fpath 1
+	}
     } else {
-	log INFO "$fpath is a compose project file"
-	Project $fpath 1
+	log WARN "Project file at $fpath does not exist!"
     }
 }
 
@@ -496,7 +513,11 @@ proc ::cluster::compose { vm {swarm 0} { projects {} } } {
 		if { [dict exists $project options] } {
 		    set options [dict get $project options]
 		}
-		Project $fpath $substitution $options
+		set projname ""
+		if { [dict exists $project project] } {
+		    set projname [dict get $project project]
+		}
+		Project $fpath $substitution $projname $options
 	    } else {
 		log WARN "Cannot find compose file at $fpath"
 	    }
@@ -634,7 +655,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Create a local temporary file with the new content.  This is far
     # from perfect, but should do as we are only creating one file and
     # will be removing it soon.
-    set fname [Temporary /tmp/profile]
+    set fname [Temporary [file join ${vars::-tmp} profile]]
     EnvWrite $fname [array get DARGS] "'"
 
     # Copy new file to same place (assuming /tmp is a good place!) and
@@ -902,21 +923,20 @@ proc ::cluster::login { vm {regs {}} } {
 
     set nm [dict get $vm -name]
     log NOTICE "Logging in within $nm"
-    Attach $vm
     foreach reg $regs {
 	if { [dict exists $reg server] && [dict exists $reg username] } {
 	    log INFO "Logging in as [dict get $reg username]\
                       at [dict get $reg server]"
-	    set cmd [list Docker login]
+	    set cmd "docker login "
 	    foreach {o k} [list -u username -p password -e email] {
 		if { [dict exists $reg $k] } {
-		    lappend cmd $o [dict get $reg $k]
+		    append cmd "$o '[dict get $reg $k]' "
 		} else {
-		    lappend cmd $o ""
+		    append cmd "$o '' "
 		}
 	    }
-	    lappend cmd [dict get $reg server]
-	    eval $cmd
+	    append cmd [dict get $reg server]
+	    Machine ssh $nm $cmd
 	}
     }
 }
@@ -947,10 +967,11 @@ proc ::cluster::pull { vm {images {}} } {
     }
 
     set nm [dict get $vm -name]
-    log NOTICE "Pulling images in $nm: $images"
+    log NOTICE "Pulling images in $nm: $images..."
     if { [llength $images] > 0 } {
 	Attach $vm
 	foreach img $images {
+	    log INFO "Pulling $img in $nm..."
 	    Docker pull $img
 	}
     }
@@ -1205,6 +1226,8 @@ proc ::cluster::+ { args } {
 proc ::cluster::Create { vm { token "" } } {
     set nm [dict get $vm -name]
     log NOTICE "Creating machine $nm"
+    Detach
+    set docker_version [Version docker]
 
     # Start creating a command that we will be able to call for
     # machine creation: first insert creation command with proper
@@ -1240,7 +1263,7 @@ proc ::cluster::Create { vm { token "" } } {
 	    vmwarevsphere --vmwarevsphere-cpu-count
 	}
 	# Setting the number of CPUs works with machine >= 0.2
-	if { [VersionGreaterOrEqual [Version machine] 0.2] } {
+	if { [vcompare ge [Version machine] 0.2] } {
 	    set COPT(virtualbox) --virtualbox-cpu-count
 	}
 	if { [info exist COPT($driver)] } {
@@ -1301,15 +1324,23 @@ proc ::cluster::Create { vm { token "" } } {
     lappend cmd $nm
     eval $cmd
 
-    # Test SSH connection by echoing the name of the machine in the
-    # machine using ssh.  This seems to be necessary to make
-    # docker-machine happy, but is also a "good thing to check" (TM).
+    # Test SSH connection by getting the version of docker using ssh.
+    # This seems to be necessary to make docker-machine happy and
+    # we'll compare to our local version below for upgrades.
     log DEBUG "Testing SSH connection to $nm"
-    if { [Machine -return -- ssh $nm echo "$nm"] eq "$nm" } {
-	log INFO "SSH to $nm working properly"
-    } else {
+    set rv_line [lindex [Machine -return -- ssh $nm "docker --version"] 0]
+    set remote_version [vcompare extract $rv_line]
+    if { $remote_version eq "" } {
 	log FATAL "Cannot log into $nm!"
 	return ""
+    } else {
+	log INFO "Machine $nm running docker v. $remote_version,\
+                  running v. [Version docker] locally"
+	if { [vcompare gt $docker_version $remote_version] } {
+	    log NOTICE "Local docker version greater than machine,\
+                        trying an upgrade"
+	    Machine upgrade $nm
+	}
     }
 
     return [dict get $vm -name]
@@ -1528,6 +1559,7 @@ proc ::cluster::Machine { args } {
 # Arguments:
 #	vm	Virtual machine description dictionary
 #	swarm	Contact swarm master?
+#	force	Force attaching
 #
 # Results:
 #       None.
@@ -1535,10 +1567,11 @@ proc ::cluster::Machine { args } {
 # Side Effects:
 #       Modify current environment so as to be able to pass it further
 #       to docker on next call.
-proc ::cluster::Attach { vm { swarm 0 } } {
+proc ::cluster::Attach { vm { swarm 0 } { force 0 }} {
     set nm [dict get $vm -name]
     if { $nm ne [lindex $vars::attached 0] \
-	     || $swarm != [lindex $vars::attached 1] } {
+	     || $swarm != [lindex $vars::attached 1] \
+	     || $force } {
 	log INFO "Attaching to $nm"
 	if { $swarm } {
 	    set cmd [list Machine -return -- env --swarm $nm]
@@ -1546,8 +1579,9 @@ proc ::cluster::Attach { vm { swarm 0 } } {
 	    set cmd [list Machine -return -- env $nm]
 	}
 	foreach l [eval $cmd] {
-	    foreach {k v} [split [string map [list "export " ""] $l] "="] {
-		set ::env($k) $v
+	    set k [EnvLine d $l]
+	    if { $k ne "" } {
+		set ::env($k) [dict get $d $k]
 	    }
 	}
 	set vars::attached [list $nm $swarm]
@@ -1571,13 +1605,15 @@ proc ::cluster::Attach { vm { swarm 0 } } {
 #       Modify current environment so as to be able to clear out
 #       docker context.
 proc ::cluster::Detach {} {
-    log INFO "Detaching from vm..."
-    foreach e [list TLS_VERIFY CERT_PATH HOST] {
-	if { [info exists ::env(DOCKER_$e)] } {
-	    unset ::env(DOCKER_$e)
+    if { [llength $vars::attached] != 0 } {
+	log INFO "Detaching from vm..."
+	foreach e [list TLS_VERIFY CERT_PATH HOST] {
+	    if { [info exists ::env(DOCKER_$e)] } {
+		unset ::env(DOCKER_$e)
+	    }
 	}
+	set vars::attached {}
     }
-    set vars::attached {}
 }
 
 
@@ -1653,46 +1689,103 @@ proc ::cluster::Ports { pspec } {
 }
 
 
-proc ::cluster::Project { fpath {substitution 0} {options {}}} {
-    # Change dir to solve relative access to env files.
-    # This is ugly, but there does not seem to be any
-    # other solution at this point for compose < 1.2
-    if { ![VersionGreaterOrEqual [Version compose] 1.2] } {
+proc ::cluster::Project { fpath {substitution 0} {project ""} {options {}}} {
+    # Change dir to solve relative access to env files.  This is ugly,
+    # but there does not seem to be any other solution at this point
+    # for compose < 1.2
+    if { [vcompare lt [Version compose] 1.2] } {
 	cd [file dirname $fpath]
     }
 
-    # Perform substituion of environment variables if
-    # requested from the VM description (and thus the YAML
-    # file).
-    set tmp_fpath ""
+    # Perform substituion of environment variables if requested from
+    # the VM description (and thus the YAML file).
+    set temporaries {}
     if { $substitution } {
-	# Read content of project file and resolve
-	# environment variables to their values in one go.
-	# This supports defaults whenever a variable does
-	# not exist, e.g. ${VARNAME:defaultValue}.
+	# Read content of project file and resolve environment
+	# variables to their values in one go.  This supports defaults
+	# whenever a variable does not exist,
+	# e.g. ${VARNAME:defaultValue}.
 	set fd [open $fpath]
 	set yaml [Resolve [read $fd]]
 	close $fd
 
+	# Parse the YAML project to see if it contains extending
+	# services, in which case we need to make sure the extended
+	# services are also available to the temporary copy.
+	set projects [yaml::yaml2dict -stream $yaml]
+	set associated {}
+	foreach p $projects {
+	    if { [dict exists $p extends] && [dict exists $p extends file] } {
+		lappend associated [dict get $p extends file]
+	    }
+	}
+
+	# Do some manual query/replace on the source YAML so that
+	# mentions of relative extended services are replaced by a
+	# full path instead (so that the temporary copy will be able
+	# to find them).
+	set i 0
+	foreach f [lsort -unique $associated] {
+	    # Find the real location and replace all its occurences.
+	    set src [file normalize [file join [file dirname $fpath] $f]]
+	    if { [file exists $src] } {
+		# Replace and count replacements.
+		set count 0
+		while 1 {
+		    set i [string first $f $yaml $i]
+		    if { $i < 0 } {
+			# Nothing left to be found, done!
+			break
+		    } else {
+			# We've found a occurence of the filename, we
+			# replace if we can find a preceeding file:
+			# otherwise, we just advance.
+			set extender [string last "file:" $yaml $i]
+			if { $extender >= 0 } {
+			    set j [expr {$i+[string length $f]-1}]
+			    set yaml [string replace $yaml $i $j $src]
+			    # Advance to next possible, account for
+			    # length of replacement.
+			    incr i [expr {[string length $src]-1}];
+			    incr count 1
+			} else {
+			    incr i [expr {[string length $f]-1}]
+			}
+		    }
+		}
+		log DEBUG "Replaced $count occurrences of $f in source YAML"
+	    }
+	}
+
 	# Copy resolved result to temporary file
 	set projdirname [file tail [file dirname $fpath]]
 	set projname [file rootname [file tail $fpath]]
-	set tmp_fpath [Temporary /tmp/$projname].yml
+	set tmp_fpath [Temporary [file join ${vars::-tmp} $projname]].yml
 	set fd [open $tmp_fpath w]
 	puts -nonewline $fd $yaml
 	close $fd
+	lappend temporaries $tmp_fpath
 
 	log NOTICE "Substituting environment variables in\
-                                compose project at $fpath via $tmp_fpath"
+                    compose project at $fpath via $tmp_fpath"
+	if { $project eq "" } {
+	    set project $projdirname
+	}
 
 	# Arrange for compose to pick up the temporary
 	# file, but still use the proper project name.
 	set cmd [list Compose -stderr -- \
-		     --file $tmp_fpath --project-name $projdirname \
+		     --file $tmp_fpath --project-name $project \
 		     up -d]
 	lappend composed $tmp_fpath
     } else {
-	set cmd [list Compose -stderr -- --file $fpath up -d]
+	if { $project eq "" } {
+	    set cmd [list Compose -stderr -- --file $fpath up -d]
+	} else {
+	    set cmd [list Compose -stderr -- \
+			 --file $fpath --project-name $project \
+			 up -d]
+	}
 	lappend composed $fpath
     }
     # Blindly add compose options if we had some.
@@ -1702,13 +1795,15 @@ proc ::cluster::Project { fpath {substitution 0} {options {}}} {
     # Run compose and return to the main directory at
     # once for older versions of compose
     eval $cmd
-    if { ![VersionGreaterOrEqual [Version compose] 1.2] } {
+    if { [vcompare lt [Version compose] 1.2] } {
 	cd $maindir
     }
     
-    # Cleanup.
-    if { $tmp_fpath ne "" } {
-	file delete -force -- $tmp_fpath
+    # Cleanup files in temporaries list.
+    if { [llength $temporaries] > 0 } {
+	foreach tmp_fpath $temporaries {
+	    file delete -force -- $tmp_fpath
+	}
     }
 }
 
@@ -1788,8 +1883,9 @@ proc ::cluster::Shares { spec } {
 #       Will call ifconfig on the target machine
 proc ::cluster::Interfaces { vm } {
     set nm [dict get $vm -name]
-    log INFO "Detecting network interfaces of $nm"
-    set interfaces {}
+    log DEBUG "Detecting network interfaces of $nm..."
+    set interfaces {};   # List of interface dictionaries.
+    set ifs {};          # List of interface names, for logging.
     set iface ""
     foreach l [Machine -return -- ssh $nm ifconfig] {
 	# The output of ifconfig is formatted so that each new
@@ -1805,6 +1901,7 @@ proc ::cluster::Interfaces { vm } {
 					interface $iface \
 					inet $inet \
 					inet6 $inet6]
+		lappend ifs $iface
 	    }
 	    set iface [lindex $l 0]
 	    set inet ""
@@ -1829,8 +1926,11 @@ proc ::cluster::Interfaces { vm } {
 				interface $iface \
 				inet $inet \
 				inet6 $inet6]
+	lappend ifs $iface
     }
 
+    # Report back
+    log INFO "Detected network addresses for [join $ifs , ]"
     return $interfaces
 }
 
@@ -2012,22 +2112,35 @@ proc ::cluster::EnvRead { fpath } {
 	log DEBUG "Reading environment description file at $fpath"
 	set fd [open $fpath]
 	while {![eof $fd]} {
-	    set line [string trim [gets $fd]]
-	    if { $line ne "" || [string index $line 0] ne "\#" } {
-		set eql [string first "=" $line]
-		if { $eql >= 0 } {
-		    set k [string range $line 0 [expr {$eql-1}]]
-		    set v [string range $line [expr {$eql+1}] end]
-		    dict set d \
-			[string trim $k] \
-			[string trim [string trim [string trim $v] "'\""]]
-		}
-	    }
+	    EnvLine d [gets $fd]
 	}
 	close $fd
     }
 
     return $d
+}
+
+
+proc ::cluster::EnvLine { d_ line } {
+    upvar $d_ d;   # Get to the dictionary variable.
+    set line [string trim $line]
+    if { $line ne "" || [string index $line 0] ne "\#" } {
+	# Skip leading "export" bash instruction
+	if { [string first "export " $line] == 0 } {
+	    set line [string trim \
+			  [string range $line [string length "export "] end]]
+	}
+	set eql [string first "=" $line]
+	if { $eql >= 0 } {
+	    set k [string range $line 0 [expr {$eql-1}]]
+	    set v [string range $line [expr {$eql+1}] end]
+	    dict set d \
+		[string trim $k] \
+		[string trim [string trim [string trim $v] "'\""]]
+	    return [string trim $k]
+	}
+    }
+    return ""
 }
 
 
@@ -2241,39 +2354,6 @@ proc ::cluster::CacheFile { yaml ext } {
 }
 
 
-proc ::cluster::VersionGreaterOrEqual { current base } {
-    # Split version numbers on dots.
-    set l_current [split $current .]
-    set l_base [split $base .]
-
-    # Compute their respective lengths and arrange for having two
-    # lists of exactly the same length (with 0 added).  The variable
-    # len will be the common length.
-    set len_current [llength $l_current]
-    set len_base [llength $l_base]
-    if { $len_current > $len_base } {
-	while { [llength $l_base] < $len_current } {
-	    lappend l_base 0
-	}
-	set len $len_current
-    } elseif { $len_base > $len_current } {
-	while { [llength $l_current] < $len_base } {
-	    lappend l_current 0
-	}
-	set len $len_base
-    } else {
-	set len $len_current
-    }
-
-    for {set i 0} {$i < $len} {incr i} {
-	if { [lindex $current $i] < [lindex $base $i] } {
-	    return 0
-	}
-    }
-    return 1
-}
-
-
 # ::cluster::VersionQuery -- Version of underlying tools
 #
 #       Query and return the version number of one of the underlying
@@ -2304,14 +2384,7 @@ proc ::cluster::VersionQuery { tool } {
 	    log WARN "$tool isn't a tool that we can query the version for"
 	}
     }
-    if { $vline ne "" } {
-	if { [regexp {\d+(\.\d+)*\.\d+} $vline version] } {
-	    return $version
-	} else {
-	    log WARN "Cannot extract a version number out of '$vline'!"
-	}
-    }
-    return "";    # Catch all for errors
+    return [vcompare extract $vline];    # Catch all for errors
 }
 
 proc ::cluster::Version { tool } {

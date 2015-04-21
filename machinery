@@ -220,6 +220,23 @@ switch -nocase -- $cmd {
 	    }
 	}
     }
+    "reinit" {
+	set cluster [init]
+	cluster getopt argv -steps steps "registries,images,compose"
+	if { [string first "," $steps] } {
+	    set steps [split $steps ","]
+	}
+
+	if { [llength $argv] == 0 } {
+	    set argv [cluster names $cluster]
+	}
+	foreach nm $argv {
+	    set vm [cluster find $cluster $nm]
+	    if { $vm ne "" } {
+		cluster init $vm $steps
+	    }
+	}
+    }
     "down" -
     "stop" -
     "halt" {
