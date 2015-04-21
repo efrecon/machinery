@@ -1,6 +1,6 @@
 namespace eval ::cluster::vcompare {
     namespace eval vars {
-	variable -depth   8
+        variable -depth   8
     }
     namespace export {[a-z]*}
     namespace path [namespace parent]
@@ -20,12 +20,12 @@ proc ::cluster::vcompare::gt { current base } {
     set l_base [Equalise $base $len]
 
     for {set i 0} {$i < $len} {incr i} {
-	if { [lindex $l_current $i] > [lindex $l_base $i] } {
-	    return 1
-	}
-	if { [lindex $l_current $i] < [lindex $l_base $i] } {
-	    return 0
-	}
+        if { [lindex $l_current $i] > [lindex $l_base $i] } {
+            return 1
+        }
+        if { [lindex $l_current $i] < [lindex $l_base $i] } {
+            return 0
+        }
     }
     return 0
 }
@@ -41,9 +41,9 @@ proc ::cluster::vcompare::eq { current base } {
     set l_base [Equalise $base $len]
 
     for {set i 0} {$i < $len} {incr i} {
-	if { [lindex $l_current $i] != [lindex $l_base $i] } {
-	    return 0
-	}
+        if { [lindex $l_current $i] != [lindex $l_base $i] } {
+            return 0
+        }
     }
     return 1
 }
@@ -54,12 +54,12 @@ proc ::cluster::vcompare::ge { current base } {
     set l_base [Equalise $base $len]
 
     for {set i 0} {$i < $len} {incr i} {
-	if { [lindex $l_current $i] > [lindex $l_base $i] } {
-	    return 1
-	}
-	if { [lindex $l_current $i] < [lindex $l_base $i] } {
-	    return 0
-	}
+        if { [lindex $l_current $i] > [lindex $l_base $i] } {
+            return 1
+        }
+        if { [lindex $l_current $i] < [lindex $l_base $i] } {
+            return 0
+        }
     }
     return 1
 }
@@ -71,23 +71,23 @@ proc ::cluster::vcompare::le { current base } {
 
 proc ::cluster::vcompare::extract { vline } {
     if { $vline ne "" } {
-	if { [regexp {\d+(\.\d+)*\.\d+} $vline version] } {
-	    return $version
-	} else {
-	    log WARN "Cannot extract a version number out of '$vline'!"
-	}
+        if { [regexp {\d+(\.\d+)*\.\d+} $vline version] } {
+            return $version
+        } else {
+            log WARN "Cannot extract a version number out of '$vline'!"
+        }
     }
     return ""
 }
 
 proc ::cluster::vcompare::Equalise { vernum {depth -1}} {
     if { $depth < 0 } {
-	set depth ${vars::-depth}
+        set depth ${vars::-depth}
     }
 
     set l_vernum [split $vernum .]
     while { [llength $l_vernum] < $depth } {
-	lappend l_vernum 0
+        lappend l_vernum 0
     }
     return $l_vernum
 }

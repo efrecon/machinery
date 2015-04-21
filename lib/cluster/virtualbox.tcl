@@ -16,7 +16,7 @@ namespace eval ::cluster::virtualbox {
     # values can be changed to influence the behaviour of this
     # implementation.
     namespace eval vars {
-	variable -manage    VBoxManage
+        variable -manage    VBoxManage
     }
     namespace export {[a-z]*}
     namespace path [namespace parent]
@@ -33,7 +33,7 @@ namespace eval ::cluster::virtualbox {
 #       translated to a proper list in order to ease parsing.
 #
 # Arguments:
-#	vm	Name or identifier of virtualbox guest machine.
+#        vm        Name or identifier of virtualbox guest machine.
 #
 # Results:
 #       Return a dictionary describing the machine
@@ -43,18 +43,18 @@ namespace eval ::cluster::virtualbox {
 proc ::cluster::virtualbox::info { vm } {
     log INFO "Getting info for guest $vm"
     foreach l [Manage -return -- showvminfo $vm --machinereadable --details] {
-	set eq [string first "=" $l]
-	if { $eq >= 0 } {
-	    set k [string trim [string range $l 0 [expr {$eq-1}]]]
-	    set v [string trim [string range $l [expr {$eq+1}] end]]
-	    # Convert arrays into list in the dictionary, otherwise
-	    # just create a key/value in the dictionary.
-	    if { [regexp {(.*)\([0-9]+\)} $k - mk] } {
-		dict lappend nfo $mk $v
-	    } else {
-		dict set nfo $k $v
-	    }
-	}
+        set eq [string first "=" $l]
+        if { $eq >= 0 } {
+            set k [string trim [string range $l 0 [expr {$eq-1}]]]
+            set v [string trim [string range $l [expr {$eq+1}] end]]
+            # Convert arrays into list in the dictionary, otherwise
+            # just create a key/value in the dictionary.
+            if { [regexp {(.*)\([0-9]+\)} $k - mk] } {
+                dict lappend nfo $mk $v
+            } else {
+                dict set nfo $k $v
+            }
+        }
     }
     return $nfo
 }
@@ -66,8 +66,8 @@ proc ::cluster::virtualbox::info { vm } {
 #       between the host and a guest machine.
 #
 # Arguments:
-#	vm	Name or identifier of virtualbox guest machine.
-#	args	Repeatedly host port, guest port, protocol in a list.
+#        vm        Name or identifier of virtualbox guest machine.
+#        args        Repeatedly host port, guest port, protocol in a list.
 #
 # Results:
 #       None.
@@ -78,18 +78,18 @@ proc ::cluster::virtualbox::forward { vm args } {
     # TODO: Don't redo if forwarding already exists...
     set running [expr {[Running $vm] ne ""}]
     foreach {host mchn proto} $args {
-	set proto [string tolower $proto]
-	if { $proto eq "tcp" || $proto eq "udp" } {
-	    log INFO "[string toupper $proto] port forwarding\
+        set proto [string tolower $proto]
+        if { $proto eq "tcp" || $proto eq "udp" } {
+            log INFO "[string toupper $proto] port forwarding\
                       localhost:$host -> ${vm}:$mchn"
-	    if { $running } {
-		Manage controlvm $vm natpf1 \
-		    "${proto}-$host,$proto,,$host,,$mchn"
-	    } else {
-		Manage modifyvm $vm --natpf1 \
-		    "${proto}-${host},$proto,,$host,,$mchn"
-	    }
-	}	
+            if { $running } {
+                Manage controlvm $vm natpf1 \
+                    "${proto}-$host,$proto,,$host,,$mchn"
+            } else {
+                Manage modifyvm $vm --natpf1 \
+                    "${proto}-${host},$proto,,$host,,$mchn"
+            }
+        }        
     }
 }
 
@@ -101,8 +101,8 @@ proc ::cluster::virtualbox::forward { vm args } {
 #       identifier for the share.
 #
 # Arguments:
-#	vm	Name or identifier of virtualbox guest machine.
-#	path	Path to EXISTING directory
+#        vm        Name or identifier of virtualbox guest machine.
+#        path        Path to EXISTING directory
 #
 # Results:
 #       Return the identifier for the share, or an empty string on
@@ -115,8 +115,8 @@ proc ::cluster::virtualbox::addshare { vm path } {
     # Refuse to add directories that do not exist (and anything else
     # that would not be a directory).
     if { ![file isdirectory $path] } {
-	log WARN "$path is not a host directory!"
-	return ""
+        log WARN "$path is not a host directory!"
+        return ""
     }
 
     # Lookup the share so we'll only add once.
@@ -126,18 +126,18 @@ proc ::cluster::virtualbox::addshare { vm path } {
     # virtual machine.  Generate a unique name that has some
     # connection to the path requested.
     if { $nm eq "" } {
-	# Halt the machine if it is running, since we cannot add
-	# shared folders to running machines.
-	if { [Running $vm] ne "" } {
-	    halt $vm
-	}
-	# Generate a unique name and add the share
-	set nm [[namespace parent]::Temporary [file tail $path]]
-	log INFO "Adding share ${vm}:${nm} for localhost:$path"
-	Manage sharedfolder add $vm \
-	    --name $nm \
-	    --hostpath $path \
-	    --automount
+        # Halt the machine if it is running, since we cannot add
+        # shared folders to running machines.
+        if { [Running $vm] ne "" } {
+            halt $vm
+        }
+        # Generate a unique name and add the share
+        set nm [[namespace parent]::Temporary [file tail $path]]
+        log INFO "Adding share ${vm}:${nm} for localhost:$path"
+        Manage sharedfolder add $vm \
+            --name $nm \
+            --hostpath $path \
+            --automount
     }
     return $nm
 }
@@ -150,8 +150,8 @@ proc ::cluster::virtualbox::addshare { vm path } {
 #       not shutdown properly after a respit period.
 #
 # Arguments:
-#	vm	Name or identifier of virtualbox guest machine.
-#	respit	Respit period, in seconds.
+#        vm        Name or identifier of virtualbox guest machine.
+#        respit        Respit period, in seconds.
 #
 # Results:
 #       None.
@@ -165,18 +165,18 @@ proc ::cluster::virtualbox::halt { vm { respit 15 } } {
     # Wait for VM to shutdown
     log NOTICE "Waiting for $vm to shutdown..."
     while {$respit >= 0} {
-	set id [Running $vm]
-	if { $id eq "" } {
-	    break
-	} else {
-	    after 1000
-	}
+        set id [Running $vm]
+        if { $id eq "" } {
+            break
+        } else {
+            after 1000
+        }
     }
 
     # Power it off if it was still on.
     if { $id ne "" } {
-	log NOTICE "Forcing powering off for $vm"
-	Manage controlvm $vm poweroff
+        log NOTICE "Forcing powering off for $vm"
+        Manage controlvm $vm poweroff
     }
 }
 
@@ -187,8 +187,8 @@ proc ::cluster::virtualbox::halt { vm { respit 15 } } {
 #       declared within a guest and return its identifier.
 #
 # Arguments:
-#	vm	Name or identifier of virtualbox guest machine.
-#	path	Local host path
+#        vm        Name or identifier of virtualbox guest machine.
+#        path        Local host path
 #
 # Results:
 #       Return the identifier of the share if it existed, an empty
@@ -199,9 +199,9 @@ proc ::cluster::virtualbox::halt { vm { respit 15 } } {
 proc ::cluster::virtualbox::share { vm path } {
     set nfo [info $vm]
     foreach k [dict keys $nfo SharedFolderPathMachineMapping*] {
-	if { [dict get $nfo $k] eq $path } {
-	    return [dict get $nfo [string map [list Path Name] $k]]
-	}
+        if { [dict get $nfo $k] eq $path } {
+            return [dict get $nfo [string map [list Path Name] $k]]
+        }
     }
     return ""
 }
@@ -218,7 +218,7 @@ proc ::cluster::virtualbox::share { vm path } {
 #       Check if a virtual machine is running and returns its identifier.
 #
 # Arguments:
-#	vm	Name or identifier of virtualbox guest machine.
+#       vm        Name or identifier of virtualbox guest machine.
 #
 # Results:
 #       Return the identifier of the machine if it is running,
@@ -230,13 +230,13 @@ proc ::cluster::virtualbox::Running { vm } {
     # Detect if machine is currently running.
     log DEBUG "Detecting running state of $vm"
     foreach l [Manage -return -- list runningvms] {
-	foreach {nm id} $l {
-	    set id [string trim $id "\{\}"]
-	    if { [string equal $nm $vm] || [string equal $id $vm] } {
-		log DEBUG "$vm is running, id: $id"
-		return $id
-	    }
-	}
+        foreach {nm id} $l {
+            set id [string trim $id "\{\}"]
+            if { [string equal $nm $vm] || [string equal $id $vm] } {
+                log DEBUG "$vm is running, id: $id"
+                return $id
+            }
+        }
     }
     return ""
 }
@@ -248,10 +248,10 @@ proc ::cluster::virtualbox::Manage { args } {
     # specify options to the procedure.
     set sep [lsearch $args "--"]
     if { $sep >= 0 } {
-	set opts [lrange $args 0 [expr {$sep-1}]]
-	set args [lrange $args [expr {$sep+1}] end]
+        set opts [lrange $args 0 [expr {$sep-1}]]
+        set args [lrange $args [expr {$sep+1}] end]
     } else {
-	set opts [list]
+        set opts [list]
     }
     
     return [eval [namespace parent]::Run $opts -- ${vars::-manage} $args]
