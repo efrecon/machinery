@@ -1,5 +1,14 @@
 # Release Notes
 
+## v 0.4.2 (in development)
+
+* Fixed a bug when swarming compose project files: these would be started up on
+  the host and not within the cluster!
+
+* Added possibility to pass project name or substitution instructions to YAML
+  compose files being swarmed into the cluster.
+
+
 ## v 0.4.1
 
 * Added support for passing docker-compose commands when swarming in

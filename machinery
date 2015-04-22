@@ -66,10 +66,12 @@ proc ::help:dump { { hdr "" } } {
     puts "COMMANDS:"
     puts "\tup\tCreate and bring up cluster and/or specific machines"
     puts "\thalt\tBring down cluster and/or specific machines"
-    puts "\trestart\tRestart whole cluster and/or specific machines"
     puts "\ttoken\tCreate (new) swarm token, force regeneration with -force"
     puts "\tdestroy\tDestroy cluster and/or specific machines"
-    puts "\tswarm\tSwarm information for cluster"
+    puts "\trestart\tRestart whole cluster and/or specific machines"
+    puts "\tenv\tExport environment variables for discovery"
+    puts "\treinit\tRerun finalisation stages on machine(s), specify via -step"
+    puts "\tswarm\tLifecycle management of components via swarm"
     puts ""
     puts "GLOBAL OPTIONS:"
     foreach { arg val dsc } $::prg_args {
@@ -85,7 +87,7 @@ foreach {arg val dsc} $prg_args {
     set CRT($arg) $val
 }
 array set CRT {
-    version     0.4.1
+    version     0.4.2
 }
 
 # Did we request for help? Output and goodbye
@@ -230,6 +232,13 @@ switch -nocase -- $cmd {
             if { [cluster getopt argv -start] } {
                 lappend operations START
             }
+            cluster getopt argv -options optstr ""
+            set copts {}
+            foreach odef [split $optstr ","] {
+                foreach {k v} [split $odef "="] {
+                    lappend copts [string trim $k] [string trim $v]
+                }
+            }
             if { [llength $operations] == 0 } {
                 # Nothing means up!
                 lappend operations UP
@@ -237,7 +246,7 @@ switch -nocase -- $cmd {
 
 	    foreach fpath $argv {
                 foreach op $operations {
-                    cluster swarm $master $op $fpath
+                    cluster swarm $master $op $fpath $copts
                 }
 	    }
 	}

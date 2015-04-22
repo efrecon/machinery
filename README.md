@@ -141,7 +141,7 @@ recognises automatically two kinds of YAML files:
 `swarm` also takes a number of options that should appear before its arguments.
 These specify what `docker-compose` operations will be executed on the specified
 files.  You can specify several options in a row, for example to restart
-components.  The supported options:
+components.  The supported options are:
 
 * `-stop` matches the [`stop`](http://docs.docker.com/compose/cli/#stop) command
   of `compose` and will stop the components.
@@ -160,6 +160,12 @@ components.  The supported options:
   will create and start the components in the background.  Additional option
   can be provided through the YAML syntax of indirecting files.
 
+* `-options` is a way to pass instructions to `machinery` when parsing regular
+  compose YAML project files, as if these files had been pointed at by the
+  indirection   YAML format. The argument to `-options` should be a
+  `,`-separated string where each token should take the form of `k=v` and
+  where `k` is the name of a YAML indirection directive, such as
+  `substitution` or `project` and where `v` is the overriding value. 
 
 #### token
 

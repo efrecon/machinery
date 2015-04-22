@@ -417,7 +417,7 @@ proc ::cluster::init { vm {steps {registries images compose}} } {
 }
 
 
-proc ::cluster::swarm { master op fpath } {
+proc ::cluster::swarm { master op fpath {opts {}}} {
     # Make sure we resolve in proper directory.
     if { [dict exists $master origin] } {
         set dirname [file dirname [dict get $master origin]]
@@ -437,7 +437,24 @@ proc ::cluster::swarm { master op fpath } {
             compose $master $op 1 $pinfo
         } else {
             log INFO "Scheduling compose project $fpath in cluster"
-            Project $fpath $op 1
+            set substitution 1
+            set projname ""
+            set options {}
+            foreach {k v} $opts {
+                switch -nocase -- $k {
+                    "substitution" {
+                        set substitution [string is true $v]
+                    }
+                    "project" {
+                        set projname $v
+                    }
+                    "options" {
+                        set options $v
+                    }
+                }
+            }
+            Attach $master 1
+            Project $fpath $op $substitution $projname $options
         }
     } else {
         log WARN "Project file at $fpath does not exist!"
