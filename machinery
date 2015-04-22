@@ -85,7 +85,7 @@ foreach {arg val dsc} $prg_args {
     set CRT($arg) $val
 }
 array set CRT {
-    version     0.3
+    version     0.4.1
 }
 
 # Did we request for help? Output and goodbye
@@ -204,19 +204,41 @@ switch -nocase -- $cmd {
 	}
     }
     "swarm" {
-	# TODO: If there is one or several arguments after the
-	# command, these should be compose project files to start up.
-	# The files are substituted, so we get discovery to work
-	# properly and they can use environment commands to schedule
-	# on specific machines.
-	# ALT: one YAML file that references compose project files?
 	set cluster [init]
 	if { [llength $argv] == 0 } {
 	    swarm info $cluster
 	} else {
 	    set master [swarm master $cluster]
+            
+            # Get arguments from the command line and convert these to
+            # operations that we can give away to swarm command below.
+            # The operations are ORDERED so we can write -stop -kill
+            # -rm -up for example.
+            set operations {}
+            if { [cluster getopt argv -stop] } {
+                lappend operations STOP
+            }
+            if { [cluster getopt argv -kill] } {
+                lappend operations KILL
+            }
+            if { [cluster getopt argv -rm] } {
+                lappend operations RM
+            }
+            if { [cluster getopt argv -up] } {
+                lappend operations UP
+            }
+            if { [cluster getopt argv -start] } {
+                lappend operations START
+            }
+            if { [llength $operations] == 0 } {
+                # Nothing means up!
+                lappend operations UP
+            }
+
 	    foreach fpath $argv {
-		cluster swarm $master $fpath
+                foreach op $operations {
+                    cluster swarm $master $op $fpath
+                }
 	    }
 	}
     }

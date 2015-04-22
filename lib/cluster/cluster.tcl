@@ -412,12 +412,12 @@ proc ::cluster::init { vm {steps {registries images compose}} } {
     # description of the discovery status in the form of
     # environment variables.
     if { [lsearch -nocase $steps compose] >= 0 } {
-        compose $vm
+        compose $vm UP
     }
 }
 
 
-proc ::cluster::swarm { master fpath } {
+proc ::cluster::swarm { master op fpath } {
     # Make sure we resolve in proper directory.
     if { [dict exists $master origin] } {
         set dirname [file dirname [dict get $master origin]]
@@ -434,10 +434,10 @@ proc ::cluster::swarm { master fpath } {
         set first [lindex $pinfo 0]
         if { [dict exists $first file] } {
             log INFO "Scheduling compose projects pointed by $fpath in cluster"
-            compose $master 1 $pinfo
+            compose $master $op 1 $pinfo
         } else {
             log INFO "Scheduling compose project $fpath in cluster"
-            Project $fpath 1
+            Project $fpath $op 1
         }
     } else {
         log WARN "Project file at $fpath does not exist!"
@@ -456,8 +456,9 @@ proc ::cluster::swarm { master fpath } {
 #       true to perform substitution.
 #
 # Arguments:
-#        vm        Dictionary description of machine (must be bound to live state)
-#        projects        List of projects, empty to take from vm.
+#        vm        Dictionary description of machine (must be bound to
+#                  live state)
+#        projects  List of projects, empty to take from vm.
 #
 # Results:
 #       Return the list of compose files that were effectively run and
@@ -465,12 +466,12 @@ proc ::cluster::swarm { master fpath } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::compose { vm {swarm 0} { projects {} } } {
+proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
     # Get projects, either from parameters (overriding the VM object) or
     # from vm object.
     if { [string length $projects] == 0 } {
         if { ![dict exists $vm -compose] } {
-            return
+            return {}
         }
         set projects [dict get $vm -compose]
     }
@@ -503,7 +504,13 @@ proc ::cluster::compose { vm {swarm 0} { projects {} } } {
             }
             set fpath [file normalize $fpath]
             if { [file exists $fpath] } {
-                log NOTICE "Starting up components from $fpath in $nm"
+                set descr [string map \
+                               [list "UP" "Creating and starting up" \
+                                    "KILL" "Killing" \
+                                    "STOP" "Stopping" \
+                                    "START" "Starting" \
+                                    "RM" "Removing"] [string toupper $op]]
+                log NOTICE "$descr components from $fpath in $nm"
                 set substitution 0
                 if { [dict exists $project substitution] } {
                     set substitution \
@@ -517,7 +524,10 @@ proc ::cluster::compose { vm {swarm 0} { projects {} } } {
                 if { [dict exists $project project] } {
                     set projname [dict get $project project]
                 }
-                Project $fpath $substitution $projname $options
+                set parsed [Project $fpath $op $substitution $projname $options]
+                if { $parsed ne "" } {
+                    lappend composed $parsed
+                }
             } else {
                 log WARN "Cannot find compose file at $fpath"
             }
@@ -827,12 +837,12 @@ proc ::cluster::shares { vm { shares {}} } {
                 if { $uid eq "" } {
                     Machine ssh $nm "sudo mkdir -p $mchn"
                     Machine ssh $nm \
-                        "sudo mount -t vboxsf -o uid=$uid $share $mchn"
+                        "sudo mount -t vboxsf -v -o uid=$uid $share $mchn"
                 } else {
                     Machine ssh $nm "sudo mkdir -p $mchn"
                     Machine ssh $nm "sudo chown $uid $mchn"
                     Machine ssh $nm \
-                        "sudo mount -t vboxsf -o uid=$uid $share $mchn"
+                        "sudo mount -t vboxsf -v -o uid=$uid $share $mchn"
                 }
             }
         }
@@ -1689,7 +1699,14 @@ proc ::cluster::Ports { pspec } {
 }
 
 
-proc ::cluster::Project { fpath {substitution 0} {project ""} {options {}}} {
+proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
+    set composed ""
+
+    if { [string toupper $op] ni {START STOP KILL RM UP} } {
+        log WARM "Operation should be one of [join {START STOP KILL RM UP} ,]"
+        return $composed
+    }
+
     # Change dir to solve relative access to env files.  This is ugly,
     # but there does not seem to be any other solution at this point
     # for compose < 1.2
@@ -1796,25 +1813,35 @@ proc ::cluster::Project { fpath {substitution 0} {project ""} {options {}}} {
         # Arrange for compose to pick up the temporary
         # file, but still use the proper project name.
         set cmd [list Compose -stderr -- \
-                     --file $tmp_fpath --project-name $project \
-                     up -d]
-        lappend composed $tmp_fpath
+                     --file $tmp_fpath --project-name $project]
+        set composed $tmp_fpath
     } else {
         if { $project eq "" } {
-            set cmd [list Compose -stderr -- --file $fpath up -d]
+            set cmd [list Compose -stderr -- --file $fpath]
         } else {
             set cmd [list Compose -stderr -- \
-                         --file $fpath --project-name $project \
-                         up -d]
+                         --file $fpath --project-name $project]
         }
-        lappend composed $fpath
+        set composed $fpath
     }
-    # Blindly add compose options if we had some.
-    foreach o $options {
-        lappend cmd $o
+
+    # Finalise command
+    lappend cmd [string tolower $op]
+    switch -nocase -- $op {
+        "UP" {
+            lappend cmd -d
+            # Blindly add compose options if we had some.
+            foreach o $options {
+                lappend cmd $o
+            }
+        }
+        "RM" {
+            lappend cmd --force
+        }
     }
-    # Run compose and return to the main directory at
-    # once for older versions of compose
+
+    # Run compose command that we have built up and return to the main
+    # directory at once for older versions of compose
     eval $cmd
     if { [vcompare lt [Version compose] 1.2] } {
         cd $maindir
@@ -1828,6 +1855,8 @@ proc ::cluster::Project { fpath {substitution 0} {project ""} {options {}}} {
             file delete -force -- $tmp_fpath
         }
     }
+
+    return $composed
 }
 
 

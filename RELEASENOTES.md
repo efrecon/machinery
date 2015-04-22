@@ -1,6 +1,15 @@
 # Release Notes
 
-## v 0.4
+## v 0.4.1
+
+* Added support for passing docker-compose commands when swarming in
+  project files: -kill, -start, -rm, etc.
+
+* Fixed output bug so we get (again!) a list of running components
+  once compose operations have ended.
+
+
+## v 0.4 (never released)
 
 * Added support for substitution of (local) environment variables as a
   workaround for this

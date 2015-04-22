@@ -8,13 +8,13 @@ or remove them at will. In short, `machinery` is to `docker-machine` what
 Swarm](https://docs.docker.com/swarm/) and
 [Compose](https://docs.docker.com/compose/) integration. It will automatically
 arrange for the created virtual machines to join the swarm cluster, generate the
-token as needed or even schedule several compose projects to be run on the
-cluster. `machinery` can automatically bring up specific project files onto
-machines that it controls. `machinery` is able to substitute the value of local
-environment variables in the compose project files before bringing the
-components up.  Together with conventions for the dynamic construction of
-network-related environment variables, this provides for a simple mechanism for
-service discovery.
+token as needed or even manage the life-cycle of several compose projects to be
+run on the cluster. `machinery` can automatically bring up specific project
+files onto machines that it controls. `machinery` is able to substitute the
+value of local environment variables in the compose project files before
+bringing the components up.  Together with conventions for the dynamic
+construction of network-related environment variables, this provides for a
+simple mechanism for service discovery.
 
 In short `machinery` provides you with an at-a-glance view of your whole
 cluster, from all the (virtual) machines that build it up, to all the components
@@ -66,10 +66,15 @@ then destroy it.
 
     machinery destroy db
 
+If you had a YAML compose project description file called `myapp.yml` describing
+the components to run on your cluster, you could schedule it for execution by
+calling:
+
+    machinery swarm myapp.yml
+
 Do you want to try for yourself at once? Jump to the bottom of this
 documentation and read and try the example section.  You might want to
-download a "compiled" [linux
-binary](https://github.com/efrecon/machinery/releases/download/v0.3/machinery-0.3-linux-x86_64)
+download a "compiled" [binary](https://github.com/efrecon/machinery/releases)
 to avoid solving dependencies.
 
 ## Operating on the cluster
@@ -132,6 +137,29 @@ recognises automatically two kinds of YAML files:
 * `machinery` also recognises list of indirections to compose project files.
   These have exactly the same syntax as the [`compose` keys](#compose) of the
   regular YAML syntax.
+
+`swarm` also takes a number of options that should appear before its arguments.
+These specify what `docker-compose` operations will be executed on the specified
+files.  You can specify several options in a row, for example to restart
+components.  The supported options:
+
+* `-stop` matches the [`stop`](http://docs.docker.com/compose/cli/#stop) command
+  of `compose` and will stop the components.
+
+* `-kill` matches the [`kill`](http://docs.docker.com/compose/cli/#kill) command
+  of `compose` and will kill the components.
+
+* `-rm` matches the [`rm`](http://docs.docker.com/compose/cli/#rm) command
+  of `compose` and will remove the components without asking at the prompt.
+
+* `-start` matches the [`start`](http://docs.docker.com/compose/cli/#start) command
+  of `compose` and will start stopped components.
+
+* `-up` is the default when nothing is specified.  It matches the
+  [`up`](http://docs.docker.com/compose/cli/#up) command of `compose` and
+  will create and start the components in the background.  Additional option
+  can be provided through the YAML syntax of indirecting files.
+
 
 #### token
 
