@@ -8,6 +8,13 @@
 * Added possibility to pass project name or substitution instructions to YAML
   compose files being swarmed into the cluster.
 
+* Fixed bug so that `.env` files pointed by project files that should be
+  substituted will also be substituted and will be found by the project file
+  when running compose.
+
+* Fixed bug where compose projects would not be properly resolved when started
+  using `swarm`.
+  
 
 ## v 0.4.1
 

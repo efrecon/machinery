@@ -426,6 +426,7 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
     }
     set fpath [file normalize $fpath]
 
+    EnvSet $master;    # Pass environment to composition.
     if { [file exists $fpath] } {
         log NOTICE "Reading projects from $fpath"
         set pinfo [::yaml::yaml2dict -file $fpath]
@@ -495,15 +496,7 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
 
     # Pass the discovery variables to compose in case they were needed
     # there...
-    if { [dict exists $vm origin] } {
-        set environment \
-            [EnvRead [CacheFile [dict get $vm origin] ${vars::-ext}]]
-        dict for {k v} $environment {
-            set ::env($k) $v
-        }
-    } else {
-        set environment {}
-    }
+    EnvSet $vm
 
     set nm [dict get $vm -name]
     Attach $vm $swarm
@@ -1752,6 +1745,9 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
             if { [dict exists $p extends] && [dict exists $p extends file] } {
                 lappend associated [dict get $p extends file]
             }
+	    if { [dict exists $p env_file] } {
+		lappend associated [dict get $p env_file]
+	    }
         }
 
         # Resolve the associated files, i.e. the one that the YAML
@@ -1763,8 +1759,9 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
             set src_path [file normalize [file join [file dirname $fpath] $f]]
             if { [file exists $src_path] } {
                 set rootname [file rootname [file tail $f]]
+		set ext [file extension $f]
                 set tmp_fpath [Temporary \
-                                   [file join ${vars::-tmp} $rootname]].yml
+                                   [file join ${vars::-tmp} $rootname]]$ext
                 log INFO "Copying a resolved version of $src_path to\
                           $tmp_fpath"
                 set in_fd [open $src_path]
@@ -1785,31 +1782,31 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
         # reference to the temporary file resolved just above
         set i 0
         foreach {f dst} $included {
-            # Replace and count replacements.
-            set count 0
-            while 1 {
-                set i [string first $f $yaml $i]
-                if { $i < 0 } {
-                    # Nothing left to be found, done!
-                    break
-                } else {
-                    # We've found a occurence of the filename, we
-                    # replace if we can find a preceeding file:
-                    # otherwise, we just advance.
-                    set extender [string last "file:" $yaml $i]
-                    if { $extender >= 0 } {
-                        set j [expr {$i+[string length $f]-1}]
-                        set yaml [string replace $yaml $i $j $dst]
-                        # Advance to next possible, account for
-                        # length of replacement.
-                        incr i [expr {[string length $dst]-1}];
-                        incr count 1
-                    } else {
-                        incr i [expr {[string length $f]-1}]
-                    }
-                }
-            }
-            log DEBUG "Replaced $count occurrences of $f in source YAML"
+	    # Replace and count replacements.
+	    set count 0
+	    while 1 {
+		set i [string first $f $yaml $i]
+		if { $i < 0 } {
+		    # Nothing left to be found, done!
+		    break
+		} else {
+		    # We've found a occurence of the filename, we
+		    # replace if we can find a preceeding file:
+		    # otherwise, we just advance.
+		    set extender [string last "file:" $yaml $i]
+		    if { $extender >= 0 } {
+			set j [expr {$i+[string length $f]-1}]
+			set yaml [string replace $yaml $i $j $dst]
+			# Advance to next possible, account for
+			# length of replacement.
+			incr i [expr {[string length $dst]-1}];
+			incr count 1
+		    } else {
+			incr i [expr {[string length $f]-1}]
+		    }
+		}
+	    }
+	    log DEBUG "Replaced $count occurrences of $f in source YAML"
         }
 
         # Copy resolved result to temporary file
@@ -2157,6 +2154,34 @@ proc ::cluster::Discovery { vm } {
         return $environment
     }
     return {}
+}
+
+
+# ::cluster::EnvSet -- Set environement
+#
+#       Set the (discovery) environment based on the origin of a
+#       virtual machine.
+#
+# Arguments:
+#	vm	Virtual machine description
+#
+# Results:
+#       Return the full dictionary of what was set, empty dict on errors.
+#
+# Side Effects:
+#       Changes the ::env global array, which will be passed to sub-processes.
+proc ::cluster::EnvSet { vm } {
+    if { [dict exists $vm origin] } {
+        set environment \
+            [EnvRead [CacheFile [dict get $vm origin] ${vars::-ext}]]
+        dict for {k v} $environment {
+            set ::env($k) $v
+        }
+    } else {
+        set environment {}
+    }
+
+    return $environment
 }
 
 

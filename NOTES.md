@@ -16,3 +16,7 @@ To make a release, you should do the following:
 * Use docker save (locally on the host), scp and docker load on the
   guest to skip slow downloads and use the local cache of docker
   images whenever possible.
+
+* Sort out `docker login` properly, by default docker `compose` starts the
+  components in the cluster as `root`, so maybe should we simply `sudo docker
+  login`?
