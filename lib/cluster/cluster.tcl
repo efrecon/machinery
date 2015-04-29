@@ -32,7 +32,7 @@ namespace eval ::cluster {
         variable -separator "-"
         # Allowed VM keys
         variable -keys      {cpu size memory master labels driver options \
-                                 ports shares images compose registries}
+                                 ports shares images compose registries aliases}
         # Path to docker executables
         variable -machine   docker-machine
         variable -docker    docker
@@ -51,6 +51,8 @@ namespace eval ::cluster {
         variable -date      "%Y%m%d %H%M%S"
         # Temporary directory
         variable -tmp       "/tmp"
+	# Environement variable prefix
+	variable -prefix    "MACHINERY_"
         # name of VM that we are attached to
         variable attached   ""
         # version numbers for our tools (on demand)
@@ -284,6 +286,15 @@ proc ::cluster::find { cluster name } {
                 return $vm
             }
         }
+
+	# Lookup by the aliases for a VM
+	if { [dict exists $vm -aliases] } {
+	    foreach nm [dict get $vm -aliases] {
+		if { $name eq $nm } {
+		    return $vm
+		}
+	    }
+	}
     }
     return {}
 }
@@ -544,8 +555,9 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
         }
     }
 
-    # Clean away environment to avoid pollution.
-    dict for {k v} $environment {
+    # Clean up environment to avoid pollution.
+    log DEBUG "Cleaning environment from ${vars::-prefix} prefixed variables"
+    foreach k [array names ::env [string trimright ${vars::-prefix} "_"]_*] {
         unset ::env($k)
     }
 
@@ -989,10 +1001,9 @@ proc ::cluster::pull { vm {images {}} } {
     set nm [dict get $vm -name]
     log NOTICE "Pulling images in $nm: $images..."
     if { [llength $images] > 0 } {
-        Attach $vm
         foreach img $images {
             log INFO "Pulling $img in $nm..."
-            Docker pull $img
+            Machine ssh $nm "docker pull $img"
         }
     }
 }
@@ -2103,19 +2114,27 @@ proc ::cluster::InterfaceLine { l } {
 #       None.
 proc ::cluster::Discovery { vm } {
     set nm [dict get $vm -name]
-    set pfx "MACHINERY_[string map [list - _] [string toupper $nm]]"
+    set pfx [string trimright ${vars::-prefix} "_"]_; # Force ending _ on prefix
+    set prefixes [list $pfx[string map [list - _] [string toupper $nm]]]
+    if { [dict exists $vm -aliases] } {
+	foreach alias [dict get $vm -aliases] {
+	    lappend prefixes $pfx[string map [list - _] [string toupper $alias]]
+	}
+    }
     if { [dict exists $vm origin] } {
         # Get current discovery values for this machine from the cache.
         set env_path [CacheFile [dict get $vm origin] ${vars::-ext}]
         set environment [EnvRead $env_path]
 
-        # Remove all keys that are associated to this machine's name,
-        # we are going to override (or won't have any if it was
-        # stopped!)
+        # Remove all keys that are associated to this machine's name
+        # and aliases, we are going to override (or won't have any if
+        # it was stopped!)
         dict for {k v} $environment {
-            if { [string first $pfx $k] == 0 } {
-                dict unset environment $k
-            }
+	    foreach pfx $prefixes {
+		if { [string first $pfx $k] == 0 } {
+		    dict unset environment $k
+		}
+	    }
         }
 
         # If the machine is running, go get all information we can
@@ -2125,24 +2144,28 @@ proc ::cluster::Discovery { vm } {
             # Get complete network interface description (except the
             # virtual interfaces)
             foreach itf [Interfaces $vm] {
-                set k ${pfx}_[string toupper [dict get $itf interface]]
-                if { [dict exists $itf inet] } {
-                    log DEBUG "inet addr for [dict get $itf interface]\
-                               is [dict get $itf inet]"
-                    dict set environment ${k}_INET [dict get $itf inet]
-                }
-                if { [dict exists $itf inet6] } {
-                    log DEBUG "inet6 addr for [dict get $itf interface]\
-                               is [dict get $itf inet6]"
-                    dict set environment ${k}_INET6 [dict get $itf inet6]
-                }
+		foreach pfx $prefixes {
+		    set k ${pfx}_[string toupper [dict get $itf interface]]
+		    if { [dict exists $itf inet] } {
+			log DEBUG "inet addr for [dict get $itf interface]\
+                                   is [dict get $itf inet]"
+			dict set environment ${k}_INET [dict get $itf inet]
+		    }
+		    if { [dict exists $itf inet6] } {
+			log DEBUG "inet6 addr for [dict get $itf interface]\
+                                   is [dict get $itf inet6]"
+			dict set environment ${k}_INET6 [dict get $itf inet6]
+		    }
+		}
             }
             # Add the official IP address, as this is what will be
             # usefull most of the time.
             set ip [lindex [Machine -return -- ip $nm] 0]
             if { $ip ne "" \
                      && [regexp {\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}} $ip] } {
-                dict set environment ${pfx}_IP $ip
+		foreach pfx $prefixes {
+		    dict set environment ${pfx}_IP $ip
+		}
             }
         }
 

@@ -14,6 +14,14 @@
 
 * Fixed bug where compose projects would not be properly resolved when started
   using `swarm`.
+
+* (Finally?) fixing login/pull bug so `machinery` will now be able to
+  properly download from private repositories.
+
+* Adding support for aliases, a new key called `aliases` under the VM
+  dictionary in the YAML file.  This should be a list of names that
+  can also be used to point at the machine from the command line, but
+  will also appear in the discovery mechanisms.
   
 
 ## v 0.4.1
