@@ -1,3 +1,15 @@
+##################
+## Module Name     --  cluster::vcompare
+## Original Author --  Emmanuel Frecon - emmanuel@sics.se
+## Description:
+##
+##      Provides facilities to compare version number.  This supports
+##      semantic versioning, but will not handle numbers where the
+##      dash sign is used to separate the main version number from a
+##      release (alpha, beta, etc.) specification.
+##
+##################
+
 namespace eval ::cluster::vcompare {
     namespace eval vars {
         variable -depth   8

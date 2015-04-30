@@ -88,7 +88,7 @@ foreach {arg val dsc} $prg_args {
     set CRT($arg) $val
 }
 array set CRT {
-    version     0.4.2
+    version     0.5
 }
 
 # Did we request for help? Output and goodbye

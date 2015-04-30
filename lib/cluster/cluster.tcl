@@ -59,6 +59,8 @@ namespace eval ::cluster {
 	variable -prefix    "MACHINERY_"
 	# Path of docker daemon init script
 	variable -daemon    "/etc/init.d/docker"
+	# Path where PID files are stored
+	variable -run       "/var/run"
         # name of VM that we are attached to
         variable attached   ""
         # version numbers for our tools (on demand)
@@ -69,6 +71,21 @@ namespace eval ::cluster {
     namespace export {[a-z]*}
     namespace ensemble create
 }
+
+## TODO/Ideas
+#
+# Break out the Env* procedures to a separate module.  This makes some
+# sort of sense as they are at least used in two different places.
+#
+# Break out all the interfaces to (remote) UNIX tools in a separate
+# package as these have a high degree of genericity attached to them.
+# How do we break away from the leading 'Machine ssh' though?
+#
+# Start using the TRACE level of verbosity and migrate some of the
+# DEBUG to trace.  When in TRACE, we should force debug on docker and
+# its friends, not when in debug. That would keep debug to what
+# happens in the program itself.
+
 
 
 # ::cluster::defaults -- Set default parameters
@@ -2664,6 +2681,23 @@ proc ::cluster::Version { tool } {
 }
 
 
+# ::cluster::Mounted -- Return the list of mount points on remote machine
+#
+#       Actively poll a remote machine for its active mount points and
+#       return a description of these.  This is basically an interface
+#       to the UNIX command "mount" (sans arguments!).  This returns a
+#       list where the mounts are described with: first the device,
+#       then the directory where it is mounted, then its type, and
+#       finally a list of the mount options.
+#
+# Arguments:
+#	vm	Virtual machine description
+#
+# Results:
+#       Return a list of the mount points.
+#
+# Side Effects:
+#       None.
 proc ::cluster::Mounted { vm } {
     set nm [dict get $vm -name]
     log DEBUG "Detecting mounts on $nm..."
@@ -2743,6 +2777,9 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 10 } } {
         set machines [ls $nm]
         if { [llength $machines] == 1 } {
             set mchn [lindex $machines 0]
+	    # If we have a state in the dictionary, match it against
+	    # the ones that we should stop at and, in that case,
+	    # return.
             if { [dict exists $mchn state] } {
                 foreach s $states {
                     if { [string equal -nocase [dict get $mchn state] $s] } {
@@ -2752,6 +2789,7 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 10 } } {
                 }
             }
         }
+	# Go on trying, this accepts floating number of seconds...
         incr retries -1;
         if { $retries > 0 } {
             log INFO "Still waiting for machine $nm to reach proper state..."
@@ -2763,6 +2801,25 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 10 } } {
 }
 
 
+# ::cluster::DockerUp -- Make sure the docker daemon is up and running
+#
+#       Check that the remote docker daemon is actually up and running
+#       and attempt (a finite number of times) to start it if it was
+#       not.  When starting up the daemon, this assumes that there is
+#       an init.d script available and that it is called docker.
+#
+# Arguments:
+#	vm	Virtual machine description
+#	cmd	(sub)command to give to init.d script
+#	force	Force sending the sub-command, even if daemon was running.
+#	sleep	Number of seconds to sleep after we've started
+#	retries	Number of times to try, negative for global retry amount.
+#
+# Results:
+#       1 if docker daemon is running remotely, 0 otherwise.
+#
+# Side Effects:
+#       None.
 proc ::cluster::DockerUp { vm {cmd "start"} {force 0} {sleep 1} {retries 5} } {
     set nm [dict get $vm -name]
     if { $retries < 0 } {
@@ -2786,16 +2843,34 @@ proc ::cluster::DockerUp { vm {cmd "start"} {force 0} {sleep 1} {retries 5} } {
 }
 
 
+# ::cluster::DockerPID -- Process identifier of remote docker daemon
+#
+#       Actively fetch and verify the process identifier of a remote
+#       docker daemon in one of the cluster machines.  This will look
+#       in the /var/run directory and check that there really is a
+#       running process for the PID that existed in /var/run.
+#
+# Arguments:
+#	vm	Virtual machine description
+#
+# Results:
+#       Return the PID of the remote docker daemon, -1 on errors (not found)
+#
+# Side Effects:
+#       None.
 proc ::cluster::DockerPID { vm } {
     set nm [dict get $vm -name]
-    # Look for pid file
+    # Look for pid file in /var/run
+    set rundir [string trimright ${vars::-run} "/"]
     set pidfile ""
-    foreach l [Machine -return -- ssh $nm "ls -1 /var/run/*.pid"] {
-	if { [string match "/var/run/docker*" $l] } {
+    foreach l [Machine -return -- ssh $nm "ls -1 ${rundir}/*.pid"] {
+	if { [string match "${rundir}/docker*" $l] } {
 	    set pidfile $l
 	}
     }
 
+    # If we have a PID file, make sure there is a process that is
+    # running at that PID (should we check it's really docker?)
     if { $pidfile ne "" } {
 	set docker [lindex [Machine -return -- ssh $nm "cat $pidfile"] 0]
 	foreach {pid cmd args} [Processes $vm] {
@@ -2804,6 +2879,7 @@ proc ::cluster::DockerPID { vm } {
 	    }
 	}
     }
+
     return -1
 }
 
