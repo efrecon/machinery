@@ -39,10 +39,12 @@ namespace eval ::cluster {
         variable -compose   docker-compose
         # Current verbosity level
         variable -verbose   NOTICE
+	# Locally cache images?
+	variable -cache     on
         # Location of boot2docker profile
         variable -profile   /var/lib/boot2docker/profile
         # Mapping from integer to string representation of verbosity levels
-        variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG}
+        variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG 7 TRACE}
         # Extension for env storage cache files
         variable -ext       .env
         # File descriptor to dump log messages to
@@ -51,8 +53,12 @@ namespace eval ::cluster {
         variable -date      "%Y%m%d %H%M%S"
         # Temporary directory
         variable -tmp       "/tmp"
+	# Default number of retries when polling
+	variable -retries   3
 	# Environement variable prefix
 	variable -prefix    "MACHINERY_"
+	# Path of docker daemon init script
+	variable -daemon    "/etc/init.d/docker"
         # name of VM that we are attached to
         variable attached   ""
         # version numbers for our tools (on demand)
@@ -272,30 +278,20 @@ proc ::cluster::names { cluster } {
 #       None.
 proc ::cluster::find { cluster name } {
     foreach vm $cluster {
-        set nm [dict get $vm -name]
-        # Lookup with proper name
-        if { $name eq $nm } {
-            return $vm
-        }
-        # Lookup the separator separating the prefix from the machine
-        # name and match on the name.
-        set sep [string first ${vars::-separator} $nm]
-        if { $sep >= 0 } {
-            incr sep [string length ${vars::-separator}]
-            if { [string range $nm $sep end] eq $name } {
-                return $vm
-            }
-        }
+	if { [NameEq $name [dict get $vm -name]] } {
+	    return $vm
+	}
 
 	# Lookup by the aliases for a VM
 	if { [dict exists $vm -aliases] } {
 	    foreach nm [dict get $vm -aliases] {
-		if { $name eq $nm } {
+		if { [NameEq $name $nm] } {
 		    return $vm
 		}
 	    }
 	}
     }
+
     return {}
 }
 
@@ -377,26 +373,35 @@ proc ::cluster::create { vm token } {
     set nm [Create $vm $token]
 
     if { $nm ne "" } {
-        # Tag virtual machine with labels.
-        tag $vm
+        if { [Wait $vm] eq "running" } {
+            # Tag virtual machine with labels.
+            tag $vm
 
-        # Open the ports and creates the shares
-        set vm [bind $vm]
-        ports $vm
-        shares $vm
+            # Open the ports and creates the shares
+            set vm [bind $vm]
+            ports $vm
+            shares $vm
 
-        # Test that machine is properly working by echoing its name
-        # using a busybox component and checking we get that name
-        # back.
-        log DEBUG "Testing that machine $vm has a working docker via busybox"
-        Attach $vm
-        if { [Docker -return -- run --rm busybox echo $nm] eq "$nm" } {
-            log INFO "Docker setup properly on $nm"
+            # Test that machine is properly working by echoing its
+            # name using a busybox component and checking we get that
+            # name back.
+	    if { [DockerUp $vm] } {
+		log DEBUG "Testing that machine $vm has a working docker\
+                           via busybox"
+		Attach $vm
+		if { [Docker -return -- run --rm busybox echo $nm] eq "$nm" } {
+		    log INFO "Docker setup properly on $nm"
+		} else {
+		    log ERROR "Cannot test docker for $nm, check manually!"
+		}
+
+		init $vm
+	    } else {
+		log WARN "No docker daemon running on $nm!"
+	    }
         } else {
-            log ERROR "Cannot test docker for $nm, check manually!"
+            log ERROR "Could not create VM $nm properly"
         }
-
-        init $vm
     }
 
     return $nm
@@ -409,6 +414,7 @@ proc ::cluster::init { vm {steps {registries images compose}} } {
     # including the most important one (e.g. the one returned by
     # docker-machine ip) as environment variable declaration in a
     # file.
+    set vm [bind $vm]
     Discovery $vm
 
     # Now pull images if any
@@ -416,7 +422,7 @@ proc ::cluster::init { vm {steps {registries images compose}} } {
         login $vm
     }
     if { [lsearch -nocase $steps images] >= 0 } {
-        pull $vm
+        pull $vm 1
     }
 
     # And iteratively run compose.  Compose will get the complete
@@ -784,16 +790,18 @@ proc ::cluster::ports { vm { ports {}} } {
 #
 # Arguments:
 #        vm        Virtual machine description dictionary
-#        shares        List of share mounts, empty to use the list from the
-#               VM description
+#        shares    List of share mounts, empty to use the list from the
+#                  VM description
+#        sleep     Number of seconds to wait between mount attempts
+#        retries   Number of times to attempt each mount
 #
 # Results:
-#       None.
+#       The list of directories that were successfully mounted.
 #
 # Side Effects:
 #       Will use the Virtual box commands to request for port
 #       forwarding.
-proc ::cluster::shares { vm { shares {}} } {
+proc ::cluster::shares { vm { shares {}} {sleep 1} {mretries 5}} {
     # Get shares, either from parameters (overriding the VM object) or
     # from vm object.
     if { [string length $shares] == 0 } {
@@ -807,6 +815,7 @@ proc ::cluster::shares { vm { shares {}} } {
     # shares to two shares (the same) and append all these pairs to
     # the list called opening.  Arrange for the list to only contain
     # resolved shares as we allow for environment variable resolution
+    set mounted {}
     set opening {}
     foreach spec $shares {
         set spec [Shares $spec];   # Extraction and syntax check
@@ -820,6 +829,9 @@ proc ::cluster::shares { vm { shares {}} } {
     set nm [dict get $vm -name]
     log NOTICE "Mounting [expr {[llength $opening]/2}] share(s) for $nm..."
 
+    if { $mretries < 0 } {
+        set mretries ${vars::-retries}
+    }
     switch [dict get $vm -driver] {
         "virtualbox" {
             # Add shares as necessary.  This might halt the virtual
@@ -838,7 +850,10 @@ proc ::cluster::shares { vm { shares {}} } {
             # Now start virtual machine as we will be manipulating the
             # runtime state of the machine.  This should only starts
             # the machines if it is not running already.
-            start $vm
+            if { ![start $vm] } {
+                log WARN "Could not start machine to perform mounts!"
+                return $mounted
+            }
 
             # Find out id of main user on virtual machine to be able
             # to mount shares under that UID.
@@ -847,31 +862,51 @@ proc ::cluster::shares { vm { shares {}} } {
             set uid ""
             if { [dict exists $idinfo uid] } {
                 if { [regexp {\d+} [dict get $idinfo uid] uid] } {
-                    log DEBUG "User identifier in machine is $uid"
+                    log DEBUG "User identifier in machine $nm is $uid"
                 }
             }
 
             # And arrange for the destination directories to exist
             # within the guest and perform the mount.
             foreach {host mchn share} $sharing {
-                log INFO "Mounting $host onto ${nm}:${mchn}"
-                # Make the directory
-                if { $uid eq "" } {
-                    Machine ssh $nm "sudo mkdir -p $mchn"
-                    Machine ssh $nm \
-                        "sudo mount -t vboxsf -v -o uid=$uid $share $mchn"
-                } else {
-                    Machine ssh $nm "sudo mkdir -p $mchn"
-                    Machine ssh $nm "sudo chown $uid $mchn"
-                    Machine ssh $nm \
-                        "sudo mount -t vboxsf -v -o uid=$uid $share $mchn"
-                }
+		set retries $mretries
+		while { $retries > 0 } {
+		    # Make the directory
+		    if { $uid eq "" } {
+			log INFO "Mounting $host onto ${nm}:${mchn}"
+			Machine ssh $nm "sudo mkdir -p $mchn"
+			Machine ssh $nm \
+			    "sudo mount -t vboxsf -v -o uid=$uid $share $mchn"
+		    } else {
+			log INFO "Mounting $host onto ${nm}:${mchn} as UID:$uid"
+			Machine ssh $nm "sudo mkdir -p $mchn"
+			Machine ssh $nm "sudo chown $uid $mchn"
+			Machine ssh $nm \
+			    "sudo mount -t vboxsf -v -o uid=$uid $share $mchn"
+		    }
+		    # Test that we managed to mount properly.
+		    foreach { dev dst type opts } [Mounted $vm] {
+			if { $dst eq $mchn && $type eq "vboxsf" } {
+			    set retries 0;    # We'll get off the loop
+                            lappend mounted $dst
+			    break
+			}
+		    }
+		    incr retries -1;   # ALWAYS! On purpose...
+		    if { $retries > 0 } {
+			log WARN "Could not find $mchn in mount points on $nm,\
+                                  retrying..."
+                        after [expr {int($sleep*1000)}]
+		    }
+		}
             }
         }
         default {
             log WARN "Cannot mount shares with driver [dict get $vm -driver]"
         }
     }
+
+    return $mounted
 }
 
 
@@ -977,18 +1012,25 @@ proc ::cluster::login { vm {regs {}} } {
 # ::cluster::pull -- Pull one or several images
 #
 #       Attach to the virtual machine given as a parameter and pull
-#       one or several images.
+#       one or several images.  This respect the global -cache option.
+#       When caching is on, the images are downloaded to the local
+#       host before being snapshotted and transmitted to the virtual
+#       machine for loading.  This has two advantages: 1. it minimises
+#       download times and thus quickens machine initialisation; 2. It
+#       is a security measure as it allows to download from private
+#       repositories and use these images in the virtual machine
+#       without keeping the credentials in the virtual machine.
 #
 # Arguments:
 #        vm        Virtual machine description
-#        images        List of images to pull, empty (default) for the ones from vm
+#        images    List of images to pull, empty (default) for the ones from vm
 #
 # Results:
 #       None.
 #
 # Side Effects:
 #       None.
-proc ::cluster::pull { vm {images {}} } {
+proc ::cluster::pull { vm {cache 0} {images {}} } {
     # Get images, either from parameters (overriding the VM object) or
     # from vm object.
     if { [string length $images] == 0 } {
@@ -999,12 +1041,49 @@ proc ::cluster::pull { vm {images {}} } {
     }
 
     set nm [dict get $vm -name]
-    log NOTICE "Pulling images in $nm: $images..."
-    if { [llength $images] > 0 } {
-        foreach img $images {
-            log INFO "Pulling $img in $nm..."
-            Machine ssh $nm "docker pull $img"
-        }
+    if { [string is true ${vars::-cache}] } {
+	log NOTICE "Pulling images locally and transfering to $nm:\
+                    [join $images {, }]..."
+	if { [llength $images] > 0 } {
+	    # When using the cache, we download the image on the
+	    # localhost (meaning that we should be able to login to
+	    # remote repositories outside of machinery and use this
+	    # credentials here!), create a snapshot of the image using
+	    # docker save, transfer it to the virtual machine with scp
+	    # and then load it there.
+	    foreach img $images {
+		# Detach so we can pull locally!
+		Detach
+		# Pull image locally
+		Docker pull $img
+		# Save it to the local disk
+		set rootname [file rootname [file tail $img]]; # Cheat!...
+		set tmp_fpath [Temporary \
+				   [file join ${vars::-tmp} $rootname]].tar
+		log INFO "Creating local snapshot on $tmp_fpath and\
+                          copying to $nm..."
+		Docker save -o $tmp_fpath $img
+		log DEBUG "Created local snapshot of $img at $tmp_fpath"
+		# Copy the tar to the machine, we use the same path, it's tmp
+		scp $vm $tmp_fpath
+		# Give the tar to docker on the remote machine
+		Attach $vm
+		log DEBUG "Loading $nm:$tmp_fpath into $img at $nm"
+		Docker load -i $tmp_fpath
+		# Cleanup: XXX: also in host!
+		log DEBUG "Cleaning up localhost:$tmp_fpath and $nm:$tmp_fpath"
+		file delete -force -- $tmp_fpath
+		Machine ssh $nm "rm -f $tmp_fpath"
+	    }
+	}
+    } else {
+	log NOTICE "Pulling images in $nm: $images..."
+	if { [llength $images] > 0 } {
+	    foreach img $images {
+		log INFO "Pulling $img in $nm..."
+		Machine ssh $nm "docker pull $img"
+	    }
+	}
     }
 }
 
@@ -1043,15 +1122,31 @@ proc ::cluster::destroy { vm } {
 #        vm        Virtual machine description
 #
 # Results:
-#       None.
+#       1 on start success, 0 otherwise.
 #
 # Side Effects:
 #       None.
-proc ::cluster::start { vm } {
+proc ::cluster::start { vm { sleep 1 } { retries 3 } } {
     set nm [dict get $vm -name]
-    log NOTICE "Bringing up machine $nm..."
-    Machine start $nm
-    Discovery [bind $vm]
+    if { $retries < 0 } {
+        set retries ${vars::-retries}
+    }
+    while { $retries > 0 } {
+        log NOTICE "Bringing up machine $nm..."
+        Machine start $nm
+        set state [Wait $vm [list "running" "stopped" "error"]]
+        if { $state eq "running" } {
+            Discovery [bind $vm]
+            return 1
+        }
+        incr retries -1
+        if { $retries > 0 } {
+            log INFO "Machine $nm could not start, trying again..."
+            after [expr {int($sleep*1000)}]
+        }
+    }
+    log WARN "Could never start $nm!"
+    return 0
 }
 
 
@@ -1098,7 +1193,8 @@ proc ::cluster::parse { fname args } {
         }
 
         # Check validity of keys and insert them as dash-led.  Arrange
-        # for one master only.
+        # for one master only and store fully-qualified aliases for
+        # the machine.
         foreach k [dict keys [dict get $d $m]] {
             if { [lsearch ${vars::-keys} $k] < 0 } {
                 log WARN "In $m, key $k is not recognised!"
@@ -1115,6 +1211,15 @@ proc ::cluster::parse { fname args } {
                         }
                     }
                 }
+		# Automatically prefix the aliases, maybe should we
+		# save the prefix in each VM instead?
+		if { $k eq "aliases" && $pfx ne "" } {
+		    set aliases {}
+		    foreach a [dict get $d $m $k] {
+			lappend aliases ${pfx}${vars::-separator}$a
+		    }
+		    dict set vm -$k $aliases
+		}
             }
         }
 
@@ -1724,7 +1829,8 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     set composed ""
 
     if { [string toupper $op] ni {START STOP KILL RM UP} } {
-        log WARM "Operation should be one of [join {START STOP KILL RM UP} ,]"
+        log WARM "Operation should be one of\
+                  [join {START STOP KILL RM UP} {, }]"
         return $composed
     }
 
@@ -1970,7 +2076,9 @@ proc ::cluster::Interfaces { vm } {
         # whitespaces, while extra information for that interface
         # happens on lines starting with whitespaces.  The code below
         # uses this fact to segragate between interfaces.
-        if { [string index $l 0] ni [list " " "\t"] } {
+	if { [string match -nocase "*Host*not*exist*" $l] } {
+	    break
+        } elseif { [string index $l 0] ni [list " " "\t"] } {
             if { $iface ne "" && ![string match "v*" $iface] } {
                   # We skip interfaces which name starts with v (for
                 # virtual).
@@ -1980,7 +2088,7 @@ proc ::cluster::Interfaces { vm } {
                                         inet6 $inet6]
                 lappend ifs $iface
             }
-            set iface [lindex $l 0]
+            set iface [lindex $l 0];  # Assumes we can form a proper list!
             set inet ""
             set inet6 ""
         } elseif { [string first "addr" $l] >= 0 } {
@@ -2007,7 +2115,9 @@ proc ::cluster::Interfaces { vm } {
     }
 
     # Report back
-    log INFO "Detected network addresses for [join $ifs , ]"
+    if { [llength $ifs] > 0 } {
+        log INFO "Detected network addresses for [join $ifs {, }]"
+    }
     return $interfaces
 }
 
@@ -2233,6 +2343,7 @@ proc ::cluster::EnvRead { fpath } {
         }
         close $fd
     }
+    log DEBUG "Read [join [dict keys $d] {, }] from $fpath"
 
     return $d
 }
@@ -2267,7 +2378,7 @@ proc ::cluster::EnvLine { d_ line } {
 #
 # Arguments:
 #        fpath        Full path to file to write to.
-#        enviro        Environment to write
+#        enviro       Environment to write
 #        quote        Character to quote values containing spaces with
 #
 # Results:
@@ -2276,7 +2387,7 @@ proc ::cluster::EnvLine { d_ line } {
 # Side Effects:
 #       None.
 proc ::cluster::EnvWrite { fpath enviro { quote "\""} } {
-    log DEBUG "Writing [llength [dict keys $enviro]] variable(s) to\
+    log DEBUG "Writing [join [dict keys $enviro] {, }] to\
                description file at $fpath"
     set fd [open $fpath "w"]
     dict for {k v} $enviro {
@@ -2471,6 +2582,40 @@ proc ::cluster::CacheFile { yaml ext } {
 }
 
 
+# ::cluster::NameEq -- Match machine names
+#
+#       This procedure matches if the name of a machine matches a name
+#       that would have been entered on the command line.  This is
+#       aware of the possible prefix.
+#
+# Arguments:
+#	name	Real name of machine
+#	nm	User-entered name
+#
+# Results:
+#       1 if names are equal, 0 otherwise
+#
+# Side Effects:
+#       None.
+proc ::cluster::NameEq { name nm } {
+    # Lookup with proper name
+    if { $name eq $nm } {
+	return 1
+    }
+    # Lookup the separator separating the prefix from the machine name
+    # and match on the name.
+    set sep [string first ${vars::-separator} $nm]
+    if { $sep >= 0 } {
+	incr sep [string length ${vars::-separator}]
+	if { [string range $nm $sep end] eq $name } {
+	    return 1
+	}
+    }
+
+    return 0
+}
+
+
 # ::cluster::VersionQuery -- Version of underlying tools
 #
 #       Query and return the version number of one of the underlying
@@ -2517,5 +2662,190 @@ proc ::cluster::Version { tool } {
     }
     return ""
 }
+
+
+proc ::cluster::Mounted { vm } {
+    set nm [dict get $vm -name]
+    log DEBUG "Detecting mounts on $nm..."
+    set mounts {};
+    # Parse the output of the 'mount' command line by line, we do this
+    # by looking for specific keywords in the string, but we might be
+    # better off using regular expressions?
+    foreach l [Machine -return -- ssh $nm mount] {
+	# Advance to word "on" and isolate the device specification
+	# that should be placed before.
+	set on [string first " on " $l]
+	if { $on >= 0 } {
+	    set dev [string trim [string range $l 0 $on]]
+	    # Advance to the keyword "type" and isolate the path that
+	    # should be between "on" and "type".
+	    set type [string first " type " $l $on]
+	    if { $type >= 0 } {
+		set dst [string trim [string range $l [expr {$on+4}] $type]]
+		# Advance to the parenthesis, this is where the
+		# options will begin.  The type is between the keyword
+		# type and the parenthesis (or the end of the
+		# string/line).
+		set paren [string first " (" $l $type]
+		if { $paren >= 0 } {
+		    set type [string trim \
+                                  [string range $l [expr {$type+6}] $paren]]
+		    set optstr [string trim \
+                                    [string range $l [expr {$paren+2}] end]]
+		    # Remove leading and trailing parenthesis, there
+		    # are the options, separated by coma signs.
+		    set optstr [string trim $optstr "()"]
+		    set opts [split $optstr ","]
+		} else {
+		    set type [string trim \
+                                  [string range $l [expr {$type+6}] end]]
+		    set opts {}
+		}
+		lappend mounts $dev $dst $type $opts
+	    } else {
+		log WARN "Cannot find 'type' in output"
+	    }
+	} else {
+	    log WARN "Cannot find 'on' in output"
+	}
+    }
+    return $mounts
+}
+
+
+# ::cluster::Wait -- Wait for state
+#
+#       Wait a finite amount of time until a virtual machine has
+#       reached one of the specified states.  State matching occurs
+#       case insensitive and the state return is one of those
+#       specified in the arguments (as opposed to those returned by
+#       docker-machine).  This is to ensure consistency of the code
+#       when calling this procedure.
+#
+# Arguments:
+#	vm	Virtual machine description
+#	states	List of acceptable states to reach
+#	sleep	Number of seconds to wait between poll retries.
+#	retries	Maximum number of retries, negative for global default
+#
+# Results:
+#       The reached state, as one of those pointed at by arguments or
+#       an empty string on errors.
+#
+# Side Effects:
+#       None.
+proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 10 } } {
+    set nm [dict get $vm -name]
+    if { $retries < 0 } {
+        set retries ${vars::-retries}
+    }
+    while { $retries > 0 } {
+        set machines [ls $nm]
+        if { [llength $machines] == 1 } {
+            set mchn [lindex $machines 0]
+            if { [dict exists $mchn state] } {
+                foreach s $states {
+                    if { [string equal -nocase [dict get $mchn state] $s] } {
+                        log INFO "Machine $nm is in state $s"
+                        return $s
+                    }
+                }
+            }
+        }
+        incr retries -1;
+        if { $retries > 0 } {
+            log INFO "Still waiting for machine $nm to reach proper state..."
+            after [expr {int($sleep*1000)}]
+        }
+    }
+    log WARN "Gave up waiting for $nm to be running properly!"
+    return ""
+}
+
+
+proc ::cluster::DockerUp { vm {cmd "start"} {force 0} {sleep 1} {retries 5} } {
+    set nm [dict get $vm -name]
+    if { $retries < 0 } {
+        set retries ${vars::-retries}
+    }
+    while { $retries > 0 } {
+	set pid [DockerPID $vm]
+	if { $pid < 0 || [string is true $force] } {
+	    log INFO "Docker daemon not running on $nm, trying to $cmd..."
+	    Machine ssh $nm "sudo ${vars::-daemon} $cmd"
+            after [expr {int($sleep*1000)}]
+	    set force 0;  # Now let's do it the normal way for the next retries
+	} else {
+	    log NOTICE "Docker daemon properly running at $nm, pid: $pid"
+	    return 1
+	}
+	incr retries -1
+    }
+    log WARN "Gave up starting docker daemon on $nm!"
+    return 0
+}
+
+
+proc ::cluster::DockerPID { vm } {
+    set nm [dict get $vm -name]
+    # Look for pid file
+    set pidfile ""
+    foreach l [Machine -return -- ssh $nm "ls -1 /var/run/*.pid"] {
+	if { [string match "/var/run/docker*" $l] } {
+	    set pidfile $l
+	}
+    }
+
+    if { $pidfile ne "" } {
+	set docker [lindex [Machine -return -- ssh $nm "cat $pidfile"] 0]
+	foreach {pid cmd args} [Processes $vm] {
+	    if { $pid == $docker } {
+		return $pid
+	    }
+	}
+    }
+    return -1
+}
+
+
+# ::cluster::Processes -- Return list of processes running on VM
+#
+#       Query a virtual machine for the list of processes that are
+#       currently running and return their description.  The
+#       description is list of length a multiple of three, where you
+#       will find, in order: the PID of the process, the main command
+#       of the process and the complete command with arguments that
+#       started the process
+#
+# Arguments:
+#	vm	Virtual machine description
+#	filter	Glob-style filter for main process name filter.
+#
+# Results:
+#       List of processes as descibed above.
+#
+# Side Effects:
+#       None.
+proc ::cluster::Processes { vm {filter *}} {
+    set nm [dict get $vm -name]
+    set processes {}
+    set skip 1
+    foreach l [Machine -return -- ssh $nm "sudo ps -o pid,comm,args"] {
+	if { $skip } {
+	    # Skip header!
+	    set skip 0
+	} else {
+	    set l [string trim $l]
+	    set pid [lindex $l 0]
+	    set cmd [lindex $l 1]
+	    set args [lrange $l 2 end]
+	    if { [string match $filter $cmd] } {
+		lappend processes $pid $cmd $args
+	    }
+	}
+    }
+    return $processes
+}
+
 
 package provide cluster 0.3

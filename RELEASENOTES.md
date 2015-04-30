@@ -1,6 +1,15 @@
 # Release Notes
 
-## v 0.4.2 (in development)
+## v 0.5 (in development)
+
+* The default is now to use the locally cached images when
+  initialising virtual machines.  This will speed up initialisation in
+  a number of cases.  Furthermore, this allows to push private images
+  on the machines withouth having to transfer repository credentials
+  or similar.
+
+
+## v 0.4.2 (Never Released)
 
 * Fixed a bug when swarming compose project files: these would be started up on
   the host and not within the cluster!
@@ -22,6 +31,10 @@
   dictionary in the YAML file.  This should be a list of names that
   can also be used to point at the machine from the command line, but
   will also appear in the discovery mechanisms.
+
+* Squeezed away a number of synchronisation bugs that would occur on
+  slow hosts, we typically wait for good markers and retry a number of
+  times sensitive operations.
   
 
 ## v 0.4.1

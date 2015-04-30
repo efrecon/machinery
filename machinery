@@ -18,6 +18,7 @@ set prg_args {
     -token     ""               "Override token for cluster"
     -cluster   ""               "YAML description, empty for cluster.yml"
     -driver    "virtualbox"     "Default driver for VM creation"
+    -cache     "on"             "Use locally cached docker images?"
 }
 
 package require Tcl 8.5
@@ -106,7 +107,7 @@ for {set eaten ""} {$eaten ne $argv} {} {
 
 # Pass arguments from the command-line as the defaults for the cluster
 # module.
-foreach k [list -machine -docker -compose -verbose] {
+foreach k [list -machine -docker -compose -verbose -cache] {
     cluster defaults $k $CRT($k)
 }
 
