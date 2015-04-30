@@ -8,6 +8,9 @@
   on the machines withouth having to transfer repository credentials
   or similar.
 
+* Factored away UNIX/linux specific commands into a separate package
+  to keep down the size of the main code-base.
+
 
 ## v 0.4.2 (Never Released)
 

@@ -20,6 +20,7 @@
 package require yaml;   # This is found in tcllib
 package require cluster::virtualbox
 package require cluster::vcompare
+package require cluster::unix
 
 namespace eval ::cluster {
     # Encapsulates variables global to this namespace under their own
@@ -57,10 +58,6 @@ namespace eval ::cluster {
 	variable -retries   3
 	# Environement variable prefix
 	variable -prefix    "MACHINERY_"
-	# Path of docker daemon init script
-	variable -daemon    "/etc/init.d/docker"
-	# Path where PID files are stored
-	variable -run       "/var/run"
         # name of VM that we are attached to
         variable attached   ""
         # version numbers for our tools (on demand)
@@ -76,10 +73,6 @@ namespace eval ::cluster {
 #
 # Break out the Env* procedures to a separate module.  This makes some
 # sort of sense as they are at least used in two different places.
-#
-# Break out all the interfaces to (remote) UNIX tools in a separate
-# package as these have a high degree of genericity attached to them.
-# How do we break away from the leading 'Machine ssh' though?
 #
 # Start using the TRACE level of verbosity and migrate some of the
 # DEBUG to trace.  When in TRACE, we should force debug on docker and
@@ -402,7 +395,7 @@ proc ::cluster::create { vm token } {
             # Test that machine is properly working by echoing its
             # name using a busybox component and checking we get that
             # name back.
-	    if { [DockerUp $vm] } {
+	    if { [unix daemon $nm docker up] } {
 		log DEBUG "Testing that machine $vm has a working docker\
                            via busybox"
 		Attach $vm
@@ -593,63 +586,6 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
 }
 
 
-# ::cluster::scp -- Copy local file into machine.
-#
-#       Copy a local file into a virtual machine.  The scp command is
-#       dynamically generated out of the ssh command that is used by
-#       docker-machine to enter the VM.  We detect that by putting
-#       docker-machine in debug mode and try running a command in the
-#       machine using docker-machine ssh.
-#
-# Arguments:
-#        vm        Virtual machine description dictionary
-#        src_fn        Full path to source.
-#        dst_fn        Full path to destination (empty to same as source)
-#
-# Results:
-#       None.
-#
-# Side Effects:
-#       None.
-proc ::cluster::scp { vm src_fname { dst_fname "" } } {
-    # Make destination identical to source if necessary.
-    if { $dst_fname eq "" } {
-        set dst_fname $src_fname
-    }
-
-    set nm [dict get $vm -name]
-    log NOTICE "Copying local $src_fname to ${nm}:$dst_fname"
-
-    # Guess raw SSH command by running ssh-ing "echo" into the virtual
-    # machine.  This assumes docker-machine output the ssh command
-    # onto the stderr.
-    log DEBUG "Detecting SSH command into $nm"
-    # Skip to last line since newer versions output more when debug is on...
-    set sshinfo [lindex [Machine -return -stderr -- --debug ssh $nm echo ""] end]
-    set ssh [string first ssh $sshinfo];  # Lookup the string 'ssh': START
-    set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
-    set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
-
-    # Construct an scp command out of the ssh command!  This converts
-    # the arguments between the ssh and scp namespaces, which are not
-    # exactly the same.
-    set cmd [regsub ^ssh $cmd scp]
-    set cmd [regsub -- -p $cmd -P]
-    foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
-        set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
-    }
-    set dst [lindex $cmd end];   # Extract out user@hostname, last in
-                                 # (ssh)command
-    set scp [lrange $cmd 0 end-1]
-    log DEBUG "Constructed command $scp, destination: $dst"
-
-    # Finalise the scp command by adding file paths information and
-    # execute it.
-    lappend scp $src_fname ${dst}:$dst_fname
-    eval [linsert $scp 0 Run]
-}
-
-
 # ::cluster::tag -- Tag a machine
 #
 #       This procedure will ensure that the tags passed as arguments
@@ -715,7 +651,7 @@ proc ::cluster::tag { vm { lbls {}}} {
 
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
-    scp $vm $fname
+    unix scp $nm $fname
     Run ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
 
     # Cleanup and restart machine to make sure the labels get live.
@@ -818,7 +754,7 @@ proc ::cluster::ports { vm { ports {}} } {
 # Side Effects:
 #       Will use the Virtual box commands to request for port
 #       forwarding.
-proc ::cluster::shares { vm { shares {}} {sleep 1} {mretries 5}} {
+proc ::cluster::shares { vm { shares {}} } {
     # Get shares, either from parameters (overriding the VM object) or
     # from vm object.
     if { [string length $shares] == 0 } {
@@ -846,9 +782,6 @@ proc ::cluster::shares { vm { shares {}} {sleep 1} {mretries 5}} {
     set nm [dict get $vm -name]
     log NOTICE "Mounting [expr {[llength $opening]/2}] share(s) for $nm..."
 
-    if { $mretries < 0 } {
-        set mretries ${vars::-retries}
-    }
     switch [dict get $vm -driver] {
         "virtualbox" {
             # Add shares as necessary.  This might halt the virtual
@@ -874,47 +807,19 @@ proc ::cluster::shares { vm { shares {}} {sleep 1} {mretries 5}} {
 
             # Find out id of main user on virtual machine to be able
             # to mount shares under that UID.
-            set idinfo [string map [list "=" " "] \
-                            [lindex [Machine -return -- ssh $nm id] 0]]
-            set uid ""
-            if { [dict exists $idinfo uid] } {
-                if { [regexp {\d+} [dict get $idinfo uid] uid] } {
-                    log DEBUG "User identifier in machine $nm is $uid"
-                }
-            }
+	    set idinfo [unix id $nm id]
+	    if { [dict exists $idinfo uid] } {
+		set uid [dict get $idinfo uid]
+		log DEBUG "User identifier in machine $nm is $uid"
+	    } else {
+		set uid ""
+	    }
 
             # And arrange for the destination directories to exist
             # within the guest and perform the mount.
             foreach {host mchn share} $sharing {
-		set retries $mretries
-		while { $retries > 0 } {
-		    # Make the directory
-		    if { $uid eq "" } {
-			log INFO "Mounting $host onto ${nm}:${mchn}"
-			Machine ssh $nm "sudo mkdir -p $mchn"
-			Machine ssh $nm \
-			    "sudo mount -t vboxsf -v -o uid=$uid $share $mchn"
-		    } else {
-			log INFO "Mounting $host onto ${nm}:${mchn} as UID:$uid"
-			Machine ssh $nm "sudo mkdir -p $mchn"
-			Machine ssh $nm "sudo chown $uid $mchn"
-			Machine ssh $nm \
-			    "sudo mount -t vboxsf -v -o uid=$uid $share $mchn"
-		    }
-		    # Test that we managed to mount properly.
-		    foreach { dev dst type opts } [Mounted $vm] {
-			if { $dst eq $mchn && $type eq "vboxsf" } {
-			    set retries 0;    # We'll get off the loop
-                            lappend mounted $dst
-			    break
-			}
-		    }
-		    incr retries -1;   # ALWAYS! On purpose...
-		    if { $retries > 0 } {
-			log WARN "Could not find $mchn in mount points on $nm,\
-                                  retrying..."
-                        after [expr {int($sleep*1000)}]
-		    }
+		if { [unix mount $nm $share $mchn $uid] } {
+		    lappend mounted $mchn
 		}
             }
         }
@@ -1082,7 +987,7 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 		Docker save -o $tmp_fpath $img
 		log DEBUG "Created local snapshot of $img at $tmp_fpath"
 		# Copy the tar to the machine, we use the same path, it's tmp
-		scp $vm $tmp_fpath
+		unix scp $nm $tmp_fpath
 		# Give the tar to docker on the remote machine
 		Attach $vm
 		log DEBUG "Loading $nm:$tmp_fpath into $img at $nm"
@@ -2030,7 +1935,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
 proc ::cluster::Shares { spec } {
     set host ""
     set mchn ""
-    # Segragates list from the string representation of shares.
+    # Segregates list from the string representation of shares.
     if { [llength $spec] >= 2 } {
         foreach {host mchn} $spec break
     } else {
@@ -2061,156 +1966,6 @@ proc ::cluster::Shares { spec } {
         }
     }
     return {}
-}
-
-
-# ::cluster::Interfaces -- Gather network interfaces
-#
-#       Collects address information for all relevant network
-#       interfaces of a virtual machine.  This is basically a wrapper
-#       around ifconfig.
-#
-# Arguments:
-#        vm        Virtual machine description dictionary
-#
-# Results:
-#       Return a list of dictionaries.  Each dictionary should have a
-#       key called interface with the name of the interface
-#       (e.g. eth1, docker0, etc.).  There might also be a key called
-#       inet and another called inet6 (self-explanatory).
-#
-# Side Effects:
-#       Will call ifconfig on the target machine
-proc ::cluster::Interfaces { vm } {
-    set nm [dict get $vm -name]
-    log DEBUG "Detecting network interfaces of $nm..."
-    set interfaces {};   # List of interface dictionaries.
-    set ifs {};          # List of interface names, for logging.
-    set iface ""
-    foreach l [Machine -return -- ssh $nm ifconfig] {
-        # The output of ifconfig is formatted so that each new
-        # interface is described with a line without leading
-        # whitespaces, while extra information for that interface
-        # happens on lines starting with whitespaces.  The code below
-        # uses this fact to segragate between interfaces.
-	if { [string match -nocase "*Host*not*exist*" $l] } {
-	    break
-        } elseif { [string index $l 0] ni [list " " "\t"] } {
-            if { $iface ne "" && ![string match "v*" $iface] } {
-                  # We skip interfaces which name starts with v (for
-                # virtual).
-                lappend interfaces [dict create \
-                                        interface $iface \
-                                        inet $inet \
-                                        inet6 $inet6]
-                lappend ifs $iface
-            }
-            set iface [lindex $l 0];  # Assumes we can form a proper list!
-            set inet ""
-            set inet6 ""
-        } elseif { [string first "addr" $l] >= 0 } {
-            # Try to be slightly intelligent when collecting the
-            # address, but this might break.
-            foreach {k v} [InterfaceLine $l] {
-                if { [string equal -nocase "inet6 addr" $k] } {
-                    set inet6 $v
-                }
-                if { [string equal -nocase "inet addr" $k] } {
-                    set inet $v
-                }
-            }
-        }
-    }
-    # Don't forget the last one!
-    if { $iface ne "" && ![string match "v*" $iface] } {
-        # We skip interfaces which name starts with v (for virtual).
-        lappend interfaces [dict create \
-                                interface $iface \
-                                inet $inet \
-                                inet6 $inet6]
-        lappend ifs $iface
-    }
-
-    # Report back
-    if { [llength $ifs] > 0 } {
-        log INFO "Detected network addresses for [join $ifs {, }]"
-    }
-    return $interfaces
-}
-
-
-# ::cluster::InterfaceLine -- Parse ifconfig details
-#
-#       Details lines as output from ifconfig have a formatting that
-#       isn't perfect for automated reading.  Keys are separted from
-#       their values using a : sign, but spaces are allowed in keys
-#       and before and/or after the colon sign.  This procedure
-#       attempts to parse in a robust way and will return a dictionary
-#       of key and values with what was extracted from the line.
-#
-# Arguments:
-#        l        Line to parse
-#
-# Results:
-#       A dictionary of keys and value with line information.
-#
-# Side Effects:
-#       None.
-proc ::cluster::InterfaceLine { l } {
-    # Initiate with an empty dictionary and the fact that we now
-    # expect a key to start.
-    set dict [dict create]
-    set k ""
-    set v ""
-    set key 1
-    # Parse the line character by character, this is going to be slow,
-    # but allows us to cover all corner cases.
-    foreach c [split [string trim $l] ""] {
-        if { $key } {
-            # We are parsing the key, wait for the : to mark the end
-            # of the key (and the start of the value).
-            if { $c eq ":" } {
-                set key 0
-            } else {
-                if { $k eq "" } {
-                    # skip whitespaces that might occur before a key
-                    # starts
-                    if { ![string is space $c] } {
-                        append k $c
-                    }
-                } else {
-                    # As soon as we've started to find a key, copy all
-                    # characters (which includes whitespaces!).
-                    append k $c
-                }
-            }
-        } else {
-            # We are parsing the value, wait for a space which will
-            # mark the end of the value, but also wait for the value
-            # to start in the first place since there might be spaces
-            # after the : sign and before the content of the value.
-            if { [string is space $c] } {
-                if { $v ne "" } {
-                    # We have parse a value, add to dictionary and
-                    # reinitialise to start parsing next key.
-                    dict set dict $k $v
-                    set key 1
-                    set k ""
-                    set v ""
-                }
-            } else {
-                # Add character to current value.
-                append v $c
-            }
-        }
-    }
-    # Don't forget the last pair of key/value!
-    if { $v ne "" } {
-        dict set dict $k $v
-    }
-
-    # Done!
-    return $dict
 }
 
 
@@ -2270,7 +2025,7 @@ proc ::cluster::Discovery { vm } {
                  && [string equal -nocase [dict get $vm state] "running"] } {
             # Get complete network interface description (except the
             # virtual interfaces)
-            foreach itf [Interfaces $vm] {
+            foreach itf [unix ifs $nm] {
 		foreach pfx $prefixes {
 		    set k ${pfx}_[string toupper [dict get $itf interface]]
 		    if { [dict exists $itf inet] } {
@@ -2681,72 +2436,6 @@ proc ::cluster::Version { tool } {
 }
 
 
-# ::cluster::Mounted -- Return the list of mount points on remote machine
-#
-#       Actively poll a remote machine for its active mount points and
-#       return a description of these.  This is basically an interface
-#       to the UNIX command "mount" (sans arguments!).  This returns a
-#       list where the mounts are described with: first the device,
-#       then the directory where it is mounted, then its type, and
-#       finally a list of the mount options.
-#
-# Arguments:
-#	vm	Virtual machine description
-#
-# Results:
-#       Return a list of the mount points.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Mounted { vm } {
-    set nm [dict get $vm -name]
-    log DEBUG "Detecting mounts on $nm..."
-    set mounts {};
-    # Parse the output of the 'mount' command line by line, we do this
-    # by looking for specific keywords in the string, but we might be
-    # better off using regular expressions?
-    foreach l [Machine -return -- ssh $nm mount] {
-	# Advance to word "on" and isolate the device specification
-	# that should be placed before.
-	set on [string first " on " $l]
-	if { $on >= 0 } {
-	    set dev [string trim [string range $l 0 $on]]
-	    # Advance to the keyword "type" and isolate the path that
-	    # should be between "on" and "type".
-	    set type [string first " type " $l $on]
-	    if { $type >= 0 } {
-		set dst [string trim [string range $l [expr {$on+4}] $type]]
-		# Advance to the parenthesis, this is where the
-		# options will begin.  The type is between the keyword
-		# type and the parenthesis (or the end of the
-		# string/line).
-		set paren [string first " (" $l $type]
-		if { $paren >= 0 } {
-		    set type [string trim \
-                                  [string range $l [expr {$type+6}] $paren]]
-		    set optstr [string trim \
-                                    [string range $l [expr {$paren+2}] end]]
-		    # Remove leading and trailing parenthesis, there
-		    # are the options, separated by coma signs.
-		    set optstr [string trim $optstr "()"]
-		    set opts [split $optstr ","]
-		} else {
-		    set type [string trim \
-                                  [string range $l [expr {$type+6}] end]]
-		    set opts {}
-		}
-		lappend mounts $dev $dst $type $opts
-	    } else {
-		log WARN "Cannot find 'type' in output"
-	    }
-	} else {
-	    log WARN "Cannot find 'on' in output"
-	}
-    }
-    return $mounts
-}
-
-
 # ::cluster::Wait -- Wait for state
 #
 #       Wait a finite amount of time until a virtual machine has
@@ -2801,127 +2490,6 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 10 } } {
 }
 
 
-# ::cluster::DockerUp -- Make sure the docker daemon is up and running
-#
-#       Check that the remote docker daemon is actually up and running
-#       and attempt (a finite number of times) to start it if it was
-#       not.  When starting up the daemon, this assumes that there is
-#       an init.d script available and that it is called docker.
-#
-# Arguments:
-#	vm	Virtual machine description
-#	cmd	(sub)command to give to init.d script
-#	force	Force sending the sub-command, even if daemon was running.
-#	sleep	Number of seconds to sleep after we've started
-#	retries	Number of times to try, negative for global retry amount.
-#
-# Results:
-#       1 if docker daemon is running remotely, 0 otherwise.
-#
-# Side Effects:
-#       None.
-proc ::cluster::DockerUp { vm {cmd "start"} {force 0} {sleep 1} {retries 5} } {
-    set nm [dict get $vm -name]
-    if { $retries < 0 } {
-        set retries ${vars::-retries}
-    }
-    while { $retries > 0 } {
-	set pid [DockerPID $vm]
-	if { $pid < 0 || [string is true $force] } {
-	    log INFO "Docker daemon not running on $nm, trying to $cmd..."
-	    Machine ssh $nm "sudo ${vars::-daemon} $cmd"
-            after [expr {int($sleep*1000)}]
-	    set force 0;  # Now let's do it the normal way for the next retries
-	} else {
-	    log NOTICE "Docker daemon properly running at $nm, pid: $pid"
-	    return 1
-	}
-	incr retries -1
-    }
-    log WARN "Gave up starting docker daemon on $nm!"
-    return 0
-}
-
-
-# ::cluster::DockerPID -- Process identifier of remote docker daemon
-#
-#       Actively fetch and verify the process identifier of a remote
-#       docker daemon in one of the cluster machines.  This will look
-#       in the /var/run directory and check that there really is a
-#       running process for the PID that existed in /var/run.
-#
-# Arguments:
-#	vm	Virtual machine description
-#
-# Results:
-#       Return the PID of the remote docker daemon, -1 on errors (not found)
-#
-# Side Effects:
-#       None.
-proc ::cluster::DockerPID { vm } {
-    set nm [dict get $vm -name]
-    # Look for pid file in /var/run
-    set rundir [string trimright ${vars::-run} "/"]
-    set pidfile ""
-    foreach l [Machine -return -- ssh $nm "ls -1 ${rundir}/*.pid"] {
-	if { [string match "${rundir}/docker*" $l] } {
-	    set pidfile $l
-	}
-    }
-
-    # If we have a PID file, make sure there is a process that is
-    # running at that PID (should we check it's really docker?)
-    if { $pidfile ne "" } {
-	set docker [lindex [Machine -return -- ssh $nm "cat $pidfile"] 0]
-	foreach {pid cmd args} [Processes $vm] {
-	    if { $pid == $docker } {
-		return $pid
-	    }
-	}
-    }
-
-    return -1
-}
-
-
-# ::cluster::Processes -- Return list of processes running on VM
-#
-#       Query a virtual machine for the list of processes that are
-#       currently running and return their description.  The
-#       description is list of length a multiple of three, where you
-#       will find, in order: the PID of the process, the main command
-#       of the process and the complete command with arguments that
-#       started the process
-#
-# Arguments:
-#	vm	Virtual machine description
-#	filter	Glob-style filter for main process name filter.
-#
-# Results:
-#       List of processes as descibed above.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Processes { vm {filter *}} {
-    set nm [dict get $vm -name]
-    set processes {}
-    set skip 1
-    foreach l [Machine -return -- ssh $nm "sudo ps -o pid,comm,args"] {
-	if { $skip } {
-	    # Skip header!
-	    set skip 0
-	} else {
-	    set l [string trim $l]
-	    set pid [lindex $l 0]
-	    set cmd [lindex $l 1]
-	    set args [lrange $l 2 end]
-	    if { [string match $filter $cmd] } {
-		lappend processes $pid $cmd $args
-	    }
-	}
-    }
-    return $processes
-}
 
 
 package provide cluster 0.3
