@@ -1,6 +1,6 @@
 # Release Notes
 
-## v 0.5 (in development)
+## v 0.5
 
 * The default is now to use the locally cached images when
   initialising virtual machines.  This will speed up initialisation in

@@ -16,13 +16,13 @@ if { [llength $argv] == 0 } {
 }
 
 cluster log NOTICE "Getting version"
-set version [lindex [::cluster::Run -return -- ../machinery version] 0]
+set version [lindex [::cluster::Run2 -return -- ../machinery version] 0]
 
 cluster log NOTICE "Creating skeleton and filling VFS"
 set tclkit [file join $bindir [::platform::generic] tclkit]
 set sdx [file join $kitdir sdx.kit]
-::cluster::Run $tclkit $sdx qwrap ../machinery
-::cluster::Run $tclkit $sdx unwrap machinery.kit
+::cluster::Run2 $tclkit $sdx qwrap ../machinery
+::cluster::Run2 $tclkit $sdx unwrap machinery.kit
 foreach fname [glob -directory [file join $dirname .. lib] -nocomplain -- *] {
     file copy -force -- $fname machinery.vfs/lib
 }
@@ -31,11 +31,11 @@ foreach platform $argv {
     set binkit [file join $bindir $platform tclkit]
     if { [file exists $binkit] } {
 	cluster log INFO "Final wrapping of binary for $platform"
-	::cluster::Run $tclkit $sdx wrap machinery.kit
+	::cluster::Run2 $tclkit $sdx wrap machinery.kit
 	# Copy runtime to temporary because won't work if same as the
 	# one we are starting from.
 	file copy $binkit ${binkit}.temp
-	::cluster::Run $tclkit $sdx wrap machinery -runtime ${binkit}.temp
+	::cluster::Run2 $tclkit $sdx wrap machinery -runtime ${binkit}.temp
 	file delete ${binkit}.temp
     } else {
 	cluster log ERROR "Cannot build for $platform, no main kit available"
