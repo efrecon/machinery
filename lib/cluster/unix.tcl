@@ -453,7 +453,7 @@ proc ::cluster::unix::ifs { nm } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::DaemonUp { nm daemon {cmd "start"} {force 0} {sleep 1} {retries 5} } {
+proc ::cluster::unix::DaemonUp { nm daemon {cmd "restart"} {force 0} {sleep 1} {retries 5} } {
     while { $retries > 0 } {
 	set pid [DaemonPID $nm $daemon]
 	if { $pid < 0 || [string is true $force] } {
@@ -494,6 +494,7 @@ proc ::cluster::unix::DaemonPID { nm daemon } {
     set pidfile ""
     foreach l [Machine -return -- ssh $nm "ls -1 ${rundir}/*.pid"] {
 	if { [string match "${rundir}/${daemon}*" $l] } {
+	    log DEBUG "Found PIDfile for $daemon at $l"
 	    set pidfile $l
 	}
     }
@@ -502,6 +503,7 @@ proc ::cluster::unix::DaemonPID { nm daemon } {
     # running at that PID (should we check it's really the daemon?)
     if { $pidfile ne "" } {
 	set dpid [lindex [Machine -return -- ssh $nm "cat $pidfile"] 0]
+	log DEBUG "Checking that there is a running process with id: $dpid"
 	foreach {pid cmd args} [ps $nm] {
 	    if { $pid == $dpid } {
 		return $pid

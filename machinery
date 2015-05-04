@@ -21,7 +21,7 @@ set prg_args {
     -cache     "on"             "Use locally cached docker images?"
 }
 
-package require Tcl 8.5
+package require Tcl 8.6;    # The cluster module requires chan pipe
 
 
 # Arrange to access all libraries under lib sub-directory.  There is

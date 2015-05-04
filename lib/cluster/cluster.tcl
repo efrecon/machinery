@@ -17,7 +17,8 @@
 ##    docker-machine ls) will not have any leading dash.
 ##
 ##################
-package require yaml;   # This is found in tcllib
+package require Tcl 8.6;  # We require chan pipe
+package require yaml;     # This is found in tcllib
 package require cluster::virtualbox
 package require cluster::vcompare
 package require cluster::unix
@@ -62,6 +63,8 @@ namespace eval ::cluster {
         variable attached   ""
         # version numbers for our tools (on demand)
         variable versions   {docker "" compose "" machine ""}
+	# Object generation identifiers
+	variable generator  0
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -383,35 +386,38 @@ proc ::cluster::create { vm token } {
     set nm [Create $vm $token]
 
     if { $nm ne "" } {
-        if { [Wait $vm] eq "running" } {
+	set vm [Running $vm]
+	if { $vm ne {} } {
             # Tag virtual machine with labels.
-            tag $vm
+            set vm [tag $vm]
+	    if { $vm ne {} } {
+		# Open the ports and creates the shares
+		ports $vm
+		shares $vm
 
-            # Open the ports and creates the shares
-            set vm [bind $vm]
-            ports $vm
-            shares $vm
+		# Test that machine is properly working by echoing its
+		# name using a busybox component and checking we get that
+		# name back.
+		if { [unix daemon $nm docker up] } {
+		    log DEBUG "Testing that machine $nm has a working docker\
+                               via busybox"
+		    Attach $vm
+		    if { [Docker -return -- run --rm busybox echo $nm] eq "$nm" } {
+			log INFO "Docker setup properly on $nm"
+		    } else {
+			log ERROR "Cannot test docker for $nm, check manually!"
+		    }
 
-            # Test that machine is properly working by echoing its
-            # name using a busybox component and checking we get that
-            # name back.
-	    if { [unix daemon $nm docker up] } {
-		log DEBUG "Testing that machine $vm has a working docker\
-                           via busybox"
-		Attach $vm
-		if { [Docker -return -- run --rm busybox echo $nm] eq "$nm" } {
-		    log INFO "Docker setup properly on $nm"
+		    init $vm
 		} else {
-		    log ERROR "Cannot test docker for $nm, check manually!"
+		    log WARN "No docker daemon running on $nm!"
 		}
-
-		init $vm
 	    } else {
-		log WARN "No docker daemon running on $nm!"
+		log ERROR "Could not create VM $nm properly"
 	    }
-        } else {
-            log ERROR "Could not create VM $nm properly"
-        }
+	} else {
+	    log ERROR "Could not create VM $nm properly"
+	}
     }
 
     return $nm
@@ -427,19 +433,24 @@ proc ::cluster::init { vm {steps {registries images compose}} } {
     set vm [bind $vm]
     Discovery $vm
 
-    # Now pull images if any
-    if { [lsearch -nocase $steps registries] >= 0 } {
-        login $vm
-    }
-    if { [lsearch -nocase $steps images] >= 0 } {
-        pull $vm 1
-    }
+    set nm [dict get $vm -name]
+    if { [unix daemon $nm docker up] } {
+	# Now pull images if any
+	if { [lsearch -nocase $steps registries] >= 0 } {
+	    login $vm
+	}
+	if { [lsearch -nocase $steps images] >= 0 } {
+	    pull $vm 1
+	}
 
-    # And iteratively run compose.  Compose will get the complete
-    # description of the discovery status in the form of
-    # environment variables.
-    if { [lsearch -nocase $steps compose] >= 0 } {
-        compose $vm UP
+	# And iteratively run compose.  Compose will get the complete
+	# description of the discovery status in the form of
+	# environment variables.
+	if { [lsearch -nocase $steps compose] >= 0 } {
+	    compose $vm UP
+	}
+    } else {
+	log WARN "No docker daemon running on $nm!"
     }
 }
 
@@ -657,6 +668,8 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Cleanup and restart machine to make sure the labels get live.
     file delete -force -- $fname;      # Remove local file, not needed anymore
     Machine restart $nm;               # Restart machine to activate tags
+
+    return [Running $vm]
 }
 
 
@@ -680,8 +693,8 @@ proc ::cluster::tag { vm { lbls {}}} {
 #
 # Arguments:
 #        vm        Virtual machine description dictionary
-#        ports        List of port forwardings, empty to use the list from the
-#               VM description
+#        ports     List of port forwardings, empty to use the list from the
+#                  VM description
 #
 # Results:
 #       None.
@@ -1404,6 +1417,123 @@ proc ::cluster::Create { vm { token "" } } {
     return [dict get $vm -name]
 }
 
+proc ::cluster::POpen4 { args } {
+    foreach chan {In Out Err} {
+        lassign [chan pipe] read$chan write$chan
+    } 
+
+    set pid [exec {*}$args <@ $readIn >@ $writeOut 2>@ $writeErr &]
+    chan close $writeOut
+    chan close $writeErr
+
+    foreach chan [list stdout stderr $readOut $readErr $writeIn] {
+        chan configure $chan -buffering line -blocking false
+    }
+
+    return [list $pid $writeIn $readOut $readErr]
+}
+
+
+proc ::cluster::Run2 { args } {
+    # Isolate -- that will separate options to procedure from options
+    # that would be for command.  Using -- is MANDATORY if you want to
+    # specify options to the procedure.
+    set sep [lsearch $args "--"]
+    if { $sep >= 0 } {
+        set opts [lrange $args 0 [expr {$sep-1}]]
+        set args [lrange $args [expr {$sep+1}] end]
+    } else {
+        set opts [list]
+    }
+
+    # Create an array global to the namespace that we'll use for
+    # synchronisation and context storage.
+    set c [namespace current]::command[incr ${vars::generator}]
+    upvar \#0 $c CMD
+    set CMD(id) $c
+    set CMD(command) $args
+
+    # Extract some options and start building the
+    # pipe.  As we want to capture output of the command, we will be
+    # using the Tcl command "open" with a file path that starts with a
+    # "|" sign.
+    set CMD(keep) [getopt opts -keepblanks]
+    set CMD(back) [getopt opts -return]
+    set CMD(outerr) [getopt opts -stderr]
+    set CMD(done) 0
+    set CMD(result) {}
+
+    # Kick-off the command and wait for its end
+    lassign [POpen4 {*}$args] CMD(pid) CMD(stdin) CMD(stdout) CMD(stderr)
+    fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
+    fileevent $CMD(stderr) readable [namespace code [list LineRead $c stderr]]
+    vwait ${c}(done);   # Wait for command to end
+
+    catch {close $CMD(stdin)}
+    catch {close $CMD(stdout)}
+    catch {close $CMD(stderr)}
+
+    set res $CMD(result)
+    unset $c
+    return $res
+}
+
+
+proc ::cluster::LineRead { c fd } {
+    upvar \#0 $c CMD
+
+    set line [gets $CMD($fd)]
+    set outlvl INFO
+    # Parse and analyse output of docker-machine. Do some translation
+    # of the loglevels between logrus and our internal levels.
+    if { [lindex $CMD(command) 0] eq ${vars::-machine} } {
+	foreach {k v} [string map {"=" " "} $line] {
+	    if { $k eq "msg" } {
+		set line $v
+		break
+	    }
+	    # Translate between loglevels from logrus to internal
+	    # levels.
+	    if { $k eq "level" } {
+		foreach { gl lvl } [list info INFO \
+					warn NOTICE \
+					error WARN \
+					fatal ERROR \
+					panic FATAL] {
+		    if { [string equal -nocase $v $gl] } {
+			set outlvl $lvl
+		    }
+		}
+	    }
+	}
+    }
+    # Respect -keepblanks and output or accumulate in result
+    if { ( !$CMD(keep) && [string trim $line] ne "") || $CMD(keep) } {
+	if { $CMD(back) } {
+	    if { ( $CMD(outerr) && $fd eq "stderr" ) || $fd eq "stdout" } {
+		log DEBUG "Appending $line to result"
+		lappend CMD(result) $line
+	    }
+	} else {
+	    # Output even what was captured on stderr, which is
+	    # probably what we wanted in the first place.
+	    log $outlvl "  $line"
+	}
+    }
+
+    # On EOF, we stop this very procedure to be triggered.  If there
+    # are no more outputs to listen to, then the process has ended and
+    # we are done.
+    if { [eof $CMD($fd)] } {
+	fileevent $CMD($fd) readable {}
+	if { [fileevent $CMD(stdout) readable] eq "" \
+		 && [fileevent $CMD(stderr) readable] eq "" } {
+	    set CMD(done) 1
+	}
+    }
+}
+
+
 
 # ::cluster::Run -- Run command
 #
@@ -1421,7 +1551,7 @@ proc ::cluster::Create { vm { token "" } } {
 #       could we translate between log levels?)
 #
 # Arguments:
-#        args        (Optional dash-led options, followed by --) and command
+#        args   (Optional dash-led options, followed by --) and command
 #               to execute.
 #
 # Results:
@@ -1525,10 +1655,10 @@ proc ::cluster::Docker { args } {
     }
 
     # Put docker in debug mode when we are ourselves at debug level.
-    if { [LogLevel ${vars::-verbose}] >= 6 } {
+    if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --debug]
     }
-    return [eval Run $opts -- ${vars::-docker} $args]
+    return [eval Run2 $opts -- ${vars::-docker} $args]
 }
 
 
@@ -1561,10 +1691,10 @@ proc ::cluster::Compose { args } {
     }
 
     # Put docker in debug mode when we are ourselves at debug level.
-    if { [LogLevel ${vars::-verbose}] >= 6 } {
+    if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --verbose]
     }
-    return [eval Run $opts -- ${vars::-compose} $args]
+    return [eval Run2 $opts -- ${vars::-compose} $args]
 }
 
 
@@ -1598,11 +1728,11 @@ proc ::cluster::Machine { args } {
 
     # Put docker-machine in debug mode when we are ourselves at debug
     # level.
-    if { [LogLevel ${vars::-verbose}] >= 6 } {
+    if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --debug]
     }
 
-    return [eval Run $opts -- ${vars::-machine} $args]
+    return [eval Run2 $opts -- ${vars::-machine} $args]
 }
 
 
@@ -2457,7 +2587,7 @@ proc ::cluster::Version { tool } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 10 } } {
+proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 5 } } {
     set nm [dict get $vm -name]
     if { $retries < 0 } {
         set retries ${vars::-retries}
@@ -2490,6 +2620,30 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 10 } } {
 }
 
 
+proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
+    set nm [dict get $vm -name]
+    if { $retries < 0 } {
+        set retries ${vars::-retries}
+    }
+    while { $retries > 0 } {
+	log DEBUG "Waiting for $nm to be running..."
+	set state [Wait $vm]
+	if { $state eq "running" } {
+	    set vm [bind $vm]
+	    if { [dict exists $vm url] && [dict get $vm url] ne "" } {
+		return $vm
+	    } else {
+		log INFO "Machine $nm was $state, but docker not yet ready"
+	    }
+	} else {
+	    log INFO "Machine $nm was not $state"
+	}
+	after [expr {int($sleep*1000)}]
+    }
+    log WARN "Gave up waiting for $nm to be fully started!"
+
+    return {}
+}
 
 
 package provide cluster 0.3
