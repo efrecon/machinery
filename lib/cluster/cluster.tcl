@@ -777,6 +777,12 @@ proc ::cluster::shares { vm { shares {}} } {
         set shares [dict get $vm -shares]
     }
 
+    # Access origin to be able to resolve path of relative shares.
+    set origin ""
+    if { [dict exists $vm origin] } {
+	set origin [file dirname [dict get $vm origin]]
+    }
+
     # Convert xx:yy constructs to pairs of shares, convert single
     # shares to two shares (the same) and append all these pairs to
     # the list called opening.  Arrange for the list to only contain
@@ -784,7 +790,7 @@ proc ::cluster::shares { vm { shares {}} } {
     set mounted {}
     set opening {}
     foreach spec $shares {
-        set spec [Shares $spec];   # Extraction and syntax check
+        set spec [Shares $spec $origin];   # Extraction and syntax check
         if { [llength $spec] > 0 } {
             foreach {host mchn} $spec break
             lappend opening $host $mchn
@@ -2062,7 +2068,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::Shares { spec } {
+proc ::cluster::Shares { spec {origin ""}} {
     set host ""
     set mchn ""
     # Segregates list from the string representation of shares.
@@ -2077,11 +2083,17 @@ proc ::cluster::Shares { spec } {
         }
     }
 
-    # Resolve (local) environement variables to the values.
+    # Resolve (local) environement variables to the values and make
+    # sure relative directories are resolved.
     set host [Resolve $host]
     set mchn [Resolve $mchn]
     if { $mchn eq "" } {
         set mchn $host
+    }
+
+    if { $origin ne "" } {
+	set host [file normalize [file join $origin $host]]
+	set mchn [file normalize [file join $origin $mchn]]
     }
 
     # Scream on errors and return

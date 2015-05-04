@@ -1,5 +1,12 @@
 # Release Notes
 
+## v 0.5.1 (In development)
+
+* Exported shares are now resolved relatively to the directory of the
+  main cluster description file, which to migrate project trees if
+  necessary.
+
+
 ## v 0.5
 
 * The default is now to use the locally cached images when
