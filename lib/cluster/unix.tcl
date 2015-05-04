@@ -64,6 +64,26 @@ proc ::cluster::unix::ps { nm {filter *}} {
 }
 
 
+# ::cluster::unix::daemon -- daemons interfacing
+#
+#       This procedure provides two sub-commands.  One called `pid`
+#       will actively return the PID of an init.d daemon, returning
+#       the identifier only if the daemon is running.  The second
+#       called `up` (but `start` can also be used) will make sure the
+#       daemon is actually running and will start it if not.
+#
+# Arguments:
+#	nm	Name of the virtual machine
+#	daemon	Name of the daemon (docker anyone?)
+#	cmd	Sub-command to execute
+#	args	Possible sub-commands arguments.
+#
+# Results:
+#       The PID of the daemon on the remote machine, empty string on
+#       errors.
+#
+# Side Effects:
+#       None.
 proc ::cluster::unix::daemon { nm daemon cmd args } {
     switch -nocase -- $cmd {
 	"pid" {
@@ -92,7 +112,7 @@ proc ::cluster::unix::daemon { nm daemon cmd args } {
 #       finally a list of the mount options.
 #
 # Arguments:
-#	vm	Virtual machine description
+#	nm	Name of the virtual machine
 #
 # Results:
 #       Return a list of the mount points.
@@ -147,7 +167,7 @@ proc ::cluster::unix::mounts { nm } {
 }
 
 
-# ::cluster::scp -- Copy local file into machine.
+# ::cluster::unix::scp -- Copy local file into machine.
 #
 #       Copy a local file into a virtual machine.  The scp command is
 #       dynamically generated out of the ssh command that is used by
@@ -156,7 +176,7 @@ proc ::cluster::unix::mounts { nm } {
 #       machine using docker-machine ssh.
 #
 # Arguments:
-#        vm        Virtual machine description dictionary
+#        vm        Name of the virtual machine
 #        src_fname Full path to source.
 #        dst_fname Full path to destination (empty to same as source)
 #
@@ -203,6 +223,23 @@ proc ::cluster::unix::scp { nm src_fname { dst_fname "" } } {
 }
 
 
+# ::cluster::unix::id -- Interface to user id information
+#
+#       Return a dictionary that will contain user and group
+#       information for a given user.
+#
+# Arguments:
+#	nm	Name of the virtual machine
+#	mode	"alpha" for textual values (e.g. username), "numeric" for ids.
+#	uname	Name of user to get info for, empty for current
+#
+# Results:
+#       Return a dictionary with three keys: uid, gid and groups where
+#       uid and gid are the user and group identifier and groups is
+#       the list of additional groups that the user belongs to.
+#
+# Side Effects:
+#       None.
 proc ::cluster::unix::id { nm { mode "alpha" } {uname ""}} {
     if { $uname eq "" } {
 	set idinfo [string map [list "=" " "] \
@@ -259,6 +296,28 @@ proc ::cluster::unix::id { nm { mode "alpha" } {uname ""}} {
 }
 
 
+# ::cluster::unix::mount -- Mount a share/device
+#
+#       Mount a device onto a directory in a virtual machine.  This
+#       procedure will arrange for creating the directory of the
+#       mountpoint if necessary.  The procedure will check that the
+#       device was properly mounted and is able to try a number of
+#       times if necessary.
+#
+# Arguments:
+#	nm	Name of the virtual machine
+#	dev	Path to device (or share) to mount).
+#	path	Path where to mount the device (the mountpoint).
+#	uid	UID of user owning the mountpoint and for the mount operation
+#	type	Type of the filesystem
+#	sleep	Number of seconds to wait between retries.
+#	retries	Max number of retries.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       None.
 proc ::cluster::unix::mount { nm dev path { uid "" } {type "vboxsf"} {sleep 1} {retries 3}} {
     while { $retries > 0 } {
 	# Make the directory
@@ -299,7 +358,7 @@ proc ::cluster::unix::mount { nm dev path { uid "" } {type "vboxsf"} {sleep 1} {
 #       around ifconfig.
 #
 # Arguments:
-#        vm        Virtual machine description dictionary
+#        nm        Name of virtual machine
 #
 # Results:
 #       Return a list of dictionaries.  Each dictionary should have a
@@ -414,7 +473,7 @@ proc ::cluster::unix::DaemonUp { nm daemon {cmd "start"} {force 0} {sleep 1} {re
 }
 
 
-# ::cluster::DaemonPID -- Process identifier of remote docker daemon
+# ::cluster::unix::DaemonPID -- Process identifier of remote docker daemon
 #
 #       Actively fetch and verify the process identifier of a remote
 #       daemon in one of the cluster machines.  This will look in the
