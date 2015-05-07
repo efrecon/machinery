@@ -320,18 +320,9 @@ proc ::cluster::unix::id { nm { mode "alpha" } {uname ""}} {
 #       None.
 proc ::cluster::unix::mount { nm dev path { uid "" } {type "vboxsf"} {sleep 1} {retries 3}} {
     while { $retries > 0 } {
-	# Make the directory
-	if { $uid eq "" } {
-	    log INFO "Mounting $dev onto ${nm}:${path}"
-	    Machine ssh $nm "sudo mkdir -p $path"
-	    Machine ssh $nm \
-		"sudo mount -t $type -v $dev $path"
-	} else {
-	    log INFO "Mounting $dev onto ${nm}:${path} as UID:$uid"
-	    Machine ssh $nm "sudo mkdir -p $path"
-	    Machine ssh $nm "sudo chown $uid $path"
-	    Machine ssh $nm \
-		"sudo mount -t $type -v -o uid=$uid $dev $path"
+	log INFO "Mounting $dev onto ${nm}:${path} (UID:$uid)"
+	foreach cmd [mnt.sh $dev $path $uid $type] {
+	    Machine ssh $nm "sudo $cmd"
 	}
 
 	# Test that we managed to mount properly.
@@ -350,6 +341,21 @@ proc ::cluster::unix::mount { nm dev path { uid "" } {type "vboxsf"} {sleep 1} {
     }
     return 0
 }
+
+
+proc ::cluster::unix::mnt.sh { dev path { uid "" } { type "vboxsf" } } {
+    set commands {}
+    if { $uid eq "" } {
+	lappend commands "mkdir -p $path"
+	lappend commands "mount -t $type -v $dev $path"
+    } else {
+	lappend commands "mkdir -p $path"
+	lappend commands "chown $uid $path"
+	lappend commands "mount -t $type -v -o uid=$uid $dev $path"
+    }
+    return $commands
+}
+
 
 # ::cluster::unix::ifs -- Gather network interfaces
 #

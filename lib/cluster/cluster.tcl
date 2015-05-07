@@ -45,6 +45,10 @@ namespace eval ::cluster {
 	variable -cache     on
         # Location of boot2docker profile
         variable -profile   /var/lib/boot2docker/profile
+	# Location of boot2docker bootlocal
+	variable -bootlocal /var/lib/boot2docker/bootlocal.sh
+	# Marker in bootlocal
+	variable -marker    "#### A U T O M A T E D  ## S/E/C/T/I/O/N ####"
         # Mapping from integer to string representation of verbosity levels
         variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG 7 TRACE}
         # Extension for env storage cache files
@@ -841,6 +845,73 @@ proc ::cluster::shares { vm { shares {}} } {
 		    lappend mounted $mchn
 		}
             }
+
+	    # Finally arrange for the mounts to persist over time.
+	    # This is overly complex, but the code below is both able
+	    # to create the file and/or to amend it with our mounting
+	    # information.  We also add machine-parseable comments so
+	    # recreation of data would be possible.
+	    set b2d_dir [file dirname ${vars::-bootlocal}]
+	    set bootlocal {}
+	    foreach f [Machine -return -- ssh $nm "ls -1 $b2d_dir"] {
+		if { $f eq [file tail ${vars::-bootlocal}] } {
+		    set bootlocal [Machine -return -- \
+				       ssh $nm "cat ${vars::bootlocal}"]
+		}
+	    }
+
+	    # Generate a new section, i.e. a series of bash commands
+	    # that will (re)creates the mounts.  Make sure each series
+	    # of commands is led by a machine parseable comment.
+	    set section {}
+            foreach {host mchn share} $sharing {
+		lappend section "## $share : \"$mchn\" : $uid"
+		foreach cmd [unix mnt.sh $share $mchn $uid] {
+		    lappend section "sudo $cmd"
+		}
+            }
+	    
+	    # We had no content for bootlocal at all, make sure we
+	    # have a shebang for a shell...
+	    if { [llength $bootlocal] == 0 } {
+		lappend bootlocal "#!/bin/sh"
+		lappend bootlocal ""
+	    }
+
+	    # Look for section start and end markers and either add at
+	    # end of file or replace the section.
+	    set start [lsearch $bootlocal ${vars::-marker}]
+	    if { $start >= 0 } {
+		incr start
+		set end [lsearch $bootlocal ${vars::-marker} $start]
+		incr end -1
+		log DEBUG "Replacing existing persistent mounting section"
+		set bootlocal [lreplace $bootlocal $start $end {*}$section]
+	    } else {
+		log DEBUG "Adding new persistent mounting section"
+		lappend bootlocal ${vars::-marker}
+		foreach l $section {
+		    lappend bootlocal $l
+		}
+		lappend bootlocal ${vars::-marker}
+	    }
+
+	    # Now create a temporary file with the new content
+	    set fname [Temporary [file join ${vars::-tmp} bootlocal]]
+	    set fd [open $fname w]
+	    foreach l $bootlocal {
+		puts $fd $l
+	    }
+	    close $fd
+	    log DEBUG "Created temporary file with new bootlocal content at\
+                       $fname"
+	    
+	    # Copy new file to same temp location, make sure it is
+	    # executable and install it.
+	    log INFO "Persisting shares at reboot through ${vars::-bootlocal}"
+	    unix scp $nm $fname
+	    Machine ssh $nm "chmod a+x $fname"
+	    Machine ssh $nm "sudo mv $fname ${vars::-bootlocal}"
         }
         default {
             log WARN "Cannot mount shares with driver [dict get $vm -driver]"

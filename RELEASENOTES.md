@@ -6,6 +6,10 @@
   main cluster description file, which to migrate project trees if
   necessary.
 
+* Mounted shares (still VirtualBox only) will persist reboots of the
+  virtual machines through adding a specific section to
+  /var/lib/boot2docker/bootlocal.sh or creating the file if necessary.
+
 
 ## v 0.5
 
