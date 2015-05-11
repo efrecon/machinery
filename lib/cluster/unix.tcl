@@ -459,7 +459,7 @@ proc ::cluster::unix::ifs { nm } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::DaemonUp { nm daemon {cmd "restart"} {force 0} {sleep 1} {retries 5} } {
+proc ::cluster::unix::DaemonUp { nm daemon {cmd "start"} {force 0} {sleep 1} {retries 5} } {
     while { $retries > 0 } {
 	set pid [DaemonPID $nm $daemon]
 	if { $pid < 0 || [string is true $force] } {
