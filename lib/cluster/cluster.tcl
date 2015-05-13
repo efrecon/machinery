@@ -821,7 +821,7 @@ proc ::cluster::shares { vm { shares {}} } {
     # state of the machine.  This should only starts the machines if
     # it is not running already.
     if { [llength [array names SHARINFO]] > 0 } {
-	if { ![start $vm] } {
+	if { ![start $vm 0] } {
 	    log WARN "Could not start machine to perform mounts!"
 	    return $mounted
 	}
@@ -944,7 +944,7 @@ proc ::cluster::shares { vm { shares {}} } {
                         # directory onto the remote VM directory.
                         # Arrange for rsync to understand those
                         # properly as directories and not only files.
-                        Run2 -- ${vars::-rsync} -avz -e $ssh \
+                        Run2 -- ${vars::-rsync} -az -e $ssh \
                             [string trimright $host "/"]/ \
                             $hname:[string trimright $mchn "/"]/
                         lappend mounted $mchn
@@ -966,7 +966,8 @@ proc ::cluster::shares { vm { shares {}} } {
 # ::cluster::sync -- Shares synchronisation
 #
 #       This procedure will arrange for rsync shares to be
-#       synchronised from the guest VM back to the host machine.
+#       synchronised from the guest VM back to the host machine (get
+#       operation) or the other way around (put operation).
 #
 #       The format of the list of shares is understood as follows.  A
 #       single path will be shared at the same location than the host
@@ -983,6 +984,7 @@ proc ::cluster::shares { vm { shares {}} } {
 #
 # Arguments:
 #        vm        Virtual machine description dictionary
+#        op        Operation to execute (get or put)
 #        shares    List of share mounts, empty to use the list from the
 #                  VM description
 #
@@ -991,7 +993,7 @@ proc ::cluster::shares { vm { shares {}} } {
 #
 # Side Effects:
 #       Uses rsync on remote and locally to synchronise
-proc ::cluster::sync { vm { shares {} } } {
+proc ::cluster::sync { vm {op get} {shares {}} } {
     set synchronised {}
     set nm [dict get $vm -name]
     if { ([dict exists $vm state] \
@@ -1015,11 +1017,23 @@ proc ::cluster::sync { vm { shares {} } } {
         # rsync back from the guest machine onto the host machine.
         # This forces rsync to properly understand those locations as
         # directories.
-        foreach {host mchn type} $sharing {
-            Run2 -- ${vars::-rsync} -avuz --delete -e $ssh \
-                $hname:[string trimright $mchn "/"]/ \
-                [string trimright $host "/"]/
-            lappend synchronised $mchn
+        switch -nocase -glob -- $op {
+            "g*" {
+                foreach {host mchn type} $sharing {
+                    Run2 -- ${vars::-rsync} -auz --delete -e $ssh \
+                        $hname:[string trimright $mchn "/"]/ \
+                        [string trimright $host "/"]/
+                    lappend synchronised $mchn
+                }
+            }
+            "p*" {
+                foreach {host mchn type} $sharing {
+                    Run2 -- ${vars::-rsync} -auz --delete -e $ssh \
+                        [string trimright $host "/"]/ \
+                        $hname:[string trimright $mchn "/"]/
+                    lappend synchronised $mchn
+                }
+            }
         }
     }
 
@@ -1042,6 +1056,10 @@ proc ::cluster::sync { vm { shares {} } } {
 # Side Effects:
 #       None.
 proc ::cluster::halt { vm } {
+    # Start by getting back all changes that might have occured on the
+    # the VM, if relevant...
+    sync $vm get
+
     set nm [dict get $vm -name]
     log NOTICE "Bringing down machine $nm..."
     # First attempt to be gentle against the machine, i.e. using the
@@ -1243,7 +1261,7 @@ proc ::cluster::destroy { vm } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::start { vm { sleep 1 } { retries 3 } } {
+proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
     set nm [dict get $vm -name]
     if { $retries < 0 } {
         set retries ${vars::-retries}
@@ -1253,7 +1271,14 @@ proc ::cluster::start { vm { sleep 1 } { retries 3 } } {
         Machine start $nm
         set state [Wait $vm [list "running" "stopped" "error"]]
         if { $state eq "running" } {
-            Discovery [bind $vm]
+            # Start by putting back all changes that might have
+            # occured onto the the VM, if relevant...
+            set vm [bind $vm]
+            if { [string is true $sync] } {
+                sync $vm put
+            }
+
+            Discovery $vm
             return 1
         }
         incr retries -1
