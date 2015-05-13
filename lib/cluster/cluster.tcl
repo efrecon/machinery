@@ -63,6 +63,10 @@ namespace eval ::cluster {
 	variable -retries   3
 	# Environement variable prefix
 	variable -prefix    "MACHINERY_"
+	# Sharing mapping between drivers (pattern matching) and types
+	variable -sharing   "virtualbox vboxsf * rsync"
+	# Supported sharing types.
+	variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
         variable attached   ""
         # version numbers for our tools (on demand)
@@ -762,8 +766,6 @@ proc ::cluster::ports { vm { ports {}} } {
 #        vm        Virtual machine description dictionary
 #        shares    List of share mounts, empty to use the list from the
 #                  VM description
-#        sleep     Number of seconds to wait between mount attempts
-#        retries   Number of times to attempt each mount
 #
 # Results:
 #       The list of directories that were successfully mounted.
@@ -787,6 +789,16 @@ proc ::cluster::shares { vm { shares {}} } {
 	set origin [file dirname [dict get $vm origin]]
     }
 
+    # Detect default sharing type based on the driver of the virtual
+    # machine.
+    set sharing ""
+    foreach {driver type} ${vars::-sharing} {
+	if { [string match $driver [dict get $vm -driver]] } {
+	    set sharing $type
+	    break
+	}
+    }
+
     # Convert xx:yy constructs to pairs of shares, convert single
     # shares to two shares (the same) and append all these pairs to
     # the list called opening.  Arrange for the list to only contain
@@ -794,10 +806,10 @@ proc ::cluster::shares { vm { shares {}} } {
     set mounted {}
     set opening {}
     foreach spec $shares {
-        set spec [Shares $spec $origin];   # Extraction and syntax check
+        set spec [Shares $spec $origin $sharing]; # Extraction and syntax check
         if { [llength $spec] > 0 } {
-            foreach {host mchn} $spec break
-            lappend opening $host $mchn
+            foreach {host mchn sharing} $spec break
+            lappend opening $host $mchn $sharing
         }
     }
 
@@ -813,7 +825,7 @@ proc ::cluster::shares { vm { shares {}} } {
             # new list called sharing.  This allows us to halt the
             # machine as little as possible.
             set sharing {}
-            foreach {host mchn} $opening {
+            foreach {host mchn sharing} $opening {
                 set share [virtualbox::addshare $nm $host]
                 if { $share ne "" } {
                     lappend sharing $host $mchn $share
@@ -2131,7 +2143,8 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
 #       Description
 #
 # Arguments:
-#        spec        Share mount specification
+#       spec        Share mount specification
+#       origin      Relative directory location, if relevant.
 #
 # Results:
 #       Return a pair compose of the host path and the guest path, or
@@ -2139,19 +2152,30 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::Shares { spec {origin ""}} {
+proc ::cluster::Shares { spec {origin ""} {type ""}} {
     set host ""
     set mchn ""
+    set sharing ""
+
     # Segregates list from the string representation of shares.
     if { [llength $spec] >= 2 } {
-        foreach {host mchn} $spec break
+        foreach {host mchn sharing} $spec break
     } else {
         set colon [string first ":" $spec]
         if { $colon >= 0 } {
-            foreach {host mchn} [split $spec ":"] break
+            foreach {host mchn sharing} [split $spec ":"] break
         } else {
             set host $spec
         }
+    }
+
+    # Make sure we have a sharing type if default and segragate away
+    # types that are not recognised.
+    if { $sharing eq "" } { set sharing $type }
+    if { $sharing ne "" && $sharing ni $vars::sharing } {
+	log ERROR "Sharing type $sharing is not supported, should be one of\
+                   [join $vars::sharing ,\ ]"
+	return {}
     }
 
     # Resolve (local) environement variables to the values and make
@@ -2173,7 +2197,7 @@ proc ::cluster::Shares { spec {origin ""}} {
         return {}
     } else {
         if { [file isdirectory $host] } {
-            return [list $host $mchn]
+            return [list $host $mchn $sharing]
         } else {
             log ERROR "$host is not a directory"
         }
