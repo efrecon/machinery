@@ -6,7 +6,7 @@
 ##      This module contains high(er)-level interfaces to a number of
 ##      unix/linux command-line tools and parameters.  Most of the
 ##      time, the commands are named similarily to the tools, even
-##      though their output is meant to be easily crunch by Tcl
+##      though their output is meant to be easily crunched by Tcl
 ##      callers.
 ##
 ##################
@@ -193,24 +193,12 @@ proc ::cluster::unix::scp { nm src_fname { dst_fname "" } } {
 
     log NOTICE "Copying local $src_fname to ${nm}:$dst_fname"
 
-    # Guess raw SSH command by running ssh-ing "echo" into the virtual
-    # machine.  This assumes docker-machine output the ssh command
-    # onto the stderr.
-    log DEBUG "Detecting SSH command into $nm"
-    # Skip to last line since newer versions output more when debug is on...
-    set sshinfo [lindex [Machine -return -stderr -- --debug ssh $nm echo ""] end]
-    set ssh [string first ssh $sshinfo];  # Lookup the string 'ssh': START
-    set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
-    set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
-
     # Construct an scp command out of the ssh command!  This converts
     # the arguments between the ssh and scp namespaces, which are not
     # exactly the same.
+    set cmd [remote $nm]
     set cmd [regsub ^ssh $cmd scp]
     set cmd [regsub -- -p $cmd -P]
-    foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
-        set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
-    }
     set dst [lindex $cmd end];   # Extract out user@hostname, last in
                                  # (ssh)command
     set scp [lrange $cmd 0 end-1]
@@ -222,6 +210,23 @@ proc ::cluster::unix::scp { nm src_fname { dst_fname "" } } {
     eval [linsert $scp 0 Run]
 }
 
+
+proc ::cluster::unix::remote { nm } {
+    log DEBUG "Detecting SSH command into $nm"
+    # Skip to last line since newer versions output more when debug is on...
+    set sshinfo [lindex [Machine -return -stderr -- --debug ssh $nm echo ""] \
+                     end]
+    set ssh [string first ssh $sshinfo];  # Lookup the string 'ssh': START
+    set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
+    set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
+
+    # Replace options setting arguments to use = to make it easier for
+    # callers.
+    foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
+        set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
+    }
+    return $cmd
+}
 
 # ::cluster::unix::id -- Interface to user id information
 #

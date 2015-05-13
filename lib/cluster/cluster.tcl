@@ -35,10 +35,11 @@ namespace eval ::cluster {
         # Allowed VM keys
         variable -keys      {cpu size memory master labels driver options \
                                  ports shares images compose registries aliases}
-        # Path to docker executables
+        # Path to common executables
         variable -machine   docker-machine
         variable -docker    docker
         variable -compose   docker-compose
+        variable -rsync     rsync
         # Current verbosity level
         variable -verbose   NOTICE
 	# Locally cache images?
@@ -615,8 +616,8 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
 #       boot2docker.
 #
 # Arguments:
-#        vm        Virtual machine description dictionary
-#        lbls        Even long list of keys and values: the labels to set.
+#        vm     Virtual machine description dictionary
+#        lbls   Even long list of keys and values: the labels to set.
 #               Empty list means taking the labels from the VM description.
 #
 # Results:
@@ -629,7 +630,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # from vm object.
     if { [string length $lbls] == 0 } {
         if { ![dict exists $vm -labels] } {
-            return
+            return $vm
         }
         set lbls [dict get $vm -labels]
     }
@@ -750,17 +751,29 @@ proc ::cluster::ports { vm { ports {}} } {
 
 # ::cluster::shares -- Shares mounting
 #
-#       This procedure will arrange for shares to be mounted between
-#       the host machine and the guest machine.  This is only
-#       implemented on top of the virtualbox driver at present.
+#       This procedure will arrange for shares to be mounted or
+#       prepared for synchronisation between the host machine and the
+#       guest machine.  On top of the virtualbox driver, and when the
+#       shares are marked with the type vboxsf, this will implement a
+#       proper (and persistent) mount.  On top of all other drivers,
+#       and/or when the type is rsync, the content of the directory on
+#       the host machine will be copied to the guest VM at
+#       initialisation time using rsync.  Synchronising the other way
+#       around during the life of the VM can be achieved using the
+#       procedure called sync.
 #
 #       The format of the list of shares is understood as follows.  A
 #       single path will be shared at the same location than the host
-#       within the guest.  A share specification can also be a pair
-#       (i.e. a list itself!)  composed of a host path and a guest
-#       path.  Finally, a share specification can also have the form
-#       host:guest where host and guest should the path on the local
-#       host and where to mount it on the guest.
+#       within the guest.  A share specification can also be a list of
+#       two or more items composed of a host path and a guest path and
+#       possibly a type.  When the type is missing, it will default to
+#       a good default depending on the driver.  Finally, a share
+#       specification can also have the form host:guest:type where
+#       host and guest should the path on the local host and where to
+#       mount it on the guest.  In that case, the type is optional and
+#       will properly default as explained above.  If the guest
+#       directory is empty, it is understood as the same as the host
+#       directory.
 #
 # Arguments:
 #        vm        Virtual machine description dictionary
@@ -771,166 +784,246 @@ proc ::cluster::ports { vm { ports {}} } {
 #       The list of directories that were successfully mounted.
 #
 # Side Effects:
-#       Will use the Virtual box commands to request for port
-#       forwarding.
+#       Plenty as it performs mounts and/or rsync synchronisation
 proc ::cluster::shares { vm { shares {}} } {
-    # Get shares, either from parameters (overriding the VM object) or
-    # from vm object.
-    if { [string length $shares] == 0 } {
-        if { ![dict exists $vm -shares] } {
-            return
-        }
-        set shares [dict get $vm -shares]
-    }
-
-    # Access origin to be able to resolve path of relative shares.
-    set origin ""
-    if { [dict exists $vm origin] } {
-	set origin [file dirname [dict get $vm origin]]
-    }
-
-    # Detect default sharing type based on the driver of the virtual
-    # machine.
-    set sharing ""
-    foreach {driver type} ${vars::-sharing} {
-	if { [string match $driver [dict get $vm -driver]] } {
-	    set sharing $type
-	    break
-	}
-    }
-
-    # Convert xx:yy constructs to pairs of shares, convert single
-    # shares to two shares (the same) and append all these pairs to
-    # the list called opening.  Arrange for the list to only contain
-    # resolved shares as we allow for environment variable resolution
     set mounted {}
-    set opening {}
-    foreach spec $shares {
-        set spec [Shares $spec $origin $sharing]; # Extraction and syntax check
-        if { [llength $spec] > 0 } {
-            foreach {host mchn sharing} $spec break
-            lappend opening $host $mchn $sharing
-        }
-    }
+    set opening [Mounting $vm $shares]
 
     # Some nic'ish ouput of the shares and what we do.
     set nm [dict get $vm -name]
-    log NOTICE "Mounting [expr {[llength $opening]/2}] share(s) for $nm..."
+    log NOTICE "Sharing [expr {[llength $opening]/3}] volume(s) for $nm..."
 
-    switch [dict get $vm -driver] {
-        "virtualbox" {
-            # Add shares as necessary.  This might halt the virtual
-            # machine if they do not exist yet, so we gather their
-            # names together with host and guest path information in a
-            # new list called sharing.  This allows us to halt the
-            # machine as little as possible.
-            set sharing {}
-            foreach {host mchn sharing} $opening {
-                set share [virtualbox::addshare $nm $host]
-                if { $share ne "" } {
-                    lappend sharing $host $mchn $share
-                }
-            }
-
-            # Now start virtual machine as we will be manipulating the
-            # runtime state of the machine.  This should only starts
-            # the machines if it is not running already.
-            if { ![start $vm] } {
-                log WARN "Could not start machine to perform mounts!"
-                return $mounted
-            }
-
-            # Find out id of main user on virtual machine to be able
-            # to mount shares under that UID.
-	    set idinfo [unix id $nm id]
-	    if { [dict exists $idinfo uid] } {
-		set uid [dict get $idinfo uid]
-		log DEBUG "User identifier in machine $nm is $uid"
-	    } else {
-		set uid ""
-	    }
-
-            # And arrange for the destination directories to exist
-            # within the guest and perform the mount.
-            foreach {host mchn share} $sharing {
-		if { [unix mount $nm $share $mchn $uid] } {
-		    lappend mounted $mchn
-		}
-            }
-
-	    # Finally arrange for the mounts to persist over time.
-	    # This is overly complex, but the code below is both able
-	    # to create the file and/or to amend it with our mounting
-	    # information.  We also add machine-parseable comments so
-	    # recreation of data would be possible.
-	    set b2d_dir [file dirname ${vars::-bootlocal}]
-	    set bootlocal {}
-	    foreach f [Machine -return -- ssh $nm "ls -1 $b2d_dir"] {
-		if { $f eq [file tail ${vars::-bootlocal}] } {
-		    set bootlocal [Machine -return -- \
-				       ssh $nm "cat ${vars::bootlocal}"]
+    # Add shares as necessary.  This might halt the virtual machine if
+    # they do not exist yet, so we collect their names together with
+    # host and guest path information in a new list called sharing.
+    # This allows us to halt the machine as little as possible.
+    array set SHARINFO {}
+    foreach {host mchn type} $opening {
+	switch -glob -- $type {
+	    "v*box*" {
+		if { [dict get $vm -driver] ne "virtualbox" } {
+		    log WARN "Cannot use $type sharing on other drivers than\
+                              virtualbox!"
+		} else {
+		    set share [virtualbox::addshare $nm $host]
+		    if { $share ne "" } {
+			lappend SHARINFO(vboxsf) $host $mchn $share
+		    }
 		}
 	    }
+	    "rsync" {
+		lappend SHARINFO(rsync) $host $mchn
+	    }
+	}
+    }
 
-	    # Generate a new section, i.e. a series of bash commands
-	    # that will (re)creates the mounts.  Make sure each series
-	    # of commands is led by a machine parseable comment.
-	    set section {}
-            foreach {host mchn share} $sharing {
-		lappend section "## $share : \"$mchn\" : $uid"
-		foreach cmd [unix mnt.sh $share $mchn $uid] {
-		    lappend section "sudo $cmd"
+    # Now start virtual machine as we will be manipulating the runtime
+    # state of the machine.  This should only starts the machines if
+    # it is not running already.
+    if { [llength [array names SHARINFO]] > 0 } {
+	if { ![start $vm] } {
+	    log WARN "Could not start machine to perform mounts!"
+	    return $mounted
+	}
+    }
+
+    # If we have some rsync-based shares, then we need to make sure
+    # we'll have rsync on the machine!  The following code only works
+    # on the Tinycore linux-based boot2docker.
+    if { [info exists SHARINFO(rsync)] } {
+	log NOTICE "Installing rsync in $nm"
+	Machine ssh $nm "tce-load -wi rsync"
+    }
+
+    # Find out id of main user on virtual machine to be able to mount
+    # shares and/or create directories under that UID.
+    set idinfo [unix id $nm id]
+    if { [dict exists $idinfo uid] } {
+        set uid [dict get $idinfo uid]
+        log DEBUG "User identifier in machine $nm is $uid"
+    } else {
+        set uid ""
+    }
+
+    foreach type [array names SHARINFO] {
+	switch $type {
+	    "vboxsf" {
+		# And arrange for the destination directories to exist
+		# within the guest and perform the mount.
+		foreach {host mchn share} $SHARINFO(vboxsf) {
+		    if { [unix mount $nm $share $mchn $uid] } {
+			lappend mounted $mchn
+		    }
 		}
-            }
-	    
-	    # We had no content for bootlocal at all, make sure we
-	    # have a shebang for a shell...
-	    if { [llength $bootlocal] == 0 } {
-		lappend bootlocal "#!/bin/sh"
-		lappend bootlocal ""
-	    }
 
-	    # Look for section start and end markers and either add at
-	    # end of file or replace the section.
-	    set start [lsearch $bootlocal ${vars::-marker}]
-	    if { $start >= 0 } {
-		incr start
-		set end [lsearch $bootlocal ${vars::-marker} $start]
-		incr end -1
-		log DEBUG "Replacing existing persistent mounting section"
-		set bootlocal [lreplace $bootlocal $start $end {*}$section]
-	    } else {
-		log DEBUG "Adding new persistent mounting section"
-		lappend bootlocal ${vars::-marker}
-		foreach l $section {
-		    lappend bootlocal $l
+		# Finally arrange for the mounts to persist over time.
+		# This is overly complex, but the code below is both able
+		# to create the file and/or to amend it with our mounting
+		# information.  We also add machine-parseable comments so
+		# recreation of data would be possible.
+		set b2d_dir [file dirname ${vars::-bootlocal}]
+		set bootlocal {}
+		foreach f [Machine -return -- ssh $nm "ls -1 $b2d_dir"] {
+		    if { $f eq [file tail ${vars::-bootlocal}] } {
+			set bootlocal [Machine -return -- \
+					   ssh $nm "cat ${vars::bootlocal}"]
+		    }
 		}
-		lappend bootlocal ${vars::-marker}
-	    }
 
-	    # Now create a temporary file with the new content
-	    set fname [Temporary [file join ${vars::-tmp} bootlocal]]
-	    set fd [open $fname w]
-	    foreach l $bootlocal {
-		puts $fd $l
+		# Generate a new section, i.e. a series of bash commands
+		# that will (re)creates the mounts.  Make sure each series
+		# of commands is led by a machine parseable comment.
+		set section {}
+		foreach {host mchn share} $SHARINFO(vboxsf) {
+		    lappend section "## $share : \"$mchn\" : $uid"
+		    foreach cmd [unix mnt.sh $share $mchn $uid] {
+			lappend section "sudo $cmd"
+		    }
+		}
+		
+		# We had no content for bootlocal at all, make sure we
+		# have a shebang for a shell...
+		if { [llength $bootlocal] == 0 } {
+		    lappend bootlocal "#!/bin/sh"
+		    lappend bootlocal ""
+		}
+
+		# Look for section start and end markers and either add at
+		# end of file or replace the section.
+		set start [lsearch $bootlocal ${vars::-marker}]
+		if { $start >= 0 } {
+		    incr start
+		    set end [lsearch $bootlocal ${vars::-marker} $start]
+		    incr end -1
+		    log DEBUG "Replacing existing persistent mounting section"
+		    set bootlocal [lreplace $bootlocal $start $end {*}$section]
+		} else {
+		    log DEBUG "Adding new persistent mounting section"
+		    lappend bootlocal ${vars::-marker}
+		    foreach l $section {
+			lappend bootlocal $l
+		    }
+		    lappend bootlocal ${vars::-marker}
+		}
+
+		# Now create a temporary file with the new content
+		set fname [Temporary [file join ${vars::-tmp} bootlocal]]
+		set fd [open $fname w]
+		foreach l $bootlocal {
+		    puts $fd $l
+		}
+		close $fd
+		log DEBUG "Created temporary file with new bootlocal content at\
+                           $fname"
+		
+		# Copy new file to same temp location, make sure it is
+		# executable and install it.
+		log INFO "Persisting shares at reboot through\
+                          ${vars::-bootlocal}"
+		unix scp $nm $fname
+		Machine ssh $nm "chmod a+x $fname"
+		Machine ssh $nm "sudo mv $fname ${vars::-bootlocal}"
 	    }
-	    close $fd
-	    log DEBUG "Created temporary file with new bootlocal content at\
-                       $fname"
-	    
-	    # Copy new file to same temp location, make sure it is
-	    # executable and install it.
-	    log INFO "Persisting shares at reboot through ${vars::-bootlocal}"
-	    unix scp $nm $fname
-	    Machine ssh $nm "chmod a+x $fname"
-	    Machine ssh $nm "sudo mv $fname ${vars::-bootlocal}"
-        }
-        default {
-            log WARN "Cannot mount shares with driver [dict get $vm -driver]"
-        }
+	    "rsync" {
+		# Detect SSH command
+                set ssh [unix remote $nm]
+                set last [lindex $ssh end]
+                if { [regexp {(\w+)@([\w.]+)} $last x uname hname] } {
+                    set ssh [lrange $ssh 0 end-1]
+                    lappend ssh -l $uname
+
+                    # rsync for each
+                    foreach {host mchn} $SHARINFO(rsync) {
+                        # Create directory on remote VM and arrange
+                        # for the UID to match (should we?)
+                        Machine ssh $nm "sudo mkdir -p $mchn"
+                        if { $uid ne "" } {
+                            Machine ssh $nm "sudo chown $uid $mchn"
+                        }
+                        # Synchronise the content of the local host
+                        # directory onto the remote VM directory.
+                        # Arrange for rsync to understand those
+                        # properly as directories and not only files.
+                        Run2 -- ${vars::-rsync} -avz -e $ssh \
+                            [string trimright $host "/"]/ \
+                            $hname:[string trimright $mchn "/"]/
+                        lappend mounted $mchn
+                    }
+		}
+	    }
+	}
+    }
+
+    if { [info exists SHARINFO(rsync)] } {
+        log INFO "Consider running a cron job to synchronise back changes\
+                  that would occur in $nm onto the host!"
     }
 
     return $mounted
+}
+
+
+# ::cluster::sync -- Shares synchronisation
+#
+#       This procedure will arrange for rsync shares to be
+#       synchronised from the guest VM back to the host machine.
+#
+#       The format of the list of shares is understood as follows.  A
+#       single path will be shared at the same location than the host
+#       within the guest.  A share specification can also be a list of
+#       two or more items composed of a host path and a guest path and
+#       possibly a type.  When the type is missing, it will default to
+#       a good default depending on the driver.  Finally, a share
+#       specification can also have the form host:guest:type where
+#       host and guest should the path on the local host and where to
+#       mount it on the guest.  In that case, the type is optional and
+#       will properly default as explained above.  If the guest
+#       directory is empty, it is understood as the same as the host
+#       directory.
+#
+# Arguments:
+#        vm        Virtual machine description dictionary
+#        shares    List of share mounts, empty to use the list from the
+#                  VM description
+#
+# Results:
+#       The list of directories that were successfully synchronised
+#
+# Side Effects:
+#       Uses rsync on remote and locally to synchronise
+proc ::cluster::sync { vm { shares {} } } {
+    set synchronised {}
+    set nm [dict get $vm -name]
+    if { ([dict exists $vm state] \
+              && ![string equal -nocase [dict get $vm state] "running"]) \
+             || ![dict exists $vm state] } {
+        log WARN "Machine $nm not running, cannot sync"
+        return $synchronised
+    }
+
+    # Consider rsync shares and forget about all the other ones...
+    set sharing [Mounting $vm $shares rsync]
+    log NOTICE "Synchronising [expr {[llength $sharing]/3}] share(s) for $nm..."
+
+    # Detect SSH command
+    set ssh [unix remote $nm]
+    set last [lindex $ssh end]
+    if { [regexp {(\w+)@([\w.]+)} $last x uname hname] } {
+        set ssh [lrange $ssh 0 end-1]
+        lappend ssh -l $uname
+
+        # rsync back from the guest machine onto the host machine.
+        # This forces rsync to properly understand those locations as
+        # directories.
+        foreach {host mchn type} $sharing {
+            Run2 -- ${vars::-rsync} -avuz --delete -e $ssh \
+                $hname:[string trimright $mchn "/"]/ \
+                [string trimright $host "/"]/
+            lappend synchronised $mchn
+        }
+    }
+
+    return $synchronised
 }
 
 
@@ -1541,6 +1634,7 @@ proc ::cluster::Run2 { args } {
     upvar \#0 $c CMD
     set CMD(id) $c
     set CMD(command) $args
+    log DEBUG "Executing $CMD(command) and capturing its output"
 
     # Extract some options and start building the
     # pipe.  As we want to capture output of the command, we will be
@@ -2129,6 +2223,71 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     }
 
     return $composed
+}
+
+
+# ::cluster::Mounting -- Return list of mount points and types
+#
+#       This procedure will either take the list of shares from its
+#       arguments or the virtual machine specification and will return
+#       a 3-ary list with, in order, the path to the local directory
+#       on the host, the path to the directory on the machine and the
+#       type of the mounting solution for keeping those directories in
+#       sync at all time.  It can restrict itself to some types
+#       through a selection pattern.
+#
+# Arguments:
+#       vm        Virtual machine description
+#       shares    Overriding list of shares (otherwise, those from machine)
+#       types     Pattern for the types we want to restrict to.
+#
+# Results:
+#       Return a 3-ary list of mount points and their types.
+#
+# Side Effects:
+#       None.
+proc ::cluster::Mounting { vm {shares {}} {types *}} {
+    # Get shares, either from parameters (overriding the VM object) or
+    # from vm object.
+    if { [string length $shares] == 0 } {
+        if { ![dict exists $vm -shares] } {
+            return
+        }
+        set shares [dict get $vm -shares]
+    }
+
+    # Access origin to be able to resolve path of relative shares.
+    set origin ""
+    if { [dict exists $vm origin] } {
+	set origin [file dirname [dict get $vm origin]]
+    }
+
+    # Detect default sharing type based on the driver of the virtual
+    # machine.
+    set sharing ""
+    foreach {driver type} ${vars::-sharing} {
+	if { [string match $driver [dict get $vm -driver]] } {
+	    set sharing $type
+	    break
+	}
+    }
+
+    # Convert xx:yy constructs to pairs of shares, convert single
+    # shares to two shares (the same) and append all these pairs to
+    # the list called opening.  Arrange for the list to only contain
+    # resolved shares as we allow for environment variable resolution
+    set opening {}
+    foreach spec $shares {
+        set spec [Shares $spec $origin $sharing]; # Extraction and syntax check
+        if { [llength $spec] > 0 } {
+            foreach {host mchn type} $spec break
+            if { [string match $types $type] } {
+                lappend opening $host $mchn $type
+            }
+        }
+    }
+
+    return $opening
 }
 
 

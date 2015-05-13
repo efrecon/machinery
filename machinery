@@ -73,6 +73,7 @@ proc ::help:dump { { hdr "" } } {
     puts "\tenv\tExport environment variables for discovery"
     puts "\treinit\tRerun finalisation stages on machine(s), specify via -step"
     puts "\tswarm\tLifecycle management of components via swarm"
+    puts "\tsync\tOne shot synchronisation of rsync shares"
     puts ""
     puts "GLOBAL OPTIONS:"
     foreach { arg val dsc } $::prg_args {
@@ -314,6 +315,20 @@ switch -nocase -- $cmd {
 		cluster destroy $vm
 	    }
 	}
+    }
+    "sync" {
+	# Destroy one or several machines (or the whole cluster if no
+	# arguments).  The machines will be halted before removal.
+	set cluster [init]
+	if { [llength $argv] == 0 } {
+	    set argv [cluster names $cluster]
+	}
+	foreach nm $argv {
+	    set vm [cluster find $cluster $nm]
+	    if { $vm ne "" } {
+                cluster sync $vm
+            }
+        }
     }
     "env" {
 	set cluster [init]
