@@ -95,29 +95,42 @@ if necessary during that process.  More details are available in the section on
 the supported YAML format.  Note that instead of `up`, machinery also supports
 the synonym `start`.
 
-`machinery` is able to mount local host shares within the virtual machines that
-runs the virtualbox driver.  Mounting is performed at each machine start,
-meaning that from that point of view running `machinery up` with an existing
-machine as an argument is not equivalent to running `docker-machine start` with
-the same machine as an argument.
+`machinery` is able to mount local host shares within the virtual
+machines that runs the virtualbox driver.  Mounting is made persistent
+so that future runs of `docker-machine start` with the same machine as
+an argument will properly mount the shares.  On all other drivers,
+`machinery` will use rsync when bringing up and down the machines to
+keep the directories synchronised.
 
-In addition, `machinery` keeps a hidden environment file with the networking
-information for all the machines of the cluster ([see below](#netinfo)).  This
-file will have the same root name as the cluster YAML file, but with a leading `.`
-to hide it and the extension `.env` (see `env` [command description](#env)).
+In addition, `machinery` keeps a hidden environment file with the
+networking information for all the machines of the cluster ([see
+below](#netinfo)).  This file will have the same root name as the
+cluster YAML file, but with a leading `.` to hide it and the extension
+`.env` (see `env` [command description](#env)).
 
 #### halt
 
-The command `halt` will bring down one or several machines, which names would
-follow on the command line.  If no machines are specified, `machinery` will
-bring down all machines in the cluster.  Note that instead of `halt`, machinery
-also supports the synonym `stop`.
+The command `halt` will bring down one or several machines, which
+names would follow on the command line.  If no machines are specified,
+`machinery` will bring down all machines in the cluster.  Note that
+instead of `halt`, machinery also supports the synonym `stop`.  All
+directories that should be synchronised will be copied back to the
+host before their respective machines are brought down.
 
 #### destroy
 
-The command `destroy` will destroy entirely and irrevocably one or several
-machines, which names would follow on the command line.  If no machines are
-specified, `machinery` will destroy all machines in the cluster.
+The command `destroy` will destroy entirely and irrevocably one or
+several machines, which names would follow on the command line.  If no
+machines are specified, `machinery` will destroy all machines in the
+cluster.  Synchronised directories will be copied before machine
+destruction.
+
+#### sync
+
+The command `sync` will recursively copy the content of VM directories
+that are marked as shared back to the host.  Calling `machinery sync`
+from a `cron` job is a good way to ensure data is copied between
+restarts of the machines.
 
 #### swarm
 
@@ -409,27 +422,48 @@ machines.
 
 #### `shares`
 
-`shares` should be a list of share mounting specifications.  A specification is
-a either a single path or a host path separated from a guest path using a colon.
-When there is a single path, this path will be used as both the host and the
-guest path.  In paths, any occurrence of the name of an environment variable
-preceded with the `$`-sign will be replaced by the value of that local variable.
-For example, specifying `$HOME` would arrange for the path to your home
-directory to be available at the same location within the guest machine; handy
-whenever you want to transfer development files or initiate components.
+`shares` should be a list of share mounting specifications.  A
+specification is a either a single path or a host path separated from
+a guest path using a colon.  In addition, there might be a trailing
+type following another colon sign.  Recognised types are `vboxsf` and
+`rsync`.  When there is a single path (or the guest path is empty),
+this path will be used as both the host and the guest path.  In paths,
+any occurrence of the name of an environment variable preceded with
+the `$`-sign will be replaced by the value of that local variable.
+For example, specifying `$HOME` would arrange for the path to your
+home directory to be available at the same location within the guest
+machine; handy whenever you want to transfer development files or
+initiate components.  Relative path are resolved to the directory
+hosting the cluster definition YAML file.
 
-At present, share mounting is only supported on virtualbox based machines.
-Shares are declared once within the virtual machine, but they will be mounted as
-soon as a machine has been brought up using a `mount` command executed in the
-guest machine at startup.
+The default type is `vboxsf` on virtualbox-based machines and `rsync`
+on top of all other drivers.  When using the `rsync`type, you can
+bring back changes that would have occured within the virtual machine
+onto the host using the command `sync`.  When proper mounting is
+possible, the mounting will persist restarts of the virtual machine,
+e.g. when doing `docker-machine restart` or similar.
 
 #### `images`
 
-`images` should be a list of images to automatically pull from registries once a
-virtual machine has been created, initialised and verified.  This can be handy
-if you want to make sure images are already present when your machine is being
-put into action.  For example, `docker-compose` will sometimes timeout the first
-time that it schedules components as image downloading takes too long.
+`images` should be a list of images to automatically pull from
+registries once a virtual machine has been created, initialised and
+verified.  This can be handy if you want to make sure images are
+already present when your machine is being put into action.  For
+example, `docker-compose` will sometimes timeout the first time that
+it schedules components as image downloading takes too long.
+
+The default behaviour is to download images on the host and to
+transfer them to the virtual machine using a combination of `docker
+save` and `docker load`, i.e. as `tar` files.  This has two benefits:
+
+1. You can easily push images of private nature onto the virtual
+   machines without exporting any credentials or similar.
+2. If you have many machines using the same image, this can be quicker
+   than downloading from a remote registry.
+
+To switch off that behaviour and download the images from the virtual
+machines instead, set the global option `-cache` to `off`, `0` or
+`false`.
 
 #### `registries`
 
@@ -557,7 +591,7 @@ Docker Machine [drivers](https://docs.docker.com/machine/#drivers).
 ## Implementation
 
 `machinery` is written in [Tcl](http://www.tcl.tk/). It requires a recent
-version of Tcl (8.5 at least) and the `yaml` library to be able to parse YAML
+version of Tcl (8.6 at least) and the `yaml` library to be able to parse YAML
 description files.  As the `yaml` library is part of the standard `tcllib`, the
 easiest is usually to install the whole library using your package manager.  For
 example, on ubuntu, running the following will suffice as Tcl is part of the

@@ -10,6 +10,13 @@
   virtual machines through adding a specific section to
   /var/lib/boot2docker/bootlocal.sh or creating the file if necessary.
 
+* Shares can now have a type which defaults properly to vboxsf on the
+  virtualbox driver and to (new type) rsync on all other drivers.
+  This will use rsync to copy the content of a host directory at VM
+  creation and to copy back the content of the VM directory using the
+  new sub-command called `sync`.  Running `machinery sync` as a `cron`
+  job is then probably a good solution.
+
 
 ## v 0.5
 
