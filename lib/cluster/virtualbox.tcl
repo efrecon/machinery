@@ -47,6 +47,8 @@ proc ::cluster::virtualbox::info { vm } {
         if { $eq >= 0 } {
             set k [string trim [string range $l 0 [expr {$eq-1}]]]
             set v [string trim [string range $l [expr {$eq+1}] end]]
+            set k [string trim [string trim $k \"]]
+            set v [string trim [string trim $v \"]]
             # Convert arrays into list in the dictionary, otherwise
             # just create a key/value in the dictionary.
             if { [regexp {(.*)\([0-9]+\)} $k - mk] } {
@@ -89,7 +91,7 @@ proc ::cluster::virtualbox::forward { vm args } {
                 Manage modifyvm $vm --natpf1 \
                     "${proto}-${host},$proto,,$host,,$mchn"
             }
-        }        
+        }
     }
 }
 
@@ -136,8 +138,7 @@ proc ::cluster::virtualbox::addshare { vm path } {
         log INFO "Adding share ${vm}:${nm} for localhost:$path"
         Manage sharedfolder add $vm \
             --name $nm \
-            --hostpath $path \
-            --automount
+            --hostpath $path
     }
     return $nm
 }
@@ -151,10 +152,10 @@ proc ::cluster::virtualbox::addshare { vm path } {
 #
 # Arguments:
 #        vm        Name or identifier of virtualbox guest machine.
-#        respit        Respit period, in seconds.
+#        respit    Respit period, in seconds.
 #
 # Results:
-#       None.
+#       1 if machine was halted, 0 otherwise
 #
 # Side Effects:
 #       Will block while waiting for the machine to gently shutdown.
@@ -164,20 +165,12 @@ proc ::cluster::virtualbox::halt { vm { respit 15 } } {
 
     # Wait for VM to shutdown
     log NOTICE "Waiting for $vm to shutdown..."
-    while {$respit >= 0} {
-        set id [Running $vm]
-        if { $id eq "" } {
-            break
-        } else {
-            after 1000
-        }
-    }
-
-    # Power it off if it was still on.
-    if { $id ne "" } {
+    if { ![Wait $vm $respit] } {
         log NOTICE "Forcing powering off for $vm"
         Manage controlvm $vm poweroff
+        return [Wait $vm $respit]
     }
+    return 1
 }
 
 
@@ -188,7 +181,7 @@ proc ::cluster::virtualbox::halt { vm { respit 15 } } {
 #
 # Arguments:
 #        vm        Name or identifier of virtualbox guest machine.
-#        path        Local host path
+#        path      Local host path
 #
 # Results:
 #       Return the identifier of the share if it existed, an empty
@@ -242,6 +235,21 @@ proc ::cluster::virtualbox::Running { vm } {
 }
 
 
+proc ::cluster::virtualbox::Wait { vm { respit 15 } } {
+    while {$respit >= 0} {
+        set nfo [info $vm]
+        if { [dict exists $nfo VMState] \
+            && [string equal -nocase [dict get $nfo VMState] "poweroff"] } {
+            return 1
+        } else {
+            log DEBUG "$vm still running, keep waiting"
+            after 1000
+            incr respit -1
+        }
+    }
+    return 0
+}
+
 proc ::cluster::virtualbox::Manage { args } {
     # Isolate -- that will separate options to procedure from options
     # that would be for command.  Using -- is MANDATORY if you want to
@@ -253,8 +261,8 @@ proc ::cluster::virtualbox::Manage { args } {
     } else {
         set opts [list]
     }
-    
-    return [eval [namespace parent]::Run $opts -- ${vars::-manage} $args]
+
+    return [eval [namespace parent]::Run2 $opts -- ${vars::-manage} $args]
 }
 
 
