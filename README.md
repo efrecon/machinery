@@ -36,7 +36,7 @@ be started up when `db` is brought up and created.
 
     wk01: &worker
       driver: virtualbox
-      memory:2048
+      memory: 2GiB
       labels:
         role: worker
     db:
@@ -55,27 +55,27 @@ be started up when `db` is brought up and created.
       shares:
         - $HOME
 
-Given access to a cluster definition file such as the one described above, the
-following command would create all the configured machines and arrange for a
-swarm token to be created when first executed.
+Given access to a cluster definition file such as the one described
+above, the following command would create all the configured machines
+and arrange for a swarm token to be created when first executed.
 
     machinery up
 
-And the following command would gently bring the machine called `db` down and
-then destroy it.
+And the following command would gently bring the machine called `db`
+down and then destroy it.
 
     machinery destroy db
 
-If you had a YAML compose project description file called `myapp.yml` describing
-the components to run on your cluster, you could schedule it for execution by
-calling:
+If you had a YAML compose project description file called `myapp.yml`
+describing the components to run on your cluster, you could schedule
+it for execution by calling:
 
     machinery swarm myapp.yml
 
 Do you want to try for yourself at once? Jump to the bottom of this
 documentation and read and try the example section.  You might want to
 download a "compiled" [binary](https://github.com/efrecon/machinery/releases)
-to avoid solving dependencies.
+to avoid having to solve the few dependencies `machinery` has yourself.
 
 ## Operating on the cluster
 
@@ -383,12 +383,16 @@ driver does not support that option.
 
 In its simplest form, `size` is an integer and specifies the size of
 the virtual disk for the virtual machine.  This should be expressed in
-MB.  To make it simpler, human-readable strings are also understood,
-e.g. 20G would specify a size of 20
-[gigabytes](http://en.wikipedia.org/wiki/Gigabyte). All letters from
-the metric system are recognized, from `b` (for bytes) to `y` (for
-yottabyte). This is case insensitive and `machinery` will also
-recognise unit specifications such as `MB`.  Note that this will follows
+MB (see below).
+
+To make it simpler, human-readable strings are also understood,
+e.g. 20G would specify a size of 20 gigabytes.  `machinery` is able to
+make the difference between units expressed using the International
+System of Units (SI) and the binary-based units from the International
+Electrotechnical Commission (IEC).  Thus `1GB` is written according to
+SI metrics and is 1 000 000 000 bytes, while `1GiB` is written
+according to IEC metrics and is 1 073 741 824 bytes.  Unit specifications
+are case insensitive.
 
 The option will be automatically translated to each driver-specific
 option whenever possible, possibly making the translation between MB
@@ -397,10 +401,11 @@ driver does not support that option.
 
 #### `memory`
 
-`memory` should be an integer and specifies the amount of memory in MB to
-allocate for that virtual machine.  This will be automatically translated to
-each driver-specific option whenever possible.  A warning will be issued at
-creation time if the driver does not support that option.
+`memory` should specify the amount of memory for that virtual machine,
+it defaults to being expressed in MiB (see discussion above).  This
+will be automatically translated to each driver-specific option
+whenever possible.  A warning will be issued at creation time if the
+driver does not support that option.
 
 #### `labels`
 

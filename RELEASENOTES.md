@@ -20,6 +20,11 @@
 * Fixed bug that would prevent `machinery` to mount some of the shares
   using `vboxsf`.
 
+* Adding support for human-readable sizes, e.g. `10G` for 10 gigabytes
+  (powers of 1000), or `1GiB` for 1 gigibytes (powers of 1024
+  instead!).
+
+
 ## v 0.5
 
 * The default is now to use the locally cached images when
