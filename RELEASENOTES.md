@@ -17,6 +17,8 @@
   new sub-command called `sync`.  Running `machinery sync` as a `cron`
   job is then probably a good solution.
 
+* Fixed bug that would prevent `machinery` to mount some of the shares
+  using `vboxsf`.
 
 ## v 0.5
 

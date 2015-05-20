@@ -41,7 +41,7 @@ namespace eval ::cluster::virtualbox {
 # Side Effects:
 #       None.
 proc ::cluster::virtualbox::info { vm } {
-    log INFO "Getting info for guest $vm"
+    log DEBUG "Getting info for guest $vm"
     foreach l [Manage -return -- showvminfo $vm --machinereadable --details] {
         set eq [string first "=" $l]
         if { $eq >= 0 } {
@@ -166,7 +166,7 @@ proc ::cluster::virtualbox::halt { vm { respit 15 } } {
     # Wait for VM to shutdown
     log NOTICE "Waiting for $vm to shutdown..."
     if { ![Wait $vm $respit] } {
-        log NOTICE "Forcing powering off for $vm"
+        log NOTICE "Forcing powering off of $vm"
         Manage controlvm $vm poweroff
         return [Wait $vm $respit]
     }
