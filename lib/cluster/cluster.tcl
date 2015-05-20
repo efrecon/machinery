@@ -664,22 +664,42 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Get current set of arguments, this assumes a boot2docker image!
     # We do some quick and dirty parsing of this UNIX defaults file,
     # trimming away leading and ending quotes, skipping comments and
-    # empty lines.  The result is an array.
+    # empty lines.  The algorithm is able to handle quoted strings
+    # that span several lines, but not the subtilities of bash
+    # quoting.
     log DEBUG "Getting current boot2docker profile"
+    set k ""
     foreach l [Machine -return -- ssh $nm cat ${vars::-profile}] {
-        set l [string trim $l]
-        if { $l ne "" && [string index $l 0] ne "\#" } {
-            set equal [string first "=" $l]
-            set k [string range $l 0 [expr {$equal-1}]]
-            set v [string range $l [expr {$equal+1}] end]
-            set DARGS($k) [string trim $v "'\""]; # Trim away quotes
+        if { $k eq "" } {
+            set l [string trim $l]
+            if { $l ne "" && [string index $l 0] ne "\#" } {
+                set equal [string first "=" $l]
+                set k [string trim [string range $l 0 [expr {$equal-1}]]]
+                set v [string trimleft [string range $l [expr {$equal+1}] end]]
+                set unquoted [string map {"\"" "" "'" ""} $v]
+                set nq [expr {[string length $v]-[string length $unquoted]}]
+                if { $nq%2==0 } {
+                    set DARGS($k) \
+                        [string trim [string trim [string trim $v] "\"'"]]
+                    set k ""
+                }
+            }
+        } else {
+            append v \n
+            append v $l
+            set unquoted [string map {"\"" "" "'" ""} $v]
+            set nq [expr {[string length $v]-[string length $unquoted]}]
+            if { $nq%2==0 } {
+                set DARGS($k) [string trim [string trim [string trim $v] "\"'"]]
+                set k ""
+            }
         }
     }
 
     # Append labels to EXTRA_ARGS index in the array.  Maybe should we
     # parse for their existence before?
     foreach {k v} $lbls {
-        append DARGS(EXTRA_ARGS) " --label=${k}=${v}"
+        append DARGS(EXTRA_ARGS) " --label ${k}=${v}"
     }
 
     # Create a local temporary file with the new content.  This is far
@@ -690,8 +710,12 @@ proc ::cluster::tag { vm { lbls {}}} {
 
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
-    unix scp $nm $fname
-    Run ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
+    if { [vcompare ge [Version machine] 0.3] } {
+        Machine scp $fname ${nm}:${fname}
+    } else {
+        unix scp $nm $fname
+    }
+    Run2 ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
 
     # Cleanup and restart machine to make sure the labels get live.
     file delete -force -- $fname;      # Remove local file, not needed anymore
@@ -939,7 +963,11 @@ proc ::cluster::shares { vm { shares {}} } {
 		# executable and install it.
 		log INFO "Persisting shares at reboot through\
                           ${vars::-bootlocal}"
-		unix scp $nm $fname
+                if { [vcompare ge [Version machine] 0.3] } {
+                    Machine scp $fname ${nm}:${fname}
+                } else {
+                    unix scp $nm $fname
+                }
 		Machine ssh $nm "chmod a+x $fname"
 		Machine ssh $nm "sudo mv $fname ${vars::-bootlocal}"
 	    }
@@ -1219,7 +1247,11 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 		Docker save -o $tmp_fpath $img
 		log DEBUG "Created local snapshot of $img at $tmp_fpath"
 		# Copy the tar to the machine, we use the same path, it's tmp
-		unix scp $nm $tmp_fpath
+                if { [vcompare ge [Version machine] 0.3] } {
+                    Machine scp $tmp_fpath ${nm}:${tmp_fpath}
+                } else {
+                    unix scp $nm $tmp_fpath
+                }
 		# Give the tar to docker on the remote machine
 		Attach $vm
 		log DEBUG "Loading $nm:$tmp_fpath into $img at $nm"
@@ -2871,6 +2903,8 @@ proc ::cluster::Version { tool } {
         docker {
             if { [dict get $vars::versions $tool] eq "" } {
                 dict set vars::versions $tool [VersionQuery $tool]
+                log DEBUG "Current version for $tool is\
+                           [dict get $vars::versions $tool]"
             }
             return [dict get $vars::versions $tool]
         }
