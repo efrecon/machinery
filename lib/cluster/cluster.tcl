@@ -75,16 +75,24 @@ namespace eval ::cluster {
 	# Object generation identifiers
 	variable generator  0
 	# Size converters
-	variable converter [list \
-				b* 1 \
-				k* 1000.0 \
-				m* 1000000.0 \
-				g* 1000000000.0 \
-				t* 1000000000000.0 \
-				p* 1000000000000000.0 \
-				e* 1000000000000000000.0 \
-				z* 1000000000000000000000.0 \
-				y* 1000000000000000000000000.0]
+	variable converters [list \
+				 {^b$} 1 \
+				 {^k(?!i)(b|)$} 1000.0 \
+				 {^ki(b|)$}     1024.0 \
+				 {^m(?!i)(b|)$} [expr {pow(1000,2)}] \
+				 {^mi(b|)$}     [expr {pow(1024,2)}] \
+				 {^g(?!i)(b|)$} [expr {pow(1000,3)}] \
+				 {^gi(b|)$}     [expr {pow(1024,3)}] \
+				 {^t(?!i)(b|)$} [expr {pow(1000,4)}] \
+				 {^ti(b|)$}     [expr {pow(1024,4)}] \
+				 {^p(?!i)(b|)$} [expr {pow(1000,5)}] \
+				 {^pi(b|)$}     [expr {pow(1024,5)}] \
+				 {^e(?!i)(b|)$} [expr {pow(1000,6)}] \
+				 {^ei(b|)$}     [expr {pow(1024,6)}] \
+				 {^z(?!i)(b|)$} [expr {pow(1000,7)}] \
+				 {^zi(b|)$}     [expr {pow(1024,7)}] \
+				 {^y(?!i)(b|)$} [expr {pow(1000,8)}] \
+				 {^yi(b|)$}     [expr {pow(1024,8)}]]
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -1539,7 +1547,7 @@ proc ::cluster::Create { vm { token "" } } {
             vmwarevsphere --vmwarevsphere-memory-size
         }
         if { [info exist MOPT($driver)] } {
-            lappend cmd $MOPT($driver) [Convert [dict get $vm -memory] M M]
+            lappend cmd $MOPT($driver) [Convert [dict get $vm -memory] MiB MiB]
         } else {
             log WARN "Cannot set memory size for driver $driver!"
         }
@@ -1577,7 +1585,7 @@ proc ::cluster::Create { vm { token "" } } {
         foreach { p opt mult } $SOPT {
             if { $driver eq $p } {
                 lappend cmd $opt \
-		    [expr {[Convert [dict get $vm -size] M M]*$mult}]
+		    [expr {[Convert [dict get $vm -size] MB MB]*$mult}]
                 set found 1
                 break
             }
@@ -2905,49 +2913,35 @@ proc ::cluster::Convert { spec {dft ""} { unit "" } } {
     # see: http://en.wikipedia.org/wiki/Gigabyte
     if { $len == 2 } {
 	set i [string first [format %c $ustart] $spec]
-	set uspec [string range $spec $i end]
-	foreach {f m} $vars::converter {
-	    if { [string match -nocase $f $uspec] } {
-		set val [expr {$val*$m}]
-		set uspec "";   # Use uspec to mark we've converted!
-		break
-	    }
-	}
-	if { $uspec ne "" } {
-	    return -code error "$uspec is not a recogised multiple of bytes"
-	}
+	set m [Multiplier [string range $spec $i end]]
+	set val [expr {$val*$m}]
     } else {
 	if { $dft ne "" } {
-	    foreach {f m} $vars::converter {
-		if { [string match -nocase $f $dft] } {
-		    set val [expr {$val*$m}]
-		    set dft "";   # Use uspec to mark we've converted!
-		    break
-		}
-	    }
-	    if { $dft ne "" } {
-		return -code error "$dft is not a recogised multiple of bytes"
-	    }
+	    set m [Multiplier $dft]
+	    set val [expr {$val*$m}]
 	}
     }
 
     # Now convert back to the requested size
     if { $unit ne "" } {
-	foreach {f m} $vars::converter {
-	    if { [string match -nocase $f $unit] } {
-		set val [expr {$val/$m}]
-		set unit "";   # Use unit to mark we've converted!
-		break
-	    }
-	}
-	if { $unit ne "" } {
-	    return -code error "$unit is not a recogised multiple of bytes"
-	}
+	set m [Multiplier $unit]
+	set val [expr {$val/$m}]
     }
     if { [string match "*.0" $val] } {
 	return [expr {int($val)}]
     }
     return $val
+}
+
+
+proc ::cluster::Multiplier { unit } {
+    foreach {rx m} $vars::converters {
+	if { [regexp -nocase -- $rx $unit] } {
+	    return $m
+	}
+    }
+    
+    return -code error "$unit is not a recognised multiple of bytes"
 }
 
 

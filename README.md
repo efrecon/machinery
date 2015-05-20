@@ -41,7 +41,7 @@ be started up when `db` is brought up and created.
         role: worker
     db:
       driver: virtualbox
-      size: 20000
+      size: 40G
       labels:
         role: db
       compose:
@@ -381,11 +381,19 @@ driver does not support that option.
 
 #### `size`
 
-`size` should be an integer and specifies the size of the virtual disk for the
-virtual machine.  This should be expressed in MB.  The option will be
-automatically translated to each driver-specific option whenever possible,
-possibly making the translation between MB and GB, or similar.  A warning will
-be issued at creation time if the driver does not support that option.  
+In its simplest form, `size` is an integer and specifies the size of
+the virtual disk for the virtual machine.  This should be expressed in
+MB.  To make it simpler, human-readable strings are also understood,
+e.g. 20G would specify a size of 20
+[gigabytes](http://en.wikipedia.org/wiki/Gigabyte). All letters from
+the metric system are recognized, from `b` (for bytes) to `y` (for
+yottabyte). This is case insensitive and `machinery` will also
+recognise unit specifications such as `MB`.  Note that this will follows
+
+The option will be automatically translated to each driver-specific
+option whenever possible, possibly making the translation between MB
+and GB, or similar.  A warning will be issued at creation time if the
+driver does not support that option.
 
 #### `memory`
 
