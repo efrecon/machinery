@@ -1695,21 +1695,23 @@ proc ::cluster::LineRead { c fd } {
     # Parse and analyse output of docker-machine. Do some translation
     # of the loglevels between logrus and our internal levels.
     if { [lindex $CMD(command) 0] eq ${vars::-machine} } {
-	foreach {k v} [string map {"=" " "} $line] {
-	    if { $k eq "msg" } {
-		set line $v
-		break
-	    }
-	    # Translate between loglevels from logrus to internal
-	    # levels.
-	    if { $k eq "level" } {
-		foreach { gl lvl } [list info INFO \
-					warn NOTICE \
-					error WARN \
-					fatal ERROR \
-					panic FATAL] {
-		    if { [string equal -nocase $v $gl] } {
-			set outlvl $lvl
+	if { [string first "msg=" $line] >= 0 } {
+	    foreach {k v} [string map {"=" " "} $line] {
+		if { $k eq "msg" } {
+		    set line $v
+		    break
+		}
+		# Translate between loglevels from logrus to internal
+		# levels.
+		if { $k eq "level" } {
+		    foreach { gl lvl } [list info INFO \
+					    warn NOTICE \
+					    error WARN \
+					    fatal ERROR \
+					    panic FATAL] {
+			if { [string equal -nocase $v $gl] } {
+			    set outlvl $lvl
+			}
 		    }
 		}
 	    }
