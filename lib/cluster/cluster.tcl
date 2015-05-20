@@ -74,6 +74,17 @@ namespace eval ::cluster {
         variable versions   {docker "" compose "" machine ""}
 	# Object generation identifiers
 	variable generator  0
+	# Size converters
+	variable converter [list \
+				b* 1 \
+				k* 1000.0 \
+				m* 1000000.0 \
+				g* 1000000000.0 \
+				t* 1000000000000.0 \
+				p* 1000000000000000.0 \
+				e* 1000000000000000000.0 \
+				z* 1000000000000000000000.0 \
+				y* 1000000000000000000000000.0]
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -1528,7 +1539,7 @@ proc ::cluster::Create { vm { token "" } } {
             vmwarevsphere --vmwarevsphere-memory-size
         }
         if { [info exist MOPT($driver)] } {
-            lappend cmd $MOPT($driver) [dict get $vm -memory]
+            lappend cmd $MOPT($driver) [Convert [dict get $vm -memory] M M]
         } else {
             log WARN "Cannot set memory size for driver $driver!"
         }
@@ -1565,7 +1576,8 @@ proc ::cluster::Create { vm { token "" } } {
         set found 0
         foreach { p opt mult } $SOPT {
             if { $driver eq $p } {
-                lappend cmd $opt [expr {[dict get $vm -size]*$mult}]
+                lappend cmd $opt \
+		    [expr {[Convert [dict get $vm -size] M M]*$mult}]
                 set found 1
                 break
             }
@@ -2856,6 +2868,86 @@ proc ::cluster::Version { tool } {
         }
     }
     return ""
+}
+
+
+# ::cluster::Convert -- SI multiples converter
+#
+#       This procedure will convert sizes (memory or disk) to a target
+#       unit.  The incoming size specification is either a floating
+#       point (see below for value) or a floating point followed by a
+#       unit specifier, e.g. 10k to express 10 kilobytes.  The unit
+#       specifier is case independent and the conversion will
+#       understand both k, kB or KB.  Recognised are multipliers up to
+#       yottabyte, e.g. the leading letters (in order!): b (bytes), k,
+#       m, g, t, p, e, z, y.  When the incoming size, its default unit
+#       can be specified, in which case this is one of the unit string
+#       as described before.  If a returning unit is specified, then it
+#       is a unit string as described before and describes the unit of
+#       the returned value.
+#
+# Arguments:
+#	spec	Size specification, e.g. 1345, 34k or 20MB.
+#	dft	Default Unit of size spec when unspecified, e.g. k, GB, etc.
+#	unit	Unit of converted returned value, e.g. k, GB or similar.
+#
+# Results:
+#       The converted value in the requested SI unit, or an error.
+#
+# Side Effects:
+#       None.
+proc ::cluster::Convert { spec {dft ""} { unit "" } } {
+    # Extract value and first letter of unit specification from
+    # string.
+    set len [scan $spec "%f %c" val ustart]
+
+    # Convert incoming string to number of bytes in metric format,
+    # see: http://en.wikipedia.org/wiki/Gigabyte
+    if { $len == 2 } {
+	set i [string first [format %c $ustart] $spec]
+	set uspec [string range $spec $i end]
+	foreach {f m} $vars::converter {
+	    if { [string match -nocase $f $uspec] } {
+		set val [expr {$val*$m}]
+		set uspec "";   # Use uspec to mark we've converted!
+		break
+	    }
+	}
+	if { $uspec ne "" } {
+	    return -code error "$uspec is not a recogised multiple of bytes"
+	}
+    } else {
+	if { $dft ne "" } {
+	    foreach {f m} $vars::converter {
+		if { [string match -nocase $f $dft] } {
+		    set val [expr {$val*$m}]
+		    set dft "";   # Use uspec to mark we've converted!
+		    break
+		}
+	    }
+	    if { $dft ne "" } {
+		return -code error "$dft is not a recogised multiple of bytes"
+	    }
+	}
+    }
+
+    # Now convert back to the requested size
+    if { $unit ne "" } {
+	foreach {f m} $vars::converter {
+	    if { [string match -nocase $f $unit] } {
+		set val [expr {$val/$m}]
+		set unit "";   # Use unit to mark we've converted!
+		break
+	    }
+	}
+	if { $unit ne "" } {
+	    return -code error "$unit is not a recogised multiple of bytes"
+	}
+    }
+    if { [string match "*.0" $val] } {
+	return [expr {int($val)}]
+    }
+    return $val
 }
 
 
