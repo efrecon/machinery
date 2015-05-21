@@ -428,7 +428,6 @@ proc ::cluster::create { vm token } {
 	    if { $vm ne {} } {
 		# Open the ports and creates the shares
 		ports $vm
-		shares $vm
 
 		# Test that machine is properly working by echoing its
 		# name using a busybox component and checking we get that
@@ -459,7 +458,7 @@ proc ::cluster::create { vm token } {
 }
 
 
-proc ::cluster::init { vm {steps {registries images compose}} } {
+proc ::cluster::init { vm {steps {shares registries images compose}} } {
     # Poor man's discovery: write down a description of all the
     # network interfaces existing on the virtual machines,
     # including the most important one (e.g. the one returned by
@@ -469,6 +468,9 @@ proc ::cluster::init { vm {steps {registries images compose}} } {
     Discovery $vm
 
     set nm [dict get $vm -name]
+    if { [lsearch -nocase $steps shares] >= 0 } {
+	shares $vm
+    }
     if { [unix daemon $nm docker up] } {
 	# Now pull images if any
 	if { [lsearch -nocase $steps registries] >= 0 } {
