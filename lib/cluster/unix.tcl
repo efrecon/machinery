@@ -24,6 +24,31 @@ namespace eval ::cluster::unix {
 }
 
 
+# ::cluster::defaults -- Set default parameters
+#
+#       This procedure takes an even list of keys and values used to
+#       set the values of the options supported by the library.  The
+#       list of options is composed of all variables starting with a
+#       dash in the vars sub-namespace.  In the list, the dash
+#       preceding the key is optional.
+#
+# Arguments:
+#        args    List of key and values to set for module options.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       None.
+proc ::cluster::unix::defaults { args } {
+    foreach {k v} $args {
+        set k -[string trimleft $k -]
+        if { [info exists vars::$k] } {
+            set vars::$k $v
+        }
+    }
+}
+
 # ::cluster::unix::ps -- Return list of processes running on VM
 #
 #       Query a machine for the list of processes that are currently
@@ -176,9 +201,9 @@ proc ::cluster::unix::mounts { nm } {
 #       machine using docker-machine ssh.
 #
 # Arguments:
-#        vm        Name of the virtual machine
-#        src_fname Full path to source.
-#        dst_fname Full path to destination (empty to same as source)
+#       vm        Name of the virtual machine
+#       src_fname Full path to source.
+#       dst_fname Full path to destination (empty to same as source)
 #
 # Results:
 #       None.
@@ -196,18 +221,33 @@ proc ::cluster::unix::scp { nm src_fname { dst_fname "" } } {
     # Construct an scp command out of the ssh command!  This converts
     # the arguments between the ssh and scp namespaces, which are not
     # exactly the same.
-    set cmd [remote $nm]
-    set cmd [regsub ^ssh $cmd scp]
+    if { ${vars::-ssh} eq "" } {
+	set cmd [remote $nm]
+    } else {
+	set cmd ${vars::-ssh}
+    }
+
+    set cmd [regsub ^ssh $cmd scp];  # Need to improve this!
     set cmd [regsub -- -p $cmd -P]
-    set dst [lindex $cmd end];   # Extract out user@hostname, last in
-                                 # (ssh)command
+    # Extract username and hostname in uname and hname using the
+    # various ways they can appear in ssh commands (i.e. -l option or
+    # user@host specification at end).
+    if { [regexp -- {-l\s+(\w+)} $cmd - uname] } {
+	set hname [lindex $cmd end]
+    } else {
+	if { ![regexp -- {(\w+)@([\w.]+)} [lindex $cmd end] - uname hname] } {
+	    log WARN "Cannot find user and host names in $cmd!"
+	    return 0
+	}
+    }
     set scp [lrange $cmd 0 end-1]
-    log DEBUG "Constructed command $scp, destination: $dst"
+    log DEBUG "Constructed command $scp, destination: ${uname}@${hname}"
 
     # Finalise the scp command by adding file paths information and
     # execute it.
-    lappend scp $src_fname ${dst}:$dst_fname
+    lappend scp $src_fname ${uname}@${hname}:$dst_fname
     eval [linsert $scp 0 Run]
+    return 1
 }
 
 

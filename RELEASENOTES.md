@@ -24,6 +24,13 @@
   (powers of 1000), or `1GiB` for 1 gigibytes (powers of 1024
   instead!).
 
+* Adding support for user-specified `ssh` command, which will be used
+  in place of the one that is guessed from introspection of
+  `docker-machine ssh` whenever possible.
+
+* Using the new `docker-machine scp` sub-command for file copy
+  operations when it exists.
+
 
 ## v 0.5
 

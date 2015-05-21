@@ -19,7 +19,9 @@ set prg_args {
     -cluster   ""               "YAML description, empty for cluster.yml"
     -driver    "virtualbox"     "Default driver for VM creation"
     -cache     "on"             "Use locally cached docker images?"
+    -ssh       ""               "SSH command to use into host, dynamic replacement of %-surrounded keys will happen, e.g. ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectionAttempts=30 -o LogLevel=quiet -p %port% -i %identity% %user%@%host%.  Empty to guess."
 }
+
 
 package require Tcl 8.6;    # The cluster module requires chan pipe
 
@@ -56,7 +58,7 @@ proc ::help:dump { { hdr "" } } {
     }
     puts "NAME:"
     puts "\t$appname -\
-          Cluster creation and management via docker-machine"
+          Cluster creation and management via docker, machine, compose and swarm"
     puts ""
     puts "USAGE"
     puts "\t${appname} \[global options\] command \[command options\] \[arguments...\]"
@@ -76,8 +78,16 @@ proc ::help:dump { { hdr "" } } {
     puts "\tsync\tOne shot synchronisation of rsync shares"
     puts ""
     puts "GLOBAL OPTIONS:"
+    # Guess max length of option name for padding
+    set len 0
     foreach { arg val dsc } $::prg_args {
-	puts "\t${arg}\t$dsc (default: ${val})"
+	if { [string length $arg] > $len } { set len [string length $arg] }
+    }
+    # Nice padded output
+    incr len -1
+    foreach { arg val dsc } $::prg_args {
+	set argout [string range ${arg}[string repeat " " $len] 0 $len]
+	puts "\t${argout} $dsc (default: ${val})"
     }
     exit
 }
@@ -108,7 +118,7 @@ for {set eaten ""} {$eaten ne $argv} {} {
 
 # Pass arguments from the command-line as the defaults for the cluster
 # module.
-foreach k [list -machine -docker -compose -verbose -cache] {
+foreach k [list -machine -docker -compose -verbose -cache -ssh] {
     cluster defaults $k $CRT($k)
 }
 

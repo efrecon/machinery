@@ -23,6 +23,10 @@ package require cluster::virtualbox
 package require cluster::vcompare
 package require cluster::unix
 
+# Hard sourcing of the local json package to avoid using the one from
+# tcllib.
+source [file join [file dirname [file normalize [info script]]] json.tcl]
+
 namespace eval ::cluster {
     # Encapsulates variables global to this namespace under their own
     # namespace, an idea originating from http://wiki.tcl.tk/1489.
@@ -66,6 +70,8 @@ namespace eval ::cluster {
 	variable -prefix    "MACHINERY_"
 	# Sharing mapping between drivers (pattern matching) and types
 	variable -sharing   "virtualbox vboxsf * rsync"
+	# ssh command to use towards host
+	variable -ssh       ""
 	# Supported sharing types.
 	variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
@@ -109,6 +115,7 @@ namespace eval ::cluster {
 # DEBUG to trace.  When in TRACE, we should force debug on docker and
 # its friends, not when in debug. That would keep debug to what
 # happens in the program itself.
+#
 
 
 
@@ -710,11 +717,7 @@ proc ::cluster::tag { vm { lbls {}}} {
 
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
-    if { [vcompare ge [Version machine] 0.3] } {
-        Machine scp $fname ${nm}:${fname}
-    } else {
-        unix scp $nm $fname
-    }
+    SCopy $vm $fname
     Run2 ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
 
     # Cleanup and restart machine to make sure the labels get live.
@@ -963,39 +966,32 @@ proc ::cluster::shares { vm { shares {}} } {
 		# executable and install it.
 		log INFO "Persisting shares at reboot through\
                           ${vars::-bootlocal}"
-                if { [vcompare ge [Version machine] 0.3] } {
-                    Machine scp $fname ${nm}:${fname}
-                } else {
-                    unix scp $nm $fname
-                }
+		SCopy $vm $fname
 		Machine ssh $nm "chmod a+x $fname"
 		Machine ssh $nm "sudo mv $fname ${vars::-bootlocal}"
 	    }
 	    "rsync" {
 		# Detect SSH command
-                set ssh [unix remote $nm]
-                set last [lindex $ssh end]
-                if { [regexp {(\w+)@([\w.]+)} $last x uname hname] } {
-                    set ssh [lrange $ssh 0 end-1]
-                    lappend ssh -l $uname
+		set ssh [SCommand $vm]
+		set hname [lindex $ssh end]
+		set ssh [lrange $ssh 0 end-1]
 
-                    # rsync for each
-                    foreach {host mchn} $SHARINFO(rsync) {
-                        # Create directory on remote VM and arrange
-                        # for the UID to match (should we?)
-                        Machine ssh $nm "sudo mkdir -p $mchn"
-                        if { $uid ne "" } {
-                            Machine ssh $nm "sudo chown $uid $mchn"
-                        }
-                        # Synchronise the content of the local host
-                        # directory onto the remote VM directory.
-                        # Arrange for rsync to understand those
-                        # properly as directories and not only files.
-                        Run2 -- ${vars::-rsync} -az -e $ssh \
-                            [string trimright $host "/"]/ \
-                            $hname:[string trimright $mchn "/"]/
-                        lappend mounted $mchn
-                    }
+		# rsync for each
+		foreach {host mchn} $SHARINFO(rsync) {
+		    # Create directory on remote VM and arrange for
+		    # the UID to match (should we?)
+		    Machine ssh $nm "sudo mkdir -p $mchn"
+		    if { $uid ne "" } {
+			Machine ssh $nm "sudo chown $uid $mchn"
+		    }
+		    # Synchronise the content of the local host
+		    # directory onto the remote VM directory.  Arrange
+		    # for rsync to understand those properly as
+		    # directories and not only files.
+		    Run2 -- ${vars::-rsync} -az -e $ssh \
+			[string trimright $host "/"]/ \
+			$hname:[string trimright $mchn "/"]/
+		    lappend mounted $mchn
 		}
 	    }
 	}
@@ -1055,33 +1051,30 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
     log NOTICE "Synchronising [expr {[llength $sharing]/3}] share(s) for $nm..."
 
     # Detect SSH command
-    set ssh [unix remote $nm]
-    set last [lindex $ssh end]
-    if { [regexp {(\w+)@([\w.]+)} $last x uname hname] } {
-        set ssh [lrange $ssh 0 end-1]
-        lappend ssh -l $uname
+    set ssh [SCommand $vm]
+    set hname [lindex $ssh end]
+    set ssh [lrange $ssh 0 end-1]
 
-        # rsync back from the guest machine onto the host machine.
-        # This forces rsync to properly understand those locations as
-        # directories.
-        switch -nocase -glob -- $op {
-            "g*" {
-                foreach {host mchn type} $sharing {
-                    Run2 -- ${vars::-rsync} -auz --delete -e $ssh \
-                        $hname:[string trimright $mchn "/"]/ \
-                        [string trimright $host "/"]/
-                    lappend synchronised $mchn
-                }
-            }
-            "p*" {
-                foreach {host mchn type} $sharing {
-                    Run2 -- ${vars::-rsync} -auz --delete -e $ssh \
-                        [string trimright $host "/"]/ \
-                        $hname:[string trimright $mchn "/"]/
-                    lappend synchronised $mchn
-                }
-            }
-        }
+    # rsync back from the guest machine onto the host machine.  This
+    # forces rsync to properly understand those locations as
+    # directories.
+    switch -nocase -glob -- $op {
+	"g*" {
+	    foreach {host mchn type} $sharing {
+		Run2 -- ${vars::-rsync} -auz --delete -e $ssh \
+		    $hname:[string trimright $mchn "/"]/ \
+		    [string trimright $host "/"]/
+		lappend synchronised $mchn
+	    }
+	}
+	"p*" {
+	    foreach {host mchn type} $sharing {
+		Run2 -- ${vars::-rsync} -auz --delete -e $ssh \
+		    [string trimright $host "/"]/ \
+		    $hname:[string trimright $mchn "/"]/
+		lappend synchronised $mchn
+	    }
+	}
     }
 
     return $synchronised
@@ -1247,16 +1240,12 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 		Docker save -o $tmp_fpath $img
 		log DEBUG "Created local snapshot of $img at $tmp_fpath"
 		# Copy the tar to the machine, we use the same path, it's tmp
-                if { [vcompare ge [Version machine] 0.3] } {
-                    Machine scp $tmp_fpath ${nm}:${tmp_fpath}
-                } else {
-                    unix scp $nm $tmp_fpath
-                }
+		SCopy $vm $tmp_fpath
 		# Give the tar to docker on the remote machine
 		Attach $vm
 		log DEBUG "Loading $nm:$tmp_fpath into $img at $nm"
 		Docker load -i $tmp_fpath
-		# Cleanup: XXX: also in host!
+		# Cleanup
 		log DEBUG "Cleaning up localhost:$tmp_fpath and $nm:$tmp_fpath"
 		file delete -force -- $tmp_fpath
 		Machine ssh $nm "rm -f $tmp_fpath"
@@ -1297,6 +1286,33 @@ proc ::cluster::destroy { vm } {
         log INFO "Machine $nm does not exist, nothing to do"
     }
     Discovery [bind $vm]
+}
+
+
+# ::cluster::inspect -- Inspect a machine
+#
+#       Inspect the low-level details for a virtual machine and return
+#       a dictionary containing that description.  This is basically a
+#       direct interface to the inspect command of docker-machine,
+#       except that the result is easily digested by Tcl commands.
+#
+# Arguments:
+#	vm	Virtuam machine description
+#
+# Results:
+#       Dictionary with low-level details over the machine, see
+#       docker-machine documentation for details.
+#
+# Side Effects:
+#       None.
+proc ::cluster::inspect { vm } {
+    set nm [dict get $vm -name]
+    set json ""
+    foreach l [Machine -return -- inspect $nm] {
+	append json $l
+	append json " "
+    }
+    return [::json::parse [string trim $json]]
 }
 
 
@@ -1430,6 +1446,26 @@ proc ::cluster::parse { fname args } {
 }
 
 
+# ::cluster::env -- Output cluster environment
+#
+#       This procedure returns a description of the whole cluster
+#       suitable for discovery.  The description will contain
+#       environment variables which names start with MACHINERY_ and
+#       provide information on the various IP addresses allocated to
+#       the machines.
+#
+# Arguments:
+#	cluster	List of cluster VM descriptions
+#	force	Force inspection of all VMs (otherwise cache is returned).
+#	fd	File descriptor to print out in format suitable for bash
+#
+# Results:
+#       When the file descriptor is empty, this will return a
+#       dictionary containing the discovery status.  Otherwise, the
+#       result is undefined.
+#
+# Side Effects:
+#       Query all VMs or read from cache on disk.
 proc ::cluster::env { cluster {force 0} {fd ""} } {
     # Nothing to do on an empty cluster...
     if { [llength $cluster] == 0 } {
@@ -1676,6 +1712,26 @@ proc ::cluster::Create { vm { token "" } } {
     return [dict get $vm -name]
 }
 
+
+# ::cluster::POpen4 -- Pipe open
+#
+#       This procedure executes an external command and arranges to
+#       redirect locally assiged channel descriptors to its stdin,
+#       stdout and stderr.  This makes it possible to send input to
+#       the command, but also to properly separate its two forms of
+#       outputs.
+#
+# Arguments:
+#	args	Command to execute
+#
+# Results:
+#       A list of four elements.  Respectively: the list of process
+#       identifiers for the command(s) that were piped, channel for
+#       input to command pipe, for regular output of command pipe and
+#       channel for errors of command pipe.
+#
+# Side Effects:
+#       None.
 proc ::cluster::POpen4 { args } {
     foreach chan {In Out Err} {
         lassign [chan pipe] read$chan write$chan
@@ -1739,11 +1795,30 @@ proc ::cluster::Run2 { args } {
 }
 
 
+# ::cluster::LineRead -- Read line output from started commands
+#
+#       This reads the output from commands that we have started, line
+#       by line and either prints it out or accumulate the result.
+#       Properly mark for end of output so the caller will stop
+#       waiting for output to happen.  When outputing through the
+#       logging facility, the procedure is able to recognise the
+#       output of docker-machine commands (which uses the logrus
+#       package) and to convert between loglevels.
+#
+# Arguments:
+#	c	Identifier of command being run
+#	fd	Which channel to read (refers to index in command)
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       Read lines, outputs
 proc ::cluster::LineRead { c fd } {
     upvar \#0 $c CMD
 
     set line [gets $CMD($fd)]
-    set outlvl INFO
+    set outlvl [expr {$fd eq "stderr" ? "NOTICE":"INFO"}]
     # Parse and analyse output of docker-machine. Do some translation
     # of the loglevels between logrus and our internal levels.
     if { [lindex $CMD(command) 0] eq ${vars::-machine} } {
@@ -2596,6 +2671,21 @@ proc ::cluster::EnvRead { fpath } {
 }
 
 
+# ::cluster::EnvLine -- Parse lines of environment files
+#
+#       Parses the line passed as an argument and set the
+#       corresponding keys in the dictionary from the arguments.
+#
+# Arguments:
+#	d_	Name of dictionary variable to modify
+#	line	Line to parse
+#
+# Results:
+#       Return the key that was extracted from the line, or an empty
+#       string on errors, empty lines, comments, etc.
+#
+# Side Effects:
+#       None.
 proc ::cluster::EnvLine { d_ line } {
     upvar $d_ d;   # Get to the dictionary variable.
     set line [string trim $line]
@@ -2870,7 +2960,7 @@ proc ::cluster::NameEq { name nm } {
 #       with the proper arguments to get the version number.
 #
 # Arguments:
-#        tool        Tool to query, a string, one of: docker, machine or compose
+#        tool   Tool to query, a string, one of: docker, machine or compose
 #
 # Results:
 #       Return the version number or an empty string.
@@ -2896,6 +2986,21 @@ proc ::cluster::VersionQuery { tool } {
     return [vcompare extract $vline];    # Catch all for errors
 }
 
+
+# ::cluster::Version -- (Cached) version of underlying tools.
+#
+#       This will return the core version number of one of the
+#       underlying tools that we support.  The version number is
+#       cached in a global variable so it will only be queried once.
+#
+# Arguments:
+#       tool    Tool to query, a string, one of: docker, machine or compose
+#
+# Results:
+#       Return the version number or an empty string.
+#
+# Side Effects:
+#       None.
 proc ::cluster::Version { tool } {
     switch -nocase -- $tool {
         compose -
@@ -3033,6 +3138,22 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 5 } } {
 }
 
 
+# ::cluster::Running -- Wait for machine to be running
+#
+#       This will actively wait for a virtual machine to be in the
+#       running state and have a docker daemon that is up and running.q
+#
+# Arguments:
+#	vm	Virtual machine description
+#	sleep	Number of seconds to sleep between tests
+#	retries	Max number of retries.
+#
+# Results:
+#       Return the complete VM description (bound) on success, empty
+#       dictionary on errors.
+#
+# Side Effects:
+#       None.
 proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
     set nm [dict get $vm -name]
     if { $retries < 0 } {
@@ -3058,5 +3179,85 @@ proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
     return {}
 }
 
+
+# ::cluster::SCopy -- scp to machine
+#
+#       Copy a local file to a machine using scp.  This procedure is
+#       able to circumvent the missing scp command from machine 0.2
+#       and under.
+#
+# Arguments:
+#	vm	Virtual machine description
+#	s_fname	Path to source file
+#	d_fname	Path to destination, empty for same as source.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       Copy the file using scp
+proc ::cluster::SCopy { vm s_fname {d_fname ""}} {
+    set nm [dict get $vm -name]
+    if { $d_fname eq "" } {
+	set d_fname $s_fname
+    }
+
+    if { [vcompare ge [Version machine] 0.3] } {
+        Machine scp $s_fname ${nm}:${d_fname}
+    } else {
+	unix defaults -ssh [SCommand $vm]
+        unix scp $nm $s_fname $d_fname
+    }
+}
+
+
+# ::cluster::SCommand -- SSH Command to machine
+#
+#       This procedure actively computes the SSH command to execute an
+#       SSH to the machine specified as its argument.  It will either
+#       use the global ssh command from the variables, in which case
+#       any occurence of %port%, %user%, %identity% and %host% will be
+#       replaced with, respectively the port number, the username, the
+#       path to the identity file and the hostname/IP address of the
+#       remote machine. Otherwise, it will use the unix module to
+#       guess the SSH command.
+#
+# Arguments:
+#	vm	Virtual machine description
+#
+# Results:
+#       Return the ssh command to the machine as a list, with the
+#       hostname as the last argument of the list (no user@host
+#       construct left)
+#
+# Side Effects:
+#       None.
+proc ::cluster::SCommand { vm } {
+    set nm [dict get $vm -name]
+    set ssh {}
+    if { ${vars::-ssh} ne "" } {
+	set nfo [inspect $vm]
+	set mapper [list \
+			"%port%" [dict get $nfo Driver SSHPort] \
+			"%host%" [dict get $nfo Driver IPAddress] \
+			"%user%" [dict get $nfo Driver SSHUser]]
+	set id_path [file join [dict get $nfo StorePath] id_rsa]
+	if { [file exists $id_path] } {
+	    lappend mapper "%identity%" $id_path
+	}
+	set ssh [string map $mapper ${vars::-ssh}]
+    } else {
+	set ssh [unix remote $nm]
+    }
+
+    # Extract user name and host name from last argument if possible.
+    set last [lindex $ssh end]
+    if { [regexp {(\w+)@([\w.]+)} $last x uname hname] } {
+	set ssh [lrange $ssh 0 end-1]
+	lappend ssh -l $uname $hname
+    }
+
+    return $ssh
+}
 
 package provide cluster 0.3
