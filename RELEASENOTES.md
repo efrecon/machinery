@@ -31,6 +31,10 @@
 * Using the new `docker-machine scp` sub-command for file copy
   operations when it exists.
 
+* Added possibility to recreate the shares and mount them from within
+  a `reinit` call.  This isn't entirely tested yet and will fail
+  reusing shares if they had already been created in the past.
+
 
 ## v 0.5
 

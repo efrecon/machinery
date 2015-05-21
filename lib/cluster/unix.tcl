@@ -17,6 +17,8 @@ namespace eval ::cluster::unix {
 	variable -daemon    "/etc/init.d"
 	# Path where PID files are stored
 	variable -run       "/var/run"
+	# ssh command to use towards host
+	variable -ssh       ""
     }
     namespace export {[a-z]*}
     namespace path [namespace parent]
@@ -233,6 +235,7 @@ proc ::cluster::unix::scp { nm src_fname { dst_fname "" } } {
     # various ways they can appear in ssh commands (i.e. -l option or
     # user@host specification at end).
     if { [regexp -- {-l\s+(\w+)} $cmd - uname] } {
+	set cmd [regsub -- {-l\s+(\w+)} $cmd ""];  # Remove -l from command
 	set hname [lindex $cmd end]
     } else {
 	if { ![regexp -- {(\w+)@([\w.]+)} [lindex $cmd end] - uname hname] } {
