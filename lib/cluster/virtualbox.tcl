@@ -139,6 +139,8 @@ proc ::cluster::virtualbox::addshare { vm path } {
         Manage sharedfolder add $vm \
             --name $nm \
             --hostpath $path
+	Manage setextradata $vm \
+	    VBoxInternal2/SharedFoldersEnableSymlinksCreate/$nm 1
     }
     return $nm
 }
