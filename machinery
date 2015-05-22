@@ -20,6 +20,7 @@ set prg_args {
     -driver    "virtualbox"     "Default driver for VM creation"
     -cache     "on"             "Use locally cached docker images?"
     -ssh       ""               "SSH command to use into host, dynamic replacement of %-surrounded keys will happen, e.g. ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectionAttempts=30 -o LogLevel=quiet -p %port% -i %identity% %user%@%host%.  Empty to guess."
+    -config    ""               "Path to config file, command-line arguments will override configure content"
 }
 
 
@@ -105,6 +106,25 @@ array set CRT {
 # Did we request for help? Output and goodbye
 if { [cluster getopt argv "-help"] } {
     ::help:dump
+}
+
+# Do we have a configure file to read, do this at once.
+cluster getopt argv -config CRT(-config) $CRT(-config)
+if { $CRT(-config) ne "" } {
+    set fd [open $CRT(-config)];   # Fail with errors on purpose
+    while {![eof $fd]} {
+	set line [string trim [gets $fd]]
+	if { $line ne "" && [string index $line 0] ne "\#" } {
+	    foreach {opt val} $line break
+	    set opt [string trimleft $opt -]
+	    if { [info exists CRT(-$opt)] } {
+		set CRT(-$opt) $val
+	    } else {
+		::help:dump "-$opt (from $CRT(-config)) is not a known option!"
+	    }
+	}
+    }
+    close $fd
 }
 
 # Eat all program options from the command line, the latest value will
@@ -260,6 +280,20 @@ switch -nocase -- $cmd {
                 foreach op $operations {
                     cluster swarm $master $op $fpath $copts
                 }
+	    }
+	}
+    }
+    "ps" {
+	set cluster [init]
+	if { [llength $argv] == 0 } {
+	    set master [swarm master $cluster]
+	    cluster ps $master 1
+	} else {
+	    foreach nm $argv {
+		set vm [cluster find $cluster $nm]
+		if { $vm ne "" } {
+		    cluster ps $vm
+		}
 	    }
 	}
     }

@@ -35,6 +35,13 @@
   a `reinit` call.  This isn't entirely tested yet and will fail
   reusing shares if they had already been created in the past.
 
+* Added possibility to read program options from configuration file
+  through `-config` global option (handy when specifying complex ssh
+  commands for example).
+
+* Added `ps` command to return the status of the whole cluster (via
+  the swarm master).
+
 
 ## v 0.5
 

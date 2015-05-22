@@ -491,6 +491,18 @@ proc ::cluster::init { vm {steps {shares registries images compose}} } {
     }
 }
 
+proc ::cluster::ps { vm { swarm 0 }} {
+    set vm [bind $vm]
+    set nm [dict get $vm -name]
+    if { $swarm } {
+	log NOTICE "Getting components of cluster"
+    } else {
+	log NOTICE "Getting components of $nm"
+    }
+    Attach $vm $swarm
+    Docker -raw -- ps
+}
+
 
 proc ::cluster::swarm { master op fpath {opts {}}} {
     # Make sure we resolve in proper directory.
@@ -1778,6 +1790,7 @@ proc ::cluster::Run2 { args } {
     set CMD(keep) [getopt opts -keepblanks]
     set CMD(back) [getopt opts -return]
     set CMD(outerr) [getopt opts -stderr]
+    set CMD(relay) [getopt opts -raw]
     set CMD(done) 0
     set CMD(result) {}
 
@@ -1853,6 +1866,8 @@ proc ::cluster::LineRead { c fd } {
 		log DEBUG "Appending $line to result"
 		lappend CMD(result) $line
 	    }
+	} elseif { $CMD(relay) } {
+	    puts $fd $line
 	} else {
 	    # Output even what was captured on stderr, which is
 	    # probably what we wanted in the first place.
@@ -2085,8 +2100,8 @@ proc ::cluster::Machine { args } {
 #
 # Arguments:
 #        vm        Virtual machine description dictionary
-#        swarm        Contact swarm master?
-#        force        Force attaching
+#        swarm     Contact swarm master?
+#        force     Force attaching
 #
 # Results:
 #       None.
