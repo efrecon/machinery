@@ -256,19 +256,28 @@ proc ::cluster::unix::scp { nm src_fname { dst_fname "" } } {
 
 proc ::cluster::unix::remote { nm } {
     log DEBUG "Detecting SSH command into $nm"
-    # Skip to last line since newer versions output more when debug is on...
-    set sshinfo [lindex [Machine -return -stderr -- --debug ssh $nm echo ""] \
-                     end]
-    set ssh [string first ssh $sshinfo];  # Lookup the string 'ssh': START
-    set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
-    set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
 
-    # Replace options setting arguments to use = to make it easier for
-    # callers.
-    foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
-        set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
+    # Start looking starting from last lines as newer versions output
+    # more when debug is on...
+    foreach l [lreverse [Machine -return -stderr -- --debug ssh $nm echo ""]] {
+	foreach bin [list "/usr/bin/ssh" "ssh"] {
+	    if { [string first $bin $l] >= 0 } {
+		set sshinfo $l
+		set ssh [string last $bin $sshinfo];  # Lookup the string 'ssh': START
+		set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
+		set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
+
+		# Replace options setting arguments to use = to make it easier for
+		# callers.
+		foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
+		    set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
+		}
+
+		log INFO "SSH command into $nm is '$cmd'"
+		return $cmd
+	    }
+	}
     }
-    return $cmd
 }
 
 # ::cluster::unix::id -- Interface to user id information

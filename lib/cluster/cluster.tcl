@@ -1143,7 +1143,7 @@ proc ::cluster::halt { vm } {
 #
 # Arguments:
 #        vm        Virtual machine description
-#        args        Command to execute.
+#        args      Command to execute.
 #
 # Results:
 #       None.
@@ -1162,10 +1162,18 @@ proc ::cluster::ssh { vm args } {
             puts stdout [lindex $res end]
         }
     } else {
-        # NYI
+	foreach fd {stdout stderr stdin} {
+	    fconfigure $fd -buffering none -translation binary
+	}
+	#close stdin
+	exec [auto_execok ${vars::-machine}] ssh $nm >@stdout 2>@stderr <@stdin
     }
 }
 
+proc ::cluster::ChannelBridge { rd wr } {
+    set l [gets $rd]
+    puts $wr $l
+}
 
 proc ::cluster::login { vm {regs {}} } {
     # Get login information, either from parameters (overriding the VM
