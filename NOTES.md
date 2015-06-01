@@ -1,4 +1,4 @@
-# Internal Notes and TODOs
+# Internal Notes
 
 ## Making a Release
 
@@ -10,13 +10,3 @@ To make a release, you should do the following:
 3. Make binaries using the script in the `make` sub-directory.
 4. Tag the release in git using: `git tag -a -m "Version vX.Y" vX.Y`.
 5. Push the tag to the main repository: `git push --tags`.
-
-## TODO
-
-* Use docker save (locally on the host), scp and docker load on the
-  guest to skip slow downloads and use the local cache of docker
-  images whenever possible.
-
-* Sort out `docker login` properly, by default docker `compose` starts the
-  components in the cluster as `root`, so maybe should we simply `sudo docker
-  login`?

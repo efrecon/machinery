@@ -1,10 +1,10 @@
 # Release Notes
 
-## v 0.5.1 (In development)
+## v 0.5.1
 
 * Exported shares are now resolved relatively to the directory of the
-  main cluster description file, which to migrate project trees if
-  necessary.
+  main cluster description file, which helps migrating project trees
+  if necessary.
 
 * Mounted shares (still VirtualBox only) will persist reboots of the
   virtual machines through adding a specific section to
@@ -41,6 +41,10 @@
 
 * Added `ps` command to return the status of the whole cluster (via
   the swarm master).
+
+* `ssh` sub-command now can be called without arguments to get a
+  prompt into virtual machine (thus being a (handy?) relay to
+  `docker-machine ssh`).
 
 
 ## v 0.5
