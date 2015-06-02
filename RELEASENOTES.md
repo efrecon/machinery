@@ -1,5 +1,11 @@
 # Release Notes
 
+
+## v 0.5.2 (in development)
+
+* Fixed better exit from interactive ssh sessions.
+
+
 ## v 0.5.1
 
 * Exported shares are now resolved relatively to the directory of the
