@@ -1002,7 +1002,7 @@ proc ::cluster::shares { vm { shares {}} } {
 		    # directory onto the remote VM directory.  Arrange
 		    # for rsync to understand those properly as
 		    # directories and not only files.
-		    Run2 -- ${vars::-rsync} -az -e $ssh \
+		    Run2 -- [auto_execok ${vars::-rsync}] -az -e $ssh \
 			[string trimright $host "/"]/ \
 			$hname:[string trimright $mchn "/"]/
 		    lappend mounted $mchn
@@ -1075,7 +1075,7 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
     switch -nocase -glob -- $op {
 	"g*" {
 	    foreach {host mchn type} $sharing {
-		Run2 -- ${vars::-rsync} -auz --delete -e $ssh \
+		Run2 -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
 		    $hname:[string trimright $mchn "/"]/ \
 		    [string trimright $host "/"]/
 		lappend synchronised $mchn
@@ -1083,7 +1083,7 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
 	}
 	"p*" {
 	    foreach {host mchn type} $sharing {
-		Run2 -- ${vars::-rsync} -auz --delete -e $ssh \
+		Run2 -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
 		    [string trimright $host "/"]/ \
 		    $hname:[string trimright $mchn "/"]/
 		lappend synchronised $mchn
@@ -1139,11 +1139,12 @@ proc ::cluster::halt { vm } {
 # ::cluster::ssh -- Execute command in machine
 #
 #       This procedure will print out the result of a command executed
-#       in the VM on the standard output.
+#       in the VM on the standard output or provide an interactive
+#       prompt to the machine.
 #
 # Arguments:
 #        vm        Virtual machine description
-#        args      Command to execute.
+#        args      Command to execute, empty for interactive prompt
 #
 # Results:
 #       None.
@@ -1165,14 +1166,15 @@ proc ::cluster::ssh { vm args } {
 	foreach fd {stdout stderr stdin} {
 	    fconfigure $fd -buffering none -translation binary
 	}
-	#close stdin
-	exec [auto_execok ${vars::-machine}] ssh $nm >@stdout 2>@stderr <@stdin
+	set mchn [auto_execok ${vars::-machine}]
+	if { $mchn eq "" } {
+	    log ERROR "Cannot find machine at ${vars::-machine}!"
+	    return
+	}
+	if { [catch {exec $mchn ssh $nm >@stdout 2>@stderr <@stdin} err] } {
+	    log WARN "Child returned: $err"
+	}
     }
-}
-
-proc ::cluster::ChannelBridge { rd wr } {
-    set l [gets $rd]
-    puts $wr $l
 }
 
 proc ::cluster::login { vm {regs {}} } {
@@ -1844,7 +1846,8 @@ proc ::cluster::LineRead { c fd } {
     set outlvl [expr {$fd eq "stderr" ? "NOTICE":"INFO"}]
     # Parse and analyse output of docker-machine. Do some translation
     # of the loglevels between logrus and our internal levels.
-    if { [lindex $CMD(command) 0] eq ${vars::-machine} } {
+    set bin [lindex $CMD(command) 0]
+    if { [string first ${vars::-machine} $bin] >= 0 } {
 	if { [string first "msg=" $line] >= 0 } {
 	    foreach {k v} [string map {"=" " "} $line] {
 		if { $k eq "msg" } {
@@ -2020,7 +2023,7 @@ proc ::cluster::Docker { args } {
     if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --debug]
     }
-    return [eval Run2 $opts -- ${vars::-docker} $args]
+    return [eval Run2 $opts -- [auto_execok ${vars::-docker}] $args]
 }
 
 
@@ -2056,7 +2059,7 @@ proc ::cluster::Compose { args } {
     if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --verbose]
     }
-    return [eval Run2 $opts -- ${vars::-compose} $args]
+    return [eval Run2 $opts -- [auto_execok ${vars::-compose}] $args]
 }
 
 
@@ -2094,7 +2097,7 @@ proc ::cluster::Machine { args } {
         set args [linsert $args 0 --debug]
     }
 
-    return [eval Run2 $opts -- ${vars::-machine} $args]
+    return [eval Run2 $opts -- [auto_execok ${vars::-machine}] $args]
 }
 
 
