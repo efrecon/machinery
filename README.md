@@ -165,8 +165,8 @@ components.  The supported options are:
 * `-rm` matches the [`rm`](http://docs.docker.com/compose/cli/#rm) command
   of `compose` and will remove the components without asking at the prompt.
 
-* `-start` matches the [`start`](http://docs.docker.com/compose/cli/#start) command
-  of `compose` and will start stopped components.
+* `-start` matches the [`start`](http://docs.docker.com/compose/cli/#start)
+  command of `compose` and will start stopped components.
 
 * `-up` is the default when nothing is specified.  It matches the
   [`up`](http://docs.docker.com/compose/cli/#up) command of `compose` and
@@ -206,9 +206,20 @@ existing machines in the cluster.
 
 #### ssh
 
-The command `ssh` will execute a command within a virtual machine of the cluster
-and print out its result on the standard output.  The machine needs to be
-started for the command to succeed.
+The command `ssh` will execute a command within a virtual machine of
+the cluster and print out its result on the standard output.  The
+machine needs to be started for the command to succeed.  When run with
+no additional arguments, an interactive command-line prompt will be
+provided.
+
+#### ps
+
+When called without any argument, the command `ps` will ask the swarm
+master to return the list of all running components, as of
+`docker-machine ps`.  When called with arguments, each should
+correspond to the name of a known virtual machine and the command will
+return the list of running components for that/those machine(s)
+instead.
 
 #### version
 
@@ -403,6 +414,19 @@ to `ssh` whenever necessary).  When it needs to construct `scp`
 commands, `machinery` is able to convert between the option-space of
 `ssh` and the one of `scp`, as these programs do not exactly take the
 same options.
+
+#### `-config`
+
+This option takes the path to a file as an argument. When present, the
+file will be read and its content will be used to initialised the
+value of the options that can otherwise be specified as part of the
+command-line global options.  However, command-line options, if
+present, will always have precedence over the content of the file.  In
+the file, any empty line will be ignored, any line starting with a `#`
+will be considered as a comment and ignored.  Meaningful lines should
+contain the name of a global option (the leading dash can be omitted)
+followed by its value, separated by whitespaces.  The value can be put
+between quotes `"` if necessary.
 
 ### YAML Specification
 
