@@ -584,7 +584,10 @@ proc ::cluster::cli::command { cmd args } {
 	"server" {
 	    package require cluster::wapi
 	    set yaml [cli resolve pfx]
-	    wapi server $yaml $pfx 8090
+	    # Pass all arguments to the web API service initialisation
+	    # for maximimum flexibility and so we can benefit from
+	    # authorisation or HTTPS capabilities.
+	    wapi server $yaml $pfx {*}$args
 	    vwait forever;   # Wait forever!
 	}
 	default {

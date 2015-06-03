@@ -41,8 +41,9 @@ namespace eval ::cluster::wapi {
 # Arguments:
 #	yaml	Path to YAML file description
 #	pfx	Prefix when creating the machines in cluster
-#	port	Port to listen for incoming connections on.
-#	root	Root path to serve file for
+#	args	List of dash-led keys and their values: -port should be
+#               the port to listen on, -root a directory to serve file
+#               from, all other arguments are passed to the HTTPd lib.
 #
 # Results:
 #       The port number on success, a negative number otherwise.
@@ -52,13 +53,18 @@ namespace eval ::cluster::wapi {
 #       that the HTTP server used is capable of doing HTTPS and
 #       implements basic authorisation, but this hasn't been lift up
 #       to the interface (yet?)
-proc ::cluster::wapi::server { yaml {pfx ""} { port -1 } { root "" } } {
-    if { $port < 0 } {
-	set port ${vars::-port}
-    }
+proc ::cluster::wapi::server { yaml pfx args } {
+    # Get "our" arguments so we can translate between our API (only
+    # based on dash-led options) to the one of the web server (which
+    # requires a root directory and a port number).
+    cluster getopt args -port port ${vars::-port}
+    cluster getopt args -root www ""
 
-    # Create a webserver on the port (or default)
-    set srv [::minihttpd::new $root $port]
+    # Create a webserver on the (default?) port, pass all other
+    # arguments to the web server.  Of special interest should be
+    # -authorization to control access using basic authentication and
+    # -pki for HTTPS serving.
+    set srv [::minihttpd::new $www $port {*}$args]
     if { $srv < 0 } {
 	log ERROR "Cannot start web server on port: $port"
 	return $srv
