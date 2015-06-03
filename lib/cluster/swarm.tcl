@@ -65,9 +65,9 @@ proc ::cluster::swarm::info { cluster } {
 #       virtual machine.
 #
 # Arguments:
-#        yaml        Path to YAML description for cluster
-#        force        Force token (re)generation
-#        driver        Driver to use for token generation
+#        yaml      Path to YAML description for cluster
+#        force     Force token (re)generation
+#        driver    Driver to use for token generation
 #
 # Results:
 #       None.

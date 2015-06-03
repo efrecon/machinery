@@ -1,9 +1,16 @@
 # Release Notes
 
 
-## v 0.5.2 (in development)
+## v 0.6 (in development)
 
 * Fixed better exit from interactive ssh sessions.
+
+* Refactoring all command-line parsing and operations under global
+  `cli` command in order to make some of its services available to
+  other modules.
+
+* Implementation of a Web API, using a vocabulary similar to the one
+  from the command line.
 
 
 ## v 0.5.1

@@ -119,7 +119,7 @@ namespace eval ::cluster {
 
 
 
-# ::cluster::defaults -- Set default parameters
+# ::cluster::defaults -- Set/get default parameters
 #
 #       This procedure takes an even list of keys and values used to
 #       set the values of the options supported by the library.  The
@@ -131,17 +131,23 @@ namespace eval ::cluster {
 #        args        List of key and values to set for module options.
 #
 # Results:
-#       None.
+#       A dictionary with all current keys and their values
 #
 # Side Effects:
 #       None.
-proc ::cluster::defaults { args } {
+proc ::cluster::defaults { {args {}}} {
     foreach {k v} $args {
         set k -[string trimleft $k -]
         if { [info exists vars::$k] } {
             set vars::$k $v
         }
     }
+    
+    set state {}
+    foreach v [info vars vars::-*] {
+	lappend state [lindex [split $v ":"] end] [set $v]
+    }
+    return $state
 }
 
 # ::cluster::getopt -- Quick and Dirty Options Parser
