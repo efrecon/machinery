@@ -584,7 +584,7 @@ proc ::cluster::cli::command { cmd args } {
 	"server" {
 	    package require cluster::wapi
 	    set yaml [cli resolve pfx]
-	    wapi server $yaml $pfx
+	    wapi server $yaml $pfx 8090
 	    vwait forever;   # Wait forever!
 	}
 	default {

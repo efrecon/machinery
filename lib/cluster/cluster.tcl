@@ -235,7 +235,7 @@ proc ::cluster::log { lvl msg } {
 #       the dictionary as is.
 #
 # Arguments:
-#        machines        glob-style pattern to match on machine names
+#        machines    glob-style pattern to match on machine names
 #
 # Results:
 #       Return a list of dictionaries, one dictionary for the stat of
@@ -250,43 +250,13 @@ proc ::cluster::ls { {machines *} } {
     # of keys (this is the first line of docker-machine ls output,
     # meaning the header).
     set state [Machine -return -- ls]
-    set cols [lindex $state 0]
-    # Arrange for indices to contain the character index at which each
-    # column of the output starts (in same order as the list of keys
-    # above).
-    set indices {}
-    foreach c $cols {
-        lappend indices [string first $c $cols]
-    }
-
-    # Now loop through all lines of the output, i.e. the complete
-    # state of the cluster.
-    foreach m [lrange $state 1 end] {
-        # Isolate the content of each keys, respecting the column
-        # alignment found in <indices> and the order of the columns.
-        for {set c 0} {$c<[llength $cols]} {incr c} {
-            set k [lindex $cols $c];   # Extract the key
-            # Extract its value, i.e. the characters between where the
-            # key started in the header up to the character before
-            # where the next key started in the header.
-            if { $c < [expr [llength $cols]-1] } {
-                set end [lindex $indices [expr {$c+1}]]
-                incr end -1
-            } else {
-                set end "end"
-            }
-            # The value is inbetween those ranges, trim to get rid of
-            # trailing spaces that had been added for a nice output.
-            set v [string range $m [lindex $indices $c] $end]
-            dict set nfo [string trim [string tolower $k]] [string trim $v]
-        }
+    foreach nfo [ListParser $state] {
         # Add only machines which name matches the incoming pattern.
         if { [dict exists $nfo name] \
                  && [string match $machines [dict get $nfo name]] } {
             lappend cluster $nfo
         }
     }
-
     return $cluster
 }
 
@@ -497,7 +467,12 @@ proc ::cluster::init { vm {steps {shares registries images compose}} } {
     }
 }
 
-proc ::cluster::ps { vm { swarm 0 }} {
+proc ::cluster::tempfile { pfx ext } {
+    return [Temporary [file join ${vars::-tmp} $pfx].[string trimleft $ext .]
+}
+
+
+proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
     set vm [bind $vm]
     set nm [dict get $vm -name]
     if { $swarm } {
@@ -506,7 +481,12 @@ proc ::cluster::ps { vm { swarm 0 }} {
 	log NOTICE "Getting components of $nm"
     }
     Attach $vm $swarm
-    Docker -raw -- ps
+    if { $direct } {
+	Docker -raw -- ps
+    } else {
+	set state [Docker -return -- ps]
+	return [ListParser $state [list "CONTAINER ID" "CONTAINER_ID"]]
+    }
 }
 
 
@@ -2552,6 +2532,49 @@ proc ::cluster::Shares { spec {origin ""} {type ""}} {
     return {}
 }
 
+
+proc ::cluster::ListParser { state { hdrfix {}} } {
+    set content {};   # The list of dictionaries we will return
+
+    set cols [lindex $state 0]
+    if { [llength $hdrfix] > 0 } {
+	set cols [string map $hdrfix $cols]
+    }
+
+    # Arrange for indices to contain the character index at which each
+    # column of the output starts (in same order as the list of keys
+    # above).
+    set indices {}
+    foreach c $cols {
+        lappend indices [string first $c $cols]
+    }
+
+    # Now loop through all lines of the output, i.e. the complete
+    # state of the cluster.
+    foreach m [lrange $state 1 end] {
+        # Isolate the content of each keys, respecting the column
+        # alignment found in <indices> and the order of the columns.
+        for {set c 0} {$c<[llength $cols]} {incr c} {
+            set k [lindex $cols $c];   # Extract the key
+            # Extract its value, i.e. the characters between where the
+            # key started in the header up to the character before
+            # where the next key started in the header.
+            if { $c < [expr [llength $cols]-1] } {
+                set end [lindex $indices [expr {$c+1}]]
+                incr end -1
+            } else {
+                set end "end"
+            }
+            # The value is in between those ranges, trim to get rid of
+            # trailing spaces that had been added for a nice output.
+            set v [string range $m [lindex $indices $c] $end]
+            dict set nfo [string trim [string tolower $k]] [string trim $v]
+        }
+	lappend content $nfo
+    }
+
+    return $content
+}
 
 
 # ::cluster::Discovery -- Poor man's discovery
