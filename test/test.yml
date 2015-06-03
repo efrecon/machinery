@@ -6,7 +6,7 @@ test:
         role: testing
         target: dev
     images:
-        - gliderlabs/alpine
+        - alpine
     ports:
         - 8080:80
         - 20514:514/udp
