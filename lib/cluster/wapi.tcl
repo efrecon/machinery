@@ -321,7 +321,13 @@ proc ::cluster::wapi::Info {output prt sock url qry} {
 	foreach vm $vms {
 	    dict unset vm origin;   # Remove internal state
 	    append json [::json::stringify $vm 0 \
-			     [dict create -ports array -shares array]]
+			     [dict create -ports array \
+				  -shares array \
+				  -images array \
+				  -compose array \
+				  swarm string \
+				  state string \
+				  -registries array]]
 	    append json ","
 	}
 	set json [string trimright $json ","]
