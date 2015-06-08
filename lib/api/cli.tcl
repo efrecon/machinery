@@ -32,6 +32,21 @@ namespace eval ::api::cli {
 	    -ssh       ""               "SSH command to use into host, dynamic replacement of %-surrounded keys will happen, e.g. ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectionAttempts=30 -o LogLevel=quiet -p %port% -i %identity% %user%@%host%.  Empty to guess."
 	    -config    ""               "Path to config file, command-line arguments will override configure content"
 	}
+        # This is the list of recognised commands that will be print
+        # when help is requested.
+        variable cmds {
+            up      "Create and bring up cluster and/or specific machines"
+            halt    "Bring down cluster and/or specific machines"
+            token   "Create (new) swarm token, force regeneration with -force"
+            destroy "Destroy cluster and/or specific machines"
+            restart "Restart whole cluster and/or specific machines"
+            env     "Export environment variables for discovery"
+            reinit  "Rerun finalisation stages on machine(s), specify via -step"
+            swarm   "Lifecycle management of components via swarm"
+            sync    "One shot synchronisation of rsync shares"
+            forall  "Execute docker command on all matching containers"
+            search  "Search for matching containers"
+        }
 	
 	variable appname "";          # Name of main application.
 	variable version 0.6-dev;     # GLOBAL Application version!
@@ -58,47 +73,32 @@ namespace eval ::api::cli {
 #
 # Side Effects:
 #       COMPLETELY exit the program at once!
-proc ::api::cli::help { {hdr ""} } {
+proc ::api::cli::help { {hdr ""} {fd stderr} } {
     if { $hdr ne "" } {
-	puts ""
-	puts $hdr
-	puts ""
+	puts $fd ""
+	puts $fd $hdr
+	puts $fd ""
     }
-    puts "NAME:"
-    puts "\t${vars::appname} -\
+    puts $fd "NAME:"
+    puts $fd "\t${vars::appname} -\
           Cluster creation and management via docker, machine, compose and swarm"
-    puts ""
-    puts "USAGE"
-    puts "\t${vars::appname} \[global options\] command \[command options\] \[arguments...\]"
-    puts ""
-    puts "VERSION"
-    puts "\t${vars::version}"
-    puts ""
-    puts "COMMANDS:"
-    puts "\tup\tCreate and bring up cluster and/or specific machines"
-    puts "\thalt\tBring down cluster and/or specific machines"
-    puts "\ttoken\tCreate (new) swarm token, force regeneration with -force"
-    puts "\tdestroy\tDestroy cluster and/or specific machines"
-    puts "\trestart\tRestart whole cluster and/or specific machines"
-    puts "\tenv\tExport environment variables for discovery"
-    puts "\treinit\tRerun finalisation stages on machine(s), specify via -step"
-    puts "\tswarm\tLifecycle management of components via swarm"
-    puts "\tsync\tOne shot synchronisation of rsync shares"
-    puts "\tforall\tExecute docker command on all matching containers"
-    puts "\tsearch\tSearch for matching containers"
-    puts ""
-    puts "GLOBAL OPTIONS:"
-    # Guess max length of option name for padding
-    set len 0
+    puts $fd ""
+    puts $fd "USAGE"
+    puts $fd "\t${vars::appname} \[global options\] command \[command options\] \[arguments...\]"
+    puts $fd ""
+    puts $fd "VERSION"
+    puts $fd "\t${vars::version}"
+    puts $fd ""
+    puts $fd "COMMANDS:"
+    Tabulate 2 $vars::cmds $fd "\t"
+    puts $fd ""
+    puts $fd "GLOBAL OPTIONS:"
+    # Rewrite option descriptions, tabulate nicely and output
+    set optout {}
     foreach { arg val dsc } $vars::gopts {
-	if { [string length $arg] > $len } { set len [string length $arg] }
+        lappend optout $arg "$dsc (default: $val)"
     }
-    # Nice padded output
-    incr len -1
-    foreach { arg val dsc } $vars::gopts {
-	set argout [string range ${arg}[string repeat " " $len] 0 $len]
-	puts "\t${argout} $dsc (default: ${val})"
-    }
+    Tabulate 2 $optout $fd "\t"
     exit
 }
 
@@ -593,6 +593,8 @@ proc ::api::cli::command { cmd args } {
 	    vwait forever;   # Wait forever!
 	}
 	"search" {
+            # Search for components, arguments are glob-style patterns
+            # to match against container names.
 	    set cluster [init]
 	    set locations {}
 	    foreach ptn $args {
@@ -603,9 +605,14 @@ proc ::api::cli::command { cmd args } {
 	    }
 	}
 	"forall" {
+            # Execute docker commands, first argument is glob-style
+            # pattern to match against component name, second is
+            # docker command to execute, remaining arguments are
+            # options to the docker command.
 	    set cluster [init]
 	    if { [llength $args] >= 2 } {
-		cluster forall $cluster [lindex $args 0] [lindex $args 1] {*}[lindex $args 2 end]
+                foreach {ptn cmd} $args break;  # Extract pattern and command
+		cluster forall $cluster $ptn $cmd {*}[lindex $args 2 end]
 	    }
 	}
 	default {
@@ -622,7 +629,29 @@ proc ::api::cli::command { cmd args } {
 #
 ####################################################################
 
-proc ::api::cli::Tabulate { sz lst { separator " "} } {
+
+# ::api::cli::Tabulate -- Tabulate list
+#
+#       Considers the list passed as argument to represent a table of
+#       x lines and sz columns and pretty print its content onto a
+#       file descriptor by padding all column items with spaces so
+#       that the length of the maximum string decides.
+#
+# Arguments:
+#	sz	Number of columns.
+#	lst	Incoming list representing data to tabulate
+#	fd	File descriptor to output to
+#	pre	String to prepend to each line being output
+#	sep	Separator to add between columns.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       Output tabulated data.
+proc ::api::cli::Tabulate { sz lst { fd stdout } {pre "" } { sep " "} } {
+    # Compute maximum length of each column and put this into list
+    # called 'lens' (which will then contain $sz items).
     set lens [lrepeat $sz -1]
     for {set i 0} {$i<[llength $lst]} {incr i $sz} {
 	for {set j 0} {$j<$sz} {incr j} {
@@ -635,19 +664,21 @@ proc ::api::cli::Tabulate { sz lst { separator " "} } {
 	}
     }
 
+    # For each row, append enough spaces to each item and output the
+    # whole line one at a time.
     for {set i 0} {$i<[llength $lst]} {incr i $sz} {
-	set line ""
+	set line $pre
 	for {set j 0} {$j<$sz} {incr j} {
 	    set prm [lindex $lst [expr {$i+$j}]]
 	    set len [lindex $lens $j]
-	    incr len -1
+	    incr len -1;  # Back one to make sure range below works properly
 	    append prm [string repeat " " $len]
 	    append line [string range $prm 0 $len]
 	    if { $j<[expr {$sz-1}] } {
-		append line $separator
+		append line $sep;  # Add separator unless last element.
 	    }
 	}
-	puts stdout $line
+	puts $fd [string trimright $line]
     }
 }
 
