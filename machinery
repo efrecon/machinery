@@ -18,7 +18,7 @@ set dirname [file dirname [file normalize [info script]]]
 set appname [file rootname [file tail [info script]]]
 lappend auto_path [file join $dirname lib] [file join $dirname lib til]
 package require cluster;   # This implements the core of our routines!
-package require cluster::cli
+package require api::cli
 
 
 # Parse global options out of program arguments.

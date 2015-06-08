@@ -11,7 +11,7 @@
 
 package require cluster::swarm
 
-namespace eval ::cluster::cli {
+namespace eval ::api::cli {
     namespace eval vars {
 	# All global options recognised by the main program are
 	# described here.  Note that once these options have been
@@ -44,7 +44,7 @@ namespace eval ::cluster::cli {
     namespace ensemble create -command ::cli
 }
 
-# ::cluster::cli::help -- Dump help and exit
+# ::api::cli::help -- Dump help and exit
 #
 #       This will dump the help for the program and exit.  Help output
 #       will use the list of global options defined as part of the
@@ -58,7 +58,7 @@ namespace eval ::cluster::cli {
 #
 # Side Effects:
 #       COMPLETELY exit the program at once!
-proc ::cluster::cli::help { {hdr ""} } {
+proc ::api::cli::help { {hdr ""} } {
     if { $hdr ne "" } {
 	puts ""
 	puts $hdr
@@ -103,7 +103,7 @@ proc ::cluster::cli::help { {hdr ""} } {
 }
 
 
-# ::cluster::cli::globals -- Extract global options from args
+# ::api::cli::globals -- Extract global options from args
 #
 #       Extract the global options from the main arguments and
 #       initialise so that global dash-led variables within the
@@ -123,7 +123,7 @@ proc ::cluster::cli::help { {hdr ""} } {
 # Side Effects:
 #       Exit on problems or help, read configure files and actively
 #       modify incoming list of arguments.
-proc ::cluster::cli::globals { appname argv_ } {
+proc ::api::cli::globals { appname argv_ } {
     # XXX: There might be problems if the options to the commands end
     # up being the same as global options.  One way to ensure proper
     # parsing would be to recognise the -- separator, but as long as
@@ -182,7 +182,7 @@ proc ::cluster::cli::globals { appname argv_ } {
     }
 }
 
-# ::cluster::cli::defaults -- Set/get default parameters
+# ::api::cli::defaults -- Set/get default parameters
 #
 #       This procedure takes an even list of keys and values used to
 #       set the values of the options supported by the library.  The
@@ -198,7 +198,7 @@ proc ::cluster::cli::globals { appname argv_ } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::cli::defaults { {args {}}} {
+proc ::api::cli::defaults { {args {}}} {
     foreach {k v} $args {
         set k -[string trimleft $k -]
         if { [info exists vars::$k] } {
@@ -214,7 +214,7 @@ proc ::cluster::cli::defaults { {args {}}} {
 }
 
 
-# ::cluster::cli::version -- Program version
+# ::api::cli::version -- Program version
 #
 #       Accessor for the main program version number.
 #
@@ -226,12 +226,12 @@ proc ::cluster::cli::defaults { {args {}}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::cli::version {} {
+proc ::api::cli::version {} {
     return $vars::version
 }
 
 
-# ::cluster::cli::resolve -- Resolve proper YAML for parsing
+# ::api::cli::resolve -- Resolve proper YAML for parsing
 #
 #       Without any cluster file specified, machinery will try loading
 #       the default file called cluster.yml from the current
@@ -249,7 +249,7 @@ proc ::cluster::cli::version {} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::cli::resolve { pfx_ {fname ""} } {
+proc ::api::cli::resolve { pfx_ {fname ""} } {
     # Access prefix in caller's stack
     upvar $pfx_ pfx
 
@@ -271,7 +271,7 @@ proc ::cluster::cli::resolve { pfx_ {fname ""} } {
 }
 
 
-# ::cluster::cli::yaml -- Parse YAML content
+# ::api::cli::yaml -- Parse YAML content
 #
 #       This rather badly named procedure (this is to avoid name clash
 #       with the command called 'cluster') will parse the content of
@@ -288,7 +288,7 @@ proc ::cluster::cli::resolve { pfx_ {fname ""} } {
 #
 # Side Effects:
 #       Dumps help and exit on parsing problems.
-proc ::cluster::cli::yaml { fname {pfx ""} } {
+proc ::api::cli::yaml { fname {pfx ""} } {
     if { [catch {cluster parse $fname \
 		     -prefix $pfx -driver ${vars::-driver}} vms] } {
 	help $vms
@@ -298,7 +298,7 @@ proc ::cluster::cli::yaml { fname {pfx ""} } {
 
 
 
-# ::cluster::cli::init -- Initialise cluster description
+# ::api::cli::init -- Initialise cluster description
 #
 #       This will read the cluster YAML description file as specified
 #       from the global options and arrange to complement the VM
@@ -314,7 +314,7 @@ proc ::cluster::cli::yaml { fname {pfx ""} } {
 #
 # Side Effects:
 #       Exit with help information on parsing problems.
-proc ::cluster::cli::init { {fname ""} } {
+proc ::api::cli::init { {fname ""} } {
     set vars::yaml [resolve pfx $fname]
     set vms [yaml $vars::yaml $pfx]
 
@@ -332,7 +332,7 @@ proc ::cluster::cli::init { {fname ""} } {
 }
 
 
-# ::cluster::cli::token -- Access/Generate swarm token
+# ::api::cli::token -- Access/Generate swarm token
 #
 #       High-level access or generation of the swarm token for a given
 #       cluster.
@@ -346,7 +346,7 @@ proc ::cluster::cli::init { {fname ""} } {
 #
 # Side Effects:
 #       Token generation will kick-off a local docker component.
-proc ::cluster::cli::token {{force 0} {yaml ""}} {
+proc ::api::cli::token {{force 0} {yaml ""}} {
     if { $yaml eq "" } {
 	set yaml $vars::yaml
     }
@@ -363,7 +363,7 @@ proc ::cluster::cli::token {{force 0} {yaml ""}} {
 }
 
 
-# ::cluster::cli::machines -- Select machines to operate on
+# ::api::cli::machines -- Select machines to operate on
 #
 #       As machine names can be prefixed by the name of the cluster,
 #       this procedure arranges to look for all cluster machines that
@@ -381,7 +381,7 @@ proc ::cluster::cli::token {{force 0} {yaml ""}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::cli::machines { cluster {shortnames {}} } {
+proc ::api::cli::machines { cluster {shortnames {}} } {
     if { [llength $shortnames] == 0 } {
 	set shortnames [cluster names $cluster]
     }
@@ -398,7 +398,7 @@ proc ::cluster::cli::machines { cluster {shortnames {}} } {
 }
 
 
-# ::cluster::cli::up -- Up or start machine
+# ::api::cli::up -- Up or start machine
 #
 #       This is a helper procedure that will either create or simply
 #       start a VM of the cluster, depending on its current state.
@@ -415,7 +415,7 @@ proc ::cluster::cli::machines { cluster {shortnames {}} } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::cli::up { vm token } {
+proc ::api::cli::up { vm token } {
     if { [dict exists $vm state] } {
 	if { ![string equal -nocase [dict get $vm state] "running"] } {
 	    cluster start $vm
@@ -426,7 +426,7 @@ proc ::cluster::cli::up { vm token } {
 }
 
 
-# ::cluster::cli::command -- Main program dispatcher
+# ::api::cli::command -- Main program dispatcher
 #
 #       This procedure implements the main program dispatcher.
 #
@@ -439,27 +439,27 @@ proc ::cluster::cli::up { vm token } {
 #
 # Side Effects:
 #       A whole lot!
-proc ::cluster::cli::command { cmd args } {
+proc ::api::cli::command { cmd args } {
     switch -nocase -- $cmd {
 	"version" {
-	    puts stdout [cli version]
+	    puts stdout [version]
 	}
 	"help" {
 	    cli help
 	}
 	"token" {
-	    set cluster [cli init]
-	    puts stdout [cli token [cluster getopt args -force]]
+	    set cluster [init]
+	    puts stdout [token [cluster getopt args -force]]
 	}
 	"start" -
 	"up" {
 	    # Start up one or several machines (or the whole cluster if no
 	    # arguments), the machines will be created if they did not
 	    # exists
-	    set cluster [cli init]
-	    set token [cli token]
-	    foreach vm [cli machines $cluster $args] {
-		cli up $vm $token
+	    set cluster [init]
+	    set token [token]
+	    foreach vm [machines $cluster $args] {
+		up $vm $token
 	    }
 	}
 	"swarm" {
@@ -509,24 +509,24 @@ proc ::cluster::cli::command { cmd args } {
 	    }
 	}
 	"ps" {
-	    set cluster [cli init]
+	    set cluster [init]
 	    if { [llength $args] == 0 } {
 		set master [::cluster::swarm::master $cluster]
 		cluster ps $master 1
 	    } else {
-		foreach vm [cli machines $cluster $args] {
+		foreach vm [machines $cluster $args] {
 		    cluster ps $vm
 		}
 	    }
 	}
 	"reinit" {
-	    set cluster [cli init]
+	    set cluster [init]
 	    cluster getopt args -steps steps "registries,images,compose"
 	    if { [string first "," $steps] } {
 		set steps [split $steps ","]
 	    }
 
-	    foreach vm [cli machines $cluster $args] {
+	    foreach vm [machines $cluster $args] {
 		cluster init $vm $steps
 	    }
 	}
@@ -535,16 +535,16 @@ proc ::cluster::cli::command { cmd args } {
 	"halt" {
 	    # Halt one or several machines (or the whole cluster if no
 	    # arguments)
-	    set cluster [cli init]
-	    foreach vm [cli machines $cluster $args] {
+	    set cluster [init]
+	    foreach vm [machines $cluster $args] {
 		cluster halt $vm
 	    }
 	}
 	"restart" {
 	    # Halt one or several machines (or the whole cluster if no
 	    # arguments)
-	    set cluster [cli init]
-	    foreach vm [cli machines $cluster $args] {
+	    set cluster [init]
+	    foreach vm [machines $cluster $args] {
 		cluster halt $vm
 		cluster start $vm
 	    }
@@ -553,27 +553,27 @@ proc ::cluster::cli::command { cmd args } {
 	"destroy" {
 	    # Destroy one or several machines (or the whole cluster if no
 	    # arguments).  The machines will be halted before removal.
-	    set cluster [cli init]
-	    foreach vm [cli machines $cluster $args] {
+	    set cluster [init]
+	    foreach vm [machines $cluster $args] {
 		cluster destroy $vm
 	    }
 	}
 	"sync" {
 	    # Destroy one or several machines (or the whole cluster if no
 	    # arguments).  The machines will be halted before removal.
-	    set cluster [cli init]
-	    foreach vm [cli machines $cluster $args] {
+	    set cluster [init]
+	    foreach vm [machines $cluster $args] {
 		cluster sync $vm
 	    }
 	}
 	"env" {
-	    set cluster [cli init]
+	    set cluster [init]
 	    cluster env $cluster [cluster getopt args -force] stdout
 	}
 	"ssh" {
 	    # Execute one command in a running virtual machine.  This is
 	    # mainly an alias to docker-machine ssh.
-	    set cluster [cli init]
+	    set cluster [init]
 	    if { [llength $args] == 0 } {
 		log ERROR "Need at least the name of a machine"
 	    }
@@ -584,8 +584,8 @@ proc ::cluster::cli::command { cmd args } {
 	    }
 	}
 	"server" {
-	    package require cluster::wapi
-	    set yaml [cli resolve pfx]
+	    package require api::wapi
+	    set yaml [resolve pfx]
 	    # Pass all arguments to the web API service initialisation
 	    # for maximimum flexibility and so we can benefit from
 	    # authorisation or HTTPS capabilities.
@@ -593,20 +593,17 @@ proc ::cluster::cli::command { cmd args } {
 	    vwait forever;   # Wait forever!
 	}
 	"search" {
-	    set cluster [cli init]
+	    set cluster [init]
 	    set locations {}
 	    foreach ptn $args {
 		set locations [concat $locations [cluster search $cluster $ptn]]
 	    }
 	    if { [llength $locations] > 0 } {
-		puts "MACHINE\tNAME\tID"
-		foreach {mc nm id} $locations {
-		    puts "${mc}\t${nm}\t${id}"
-		}
+		Tabulate 3 [concat MACHINE NAME ID $locations]
 	    }
 	}
 	"forall" {
-	    set cluster [cli init]
+	    set cluster [init]
 	    if { [llength $args] >= 2 } {
 		cluster forall $cluster [lindex $args 0] [lindex $args 1] {*}[lindex $args 2 end]
 	    }
@@ -625,7 +622,37 @@ proc ::cluster::cli::command { cmd args } {
 #
 ####################################################################
 
-# ::cluster::cli::Config -- Read configuration file
+proc ::api::cli::Tabulate { sz lst { separator " "} } {
+    set lens [lrepeat $sz -1]
+    for {set i 0} {$i<[llength $lst]} {incr i $sz} {
+	for {set j 0} {$j<$sz} {incr j} {
+	    set prm [lindex $lst [expr {$i+$j}]]
+	    set plen [string length $prm]
+	    set len [lindex $lens $j]
+	    if { $plen > $len } {
+		set lens [lreplace $lens $j $j $plen]
+	    }
+	}
+    }
+
+    for {set i 0} {$i<[llength $lst]} {incr i $sz} {
+	set line ""
+	for {set j 0} {$j<$sz} {incr j} {
+	    set prm [lindex $lst [expr {$i+$j}]]
+	    set len [lindex $lens $j]
+	    incr len -1
+	    append prm [string repeat " " $len]
+	    append line [string range $prm 0 $len]
+	    if { $j<[expr {$sz-1}] } {
+		append line $separator
+	    }
+	}
+	puts stdout $line
+    }
+}
+
+
+# ::api::cli::Config -- Read configuration file
 #
 #       Read the configuration file passed as an argument and modify
 #       the global options stored in the vars sub-namespace to reflect
@@ -644,7 +671,7 @@ proc ::cluster::cli::command { cmd args } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::cli::Config {fname} {
+proc ::api::cli::Config {fname} {
     set configured {}
     set fd [open $fname];   # Fail with errors on purpose
     while {![eof $fd]} {
@@ -666,4 +693,4 @@ proc ::cluster::cli::Config {fname} {
 }
 
 
-package provide cluster::cli 0.1
+package provide api::cli 0.1

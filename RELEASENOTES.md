@@ -12,6 +12,10 @@
 * Implementation of a Web API, using a vocabulary similar to the one
   from the command line.
 
+* Adding commands to search for components (by name patterns) and to
+  execute docker commands on groups of components (by the same name
+  patterns).
+
 
 ## v 0.5.1
 

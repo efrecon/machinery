@@ -16,7 +16,7 @@
 package require cluster::swarm
 package require minihttpd
 
-namespace eval ::cluster::wapi {
+namespace eval ::api::wapi {
     namespace eval vars {
 	variable version   "0.1";  # Version of this module and API!
 	variable clusters  {};     # List of dictionaries, keys are port numbers
@@ -26,12 +26,12 @@ namespace eval ::cluster::wapi {
     }
 
     namespace export {[a-z]*}
-    namespace path [namespace parent]
+    namespace path ::cluster;   # Arrange to access log easily, should we rm?
     namespace ensemble create -command ::wapi
 }
 
 
-# ::cluster::wapi::server -- Start serving commands
+# ::api::wapi::server -- Start serving commands
 #
 #       This procedure will bind a YAML description file to a port
 #       number and will listen to incoming HTTP connections on that
@@ -53,7 +53,7 @@ namespace eval ::cluster::wapi {
 #       that the HTTP server used is capable of doing HTTPS and
 #       implements basic authorisation, but this hasn't been lift up
 #       to the interface (yet?)
-proc ::cluster::wapi::server { yaml pfx args } {
+proc ::api::wapi::server { yaml pfx args } {
     # Get "our" arguments so we can translate between our API (only
     # based on dash-led options) to the one of the web server (which
     # requires a root directory and a port number).
@@ -127,7 +127,7 @@ proc ::cluster::wapi::server { yaml pfx args } {
 #
 ####################################################################
 
-# ::cluster::wapi::Init -- Conditional cluster reading
+# ::api::wapi::Init -- Conditional cluster reading
 #
 #       Read the cluster description associated to the web server port
 #       number if necessary and return its list of dictionary
@@ -142,7 +142,7 @@ proc ::cluster::wapi::server { yaml pfx args } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Init { prt } {
+proc ::api::wapi::Init { prt } {
     if { [dict exists $vars::clusters $prt] } {
 	if { [dict exists $vars::clusters $prt cluster] } {
 	    return [dict get $vars::clusters $prt cluster]
@@ -165,7 +165,7 @@ proc ::cluster::wapi::Init { prt } {
 }
 
 
-# ::cluster::wapi::Bind -- Bind cluster to running state
+# ::api::wapi::Bind -- Bind cluster to running state
 #
 #       Bind the cluster associated to the port number passed as an
 #       argument to the current running state reported by
@@ -180,7 +180,7 @@ proc ::cluster::wapi::Init { prt } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Bind { prt } {
+proc ::api::wapi::Bind { prt } {
     set cluster {}
 
     # Initialise if necessary.
@@ -201,7 +201,7 @@ proc ::cluster::wapi::Bind { prt } {
 }
 
 
-# ::cluster::wapi::GetToken -- Get swarm token
+# ::api::wapi::GetToken -- Get swarm token
 #
 #       Get the token associated to the cluster associated to the port
 #       number passed as an argument.
@@ -215,7 +215,7 @@ proc ::cluster::wapi::Bind { prt } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::GetToken { prt {force 0}} {
+proc ::api::wapi::GetToken { prt {force 0}} {
     set token ""
     if { [Init $prt] ne {} } {
 	set yaml [dict get $vars::clusters $prt yaml]
@@ -225,7 +225,7 @@ proc ::cluster::wapi::GetToken { prt {force 0}} {
 }
 
 
-# ::cluster::wapi::Token -- API implementation for token
+# ::api::wapi::Token -- API implementation for token
 #
 #       Get or (re)generate swarm token
 #
@@ -241,7 +241,7 @@ proc ::cluster::wapi::GetToken { prt {force 0}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Token {output prt sock url qry} {
+proc ::api::wapi::Token {output prt sock url qry} {
     set force 0
     if { [dict exists $qry force] } {
 	set force [string is true [dict get $qry force]]
@@ -256,7 +256,7 @@ proc ::cluster::wapi::Token {output prt sock url qry} {
 }
 
 
-# ::cluster::wapi::Names -- API implementation for names
+# ::api::wapi::Names -- API implementation for names
 #
 #       Get the names of the machines that are declared as part of the
 #       cluster.
@@ -273,7 +273,7 @@ proc ::cluster::wapi::Token {output prt sock url qry} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Names {output prt sock url qry} {
+proc ::api::wapi::Names {output prt sock url qry} {
     set names [cluster names [Bind $prt]]
     if { $output eq "txt" } {
 	return $names
@@ -285,7 +285,7 @@ proc ::cluster::wapi::Names {output prt sock url qry} {
 }
 
 
-# ::cluster::wapi::Info -- API implementation for info
+# ::api::wapi::Info -- API implementation for info
 #
 #       Get information of (some of) the machines that are declared as
 #       part of the cluster.  Recognise 'machines' as an argument, a
@@ -304,7 +304,7 @@ proc ::cluster::wapi::Names {output prt sock url qry} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Info {output prt sock url qry} {
+proc ::api::wapi::Info {output prt sock url qry} {
     # Get list of machines from argument, all machines in cluster if
     # nothing specified.
     if { [dict exists $qry machines] } {
@@ -337,7 +337,7 @@ proc ::cluster::wapi::Info {output prt sock url qry} {
 }
 
 
-# ::cluster::wapi::Version -- API implementation for version
+# ::api::wapi::Version -- API implementation for version
 #
 #       Return machinery version
 #
@@ -353,7 +353,7 @@ proc ::cluster::wapi::Info {output prt sock url qry} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Version {output prt sock url qry} {
+proc ::api::wapi::Version {output prt sock url qry} {
     set cluster [Bind $prt]
     if { $output eq "txt" } {
 	return [cli version]
@@ -363,7 +363,7 @@ proc ::cluster::wapi::Version {output prt sock url qry} {
 }
 
 
-# ::cluster::wapi::Up -- API implementation for up
+# ::api::wapi::Up -- API implementation for up
 #
 #       Create or (re)start machines.  Recognise 'machines' as an
 #       argument, a comma-separated list of machine names (short names
@@ -382,7 +382,7 @@ proc ::cluster::wapi::Version {output prt sock url qry} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Up {output prt sock url qry} {
+proc ::api::wapi::Up {output prt sock url qry} {
     # Get list of machines from argument, all machines in cluster if
     # nothing specified.
     set token [GetToken $prt]
@@ -402,26 +402,26 @@ proc ::cluster::wapi::Up {output prt sock url qry} {
 
 
 # Implement destroy, see OnEach
-proc ::cluster::wapi::Destroy {output prt sock url qry} {
+proc ::api::wapi::Destroy {output prt sock url qry} {
     return [OnEach $output $prt $sock $url $qry [list destroy]]
 }
 
 # Implement halt, see OnEach
-proc ::cluster::wapi::Halt {output prt sock url qry} {
+proc ::api::wapi::Halt {output prt sock url qry} {
     return [OnEach $output $prt $sock $url $qry [list halt]]
 }
 
 # Implement restart, see OnEach
-proc ::cluster::wapi::Restart {output prt sock url qry} {
+proc ::api::wapi::Restart {output prt sock url qry} {
     return [OnEach $output $prt $sock $url $qry [list halt start]]
 }
 
 # Implement sync, see OnEach
-proc ::cluster::wapi::Sync {output prt sock url qry} {
+proc ::api::wapi::Sync {output prt sock url qry} {
     return [OnEach $output $prt $sock $url $qry [list sync]]
 }
 
-# ::cluster::wapi::Ps -- API implementation for ps
+# ::api::wapi::Ps -- API implementation for ps
 #
 #       List the components running on selected machines of the
 #       cluster, or as reported by the swarm master.  This is
@@ -445,7 +445,7 @@ proc ::cluster::wapi::Sync {output prt sock url qry} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Ps {output prt sock url qry} {
+proc ::api::wapi::Ps {output prt sock url qry} {
     # Get the list of machines out of the machines query parameter
     if { [dict exists $qry machines] } {
 	set machines [split [dict get $qry machines] ,]
@@ -502,7 +502,7 @@ proc ::cluster::wapi::Ps {output prt sock url qry} {
 }
 
 
-# ::cluster::wapi::Reinit -- API implementation for reinit
+# ::api::wapi::Reinit -- API implementation for reinit
 #
 #       Reinitialise machines.  Recognise 'machines' as an argument, a
 #       comma-separated list of machine names (short names accepted).
@@ -523,7 +523,7 @@ proc ::cluster::wapi::Ps {output prt sock url qry} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::Reinit {output prt sock url qry} {
+proc ::api::wapi::Reinit {output prt sock url qry} {
     if { [dict exists $qry steps] } {
 	set steps [split [dict get $qry steps] ,]
     } else {
@@ -534,7 +534,7 @@ proc ::cluster::wapi::Reinit {output prt sock url qry} {
 }
 
 
-proc ::cluster::wapi::Swarm {output prt sock url qry} {
+proc ::api::wapi::Swarm {output prt sock url qry} {
     # Get list of operations to perform out of query arguments ops
     # (but also accepts operations)
     set ops {}
@@ -578,7 +578,7 @@ proc ::cluster::wapi::Swarm {output prt sock url qry} {
 }
 
 
-# ::cluster::wapi::OnEach -- Execute sequence of ops on machines
+# ::api::wapi::OnEach -- Execute sequence of ops on machines
 #
 #       This will execute a sequence of operations on a number of
 #       machines in the cluster.  Recognise 'machines' as an argument,
@@ -598,7 +598,7 @@ proc ::cluster::wapi::Swarm {output prt sock url qry} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::OnEach {output prt sock url qry ops} {
+proc ::api::wapi::OnEach {output prt sock url qry ops} {
     if { [dict exists $qry machines] } {
 	set machines [split [dict get $qry machines] ,]
     } else {
@@ -620,7 +620,7 @@ proc ::cluster::wapi::OnEach {output prt sock url qry ops} {
 }
 
 
-# ::cluster::wapi::NYI -- Not Yet Implemented
+# ::api::wapi::NYI -- Not Yet Implemented
 #
 #       Not yet implemented, return empty!
 #
@@ -636,7 +636,7 @@ proc ::cluster::wapi::OnEach {output prt sock url qry ops} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::wapi::NYI {output prt sock url qry} {
+proc ::api::wapi::NYI {output prt sock url qry} {
     # "Implementation" of NYI
     if {$output eq "txt" } {
 	return ""
@@ -645,5 +645,5 @@ proc ::cluster::wapi::NYI {output prt sock url qry} {
     }
 }
 
-package provide cluster::wapi $::cluster::wapi::vars::version
+package provide api::wapi $::api::wapi::vars::version
 
