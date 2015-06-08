@@ -84,6 +84,8 @@ proc ::cluster::cli::help { {hdr ""} } {
     puts "\treinit\tRerun finalisation stages on machine(s), specify via -step"
     puts "\tswarm\tLifecycle management of components via swarm"
     puts "\tsync\tOne shot synchronisation of rsync shares"
+    puts "\tforall\tExecute docker command on all matching containers"
+    puts "\tsearch\tSearch for matching containers"
     puts ""
     puts "GLOBAL OPTIONS:"
     # Guess max length of option name for padding
@@ -589,6 +591,25 @@ proc ::cluster::cli::command { cmd args } {
 	    # authorisation or HTTPS capabilities.
 	    wapi server $yaml $pfx {*}$args
 	    vwait forever;   # Wait forever!
+	}
+	"search" {
+	    set cluster [cli init]
+	    set locations {}
+	    foreach ptn $args {
+		set locations [concat $locations [cluster search $cluster $ptn]]
+	    }
+	    if { [llength $locations] > 0 } {
+		puts "MACHINE\tNAME\tID"
+		foreach {mc nm id} $locations {
+		    puts "${mc}\t${nm}\t${id}"
+		}
+	    }
+	}
+	"forall" {
+	    set cluster [cli init]
+	    if { [llength $args] >= 2 } {
+		cluster forall $cluster [lindex $args 0] [lindex $args 1] {*}[lindex $args 2 end]
+	    }
 	}
 	default {
 	    help "$cmd is an unknown command!"

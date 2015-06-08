@@ -484,9 +484,50 @@ proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
     if { $direct } {
 	Docker -raw -- ps
     } else {
-	set state [Docker -return -- ps]
+	set state [Docker -return -- ps -a]
 	return [ListParser $state [list "CONTAINER ID" "CONTAINER_ID"]]
     }
+}
+
+proc ::cluster::search { cluster ptn } {
+    set locations {}
+    foreach vm $cluster {
+	log NOTICE "Searching for $ptn in [dict get $vm -name]"
+	foreach c [ps $vm 0 0] {
+	    if { [dict exists $c names] && [dict exists $c container_id] } {
+		foreach nm [split [dict get $c names] ","] {
+		    if { [string match $ptn $nm] } {
+			# Append the name of the VM, the name we found
+			# and the container ID (to make sure callers
+			# can pinpoint containers uniquely).
+			lappend locations [dict get $vm -name] \
+			    $nm [dict get $c container_id]
+		    }
+		}
+	    }
+	}
+    }
+
+    return $locations
+}
+
+
+proc ::cluster::forall { cluster ptn cmd args } {
+    set locations {}
+    foreach vm $cluster {
+	foreach c [ps $vm 0 0] {
+	    if { [dict exists $c names] && [dict exists $c container_id] } {
+		foreach nm [split [dict get $c names] ","] {
+		    if { [string match $ptn $nm] } {
+			set id [dict get $c container_id]
+			log NOTICE "Executing on $nm: $cmd $args $id"
+			Attach $vm;   # We should really already be attached!
+			Docker -- $cmd {*}$args $id
+		    }
+		}
+	    }
+	}
+    }    
 }
 
 
