@@ -47,6 +47,7 @@ namespace eval ::api::cli {
             sync    "One shot synchronisation of rsync shares"
             forall  "Execute docker command on all matching containers"
             search  "Search for matching containers"
+            ssh     "Execute command in cluster machine"
         }
 	
 	variable appname "";          # Name of main application.
