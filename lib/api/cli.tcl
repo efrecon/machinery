@@ -35,6 +35,7 @@ namespace eval ::api::cli {
         # This is the list of recognised commands that will be print
         # when help is requested.
         variable cmds {
+	    help    "Print out help or command help"
             up      "Create and bring up cluster and/or specific machines"
             halt    "Bring down cluster and/or specific machines"
             token   "Create (new) swarm token, force regeneration with -force"
@@ -51,6 +52,7 @@ namespace eval ::api::cli {
 	variable appname "";          # Name of main application.
 	variable version 0.6-dev;     # GLOBAL Application version!
 	variable yaml "";             # The cluster YAML file we ended up using!
+	variable justify 80;          # Justification for long text
 	variable default "./cluster.yml"
     }
     
@@ -103,6 +105,23 @@ proc ::api::cli::help { {hdr ""} {fd stderr} } {
 }
 
 
+proc ::api::cli::chelp { cmd hlp {opts {}} {fd stderr} } {
+    puts $fd ""
+    puts $fd [Justify $hlp $vars::justify]
+    puts $fd ""
+    puts $fd "USAGE"
+    if { [llength $opts] > 0 } {
+	puts $fd "\t${vars::appname} \[global options\] $cmd \[command options\]"
+	puts $fd ""
+	puts $fd "COMMAND OPTIONS"
+	Tabulate 2 $opts $fd "\t"
+    } else {
+	puts $fd "\t${vars::appname} \[global options\] $cmd"
+    }
+    puts $fd ""
+    exit
+}
+
 # ::api::cli::globals -- Extract global options from args
 #
 #       Extract the global options from the main arguments and
@@ -124,12 +143,6 @@ proc ::api::cli::help { {hdr ""} {fd stderr} } {
 #       Exit on problems or help, read configure files and actively
 #       modify incoming list of arguments.
 proc ::api::cli::globals { appname argv_ } {
-    # XXX: There might be problems if the options to the commands end
-    # up being the same as global options.  One way to ensure proper
-    # parsing would be to recognise the -- separator, but as long as
-    # options to the commands do not overlap, the following
-    # implementation is safe.
-
     # Initialise defaults, i.e. take the default value of all global
     # options and for each option create one extra variable in our
     # child namespace.  The variable names will have a dash, that's
@@ -146,39 +159,67 @@ proc ::api::cli::globals { appname argv_ } {
     # Access global arguments.
     upvar $argv_ argv
 
-    # Did we request for help? Output and goodbye
-    if { [cluster getopt argv "-help"] } {
-	help
-    }
-
-    # Do we have a configure file to read, do this at once.
-    cluster getopt argv -config vars::-config ${vars::-config}
-    if { ${vars::-config} ne "" } {
-	Config ${vars::-config}
-    }
-
-
-    # Eat all program options from the command line, the latest value
-    # will be the one as we don't have options that can appear several
-    # times.
-    for {set eaten ""} {$eaten ne $argv} {} {
-	set eaten $argv
-	foreach opt [info vars vars::-*] {
-	    set opt [lindex [split $opt ":"] end]
-	    cluster getopt argv $opt vars::$opt [set vars::$opt]
+    # Roll forward to look for separating -- or first
+    # command. Anything before the -- or command are the global
+    # options, anything else is the command.
+    set ddash [lsearch $argv --]
+    if { $ddash >= 0 } {
+	set opts [lrange $argv 0 [expr {$ddash-1}]]
+	set argv [lrange $argv [expr {$ddash+1}] end]
+    } else {
+	set found 0
+	foreach {cmd hlp} $vars::cmds {
+	    set cmd [lsearch $argv $cmd]
+	    if { $cmd >= 0 } {
+		set opts [lrange $argv 0 [expr {$cmd-1}]]
+		set argv [lrange $argv $cmd end]
+		set found 1
+		break
+	    }
 	}
-    }
 
-    # Pass arguments from the command-line as the defaults for the cluster
-    # module.
-    foreach k [list -machine -docker -compose -verbose -cache -ssh] {
-	cluster defaults $k [set vars::$k]
+	if { !$found } {
+	    help "Couldn't find a known command!"
+	}
     }
 
     # No Arguments remaining?? dump help and exit since we need a command
     # to know what to really do...
     if { [llength $argv] <= 0 } {
 	help "No command specified!"
+    }
+
+    # Did we request for help? Output and goodbye
+    if { [cluster getopt opts "-help"] } {
+	help
+    }
+
+    # Do we have a configure file to read, do this at once.
+    cluster getopt opts -config vars::-config ${vars::-config}
+    if { ${vars::-config} ne "" } {
+	Config ${vars::-config}
+    }
+
+    # Eat all program options from the command line, the latest value
+    # will be the one as we don't have options that can appear several
+    # times.
+    for {set eaten ""} {$eaten ne $opts} {} {
+	set eaten $opts
+	foreach opt [info vars vars::-*] {
+	    set opt [lindex [split $opt ":"] end]
+	    cluster getopt opts $opt vars::$opt [set vars::$opt]
+	}
+    }
+
+    # Remaining opts? They are unknown!
+    if { [llength $opts] > 0 } {
+	help "'$opts' contains unknown global options!"
+    }
+
+    # Pass arguments from the command-line as the defaults for the cluster
+    # module.
+    foreach k [list -machine -docker -compose -verbose -cache -ssh] {
+	cluster defaults $k [set vars::$k]
     }
 }
 
@@ -442,12 +483,27 @@ proc ::api::cli::up { vm token } {
 proc ::api::cli::command { cmd args } {
     switch -nocase -- $cmd {
 	"version" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Print program version on standard output and exit." \
+		    { -help "Print this help" }
+	    }
 	    puts stdout [version]
 	}
 	"help" {
-	    cli help
+	    if { [llength $args] == 0 } {
+		cli help
+	    } else {
+		command [lindex $args 0] -help
+	    }
 	}
 	"token" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Possibly generate and print out the swarm token for this cluster.  Tokens are cached on disk in a hidden file for reuse. Use the -force option to force the generation of a new token if necessary." \
+		    {   -help "Print this help"
+			-force "For regeneration of a new token" }
+	    }
 	    set cluster [init]
 	    puts stdout [token [cluster getopt args -force]]
 	}
@@ -456,6 +512,11 @@ proc ::api::cli::command { cmd args } {
 	    # Start up one or several machines (or the whole cluster if no
 	    # arguments), the machines will be created if they did not
 	    # exists
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Start up one or several machines (or the whole cluster if no arguments is given).  The machines will be created if they do not exist, otherwise they will be started up if they were stopped.  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+		    { -help "Print this help" }
+	    }
 	    set cluster [init]
 	    set token [token]
 	    foreach vm [machines $cluster $args] {
@@ -463,6 +524,17 @@ proc ::api::cli::command { cmd args } {
 	    }
 	}
 	"swarm" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "When called with no arguments, just print out the cluster info.  When called with arguments, these should be YAML file ready for compose, or YAML files containing indirections to YAML project files, as in the main cluster YAML description syntax." \
+		    {   -help "Print this help"
+			-stop "Stop the components"
+			-kill "Forcedly kill the components"
+			-rm "Remove the components"
+			-up "(re)create the components (this is the default)"
+			-start "Start the components"
+			-options "Takes a comma separated string as argument, each item should look like key=value, where the keys are as of the compose indirection YAML specification, e.g. project, substitution, etc." }
+	    }
 	    set cluster [cli init]
 	    if { [llength $args] == 0 } {
 		::cluster::swarm::info $cluster
@@ -509,6 +581,11 @@ proc ::api::cli::command { cmd args } {
 	    }
 	}
 	"ps" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "When called with no arguments, this will request the swarm master for a list of components.  When called with arguments, these should be the names of virtual machines and the list of components for each of these machines will be printed out.   Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+		    {   -help "Print this help" }
+	    }
 	    set cluster [init]
 	    if { [llength $args] == 0 } {
 		set master [::cluster::swarm::master $cluster]
@@ -520,6 +597,12 @@ proc ::api::cli::command { cmd args } {
 	    }
 	}
 	"reinit" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Reinitialise one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+		    { -help "Print this help" 
+		      -steps "List of comma separated steps to perform, the steps are named after the YAML description, i.e. registries, compose, images, etc." }
+	    }
 	    set cluster [init]
 	    cluster getopt args -steps steps "registries,images,compose"
 	    if { [string first "," $steps] } {
@@ -533,6 +616,11 @@ proc ::api::cli::command { cmd args } {
 	"down" -
 	"stop" -
 	"halt" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Bring down one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+		    { -help "Print this help" }
+	    }
 	    # Halt one or several machines (or the whole cluster if no
 	    # arguments)
 	    set cluster [init]
@@ -543,6 +631,11 @@ proc ::api::cli::command { cmd args } {
 	"restart" {
 	    # Halt one or several machines (or the whole cluster if no
 	    # arguments)
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Restart one or several machines (or the whole cluster if no arguments is given).  This is equivalent to calling halt and then start.  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+		    { -help "Print this help" }
+	    }
 	    set cluster [init]
 	    foreach vm [machines $cluster $args] {
 		cluster halt $vm
@@ -553,6 +646,11 @@ proc ::api::cli::command { cmd args } {
 	"destroy" {
 	    # Destroy one or several machines (or the whole cluster if no
 	    # arguments).  The machines will be halted before removal.
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Destroy one or several machines (or the whole cluster if no arguments is given).  The machines will be gently halted and before destroyal.  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+		    { -help "Print this help" }
+	    }
 	    set cluster [init]
 	    foreach vm [machines $cluster $args] {
 		cluster destroy $vm
@@ -561,18 +659,33 @@ proc ::api::cli::command { cmd args } {
 	"sync" {
 	    # Destroy one or several machines (or the whole cluster if no
 	    # arguments).  The machines will be halted before removal.
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Synchronise rsync-based shared from one or several machines (or the whole cluster if no arguments is given).  Data will move from the machine to the host.  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+		    { -help "Print this help" }
+	    }
 	    set cluster [init]
 	    foreach vm [machines $cluster $args] {
 		cluster sync $vm
 	    }
 	}
 	"env" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Print out exporting commands to get (discovery) environment of one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+		    { -help "Print this help" }
+	    }
 	    set cluster [init]
 	    cluster env $cluster [cluster getopt args -force] stdout
 	}
 	"ssh" {
 	    # Execute one command in a running virtual machine.  This is
 	    # mainly an alias to docker-machine ssh.
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "This command takes at least the name of a machine as an argument.  Without any further arguments, it will ssh into the machine, otherwise the remaining of the arguments form a command to execute on the machine.  The name of the machine should be as from the YAML description." \
+		    { -help "Print this help" }
+	    }
 	    set cluster [init]
 	    if { [llength $args] == 0 } {
 		log ERROR "Need at least the name of a machine"
@@ -584,6 +697,18 @@ proc ::api::cli::command { cmd args } {
 	    }
 	}
 	"server" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Start a web server providing a REST API to operate on the cluster." \
+		    {   -help "Print this help" 
+			-port "Port to listen on (default: 8070)" 
+			-root "Root directory to serve files from (default: empty==no serving)" 
+			-dirlist "Glob-style pattern to allow directories to be listed for content (when serving files)"
+			-logfile "Path to file for logging"
+			-pki "List of paths to two file paths for the public and private keys, will serve using HTTPS when this option exists"
+			-authorization "List of triplets for basic auth protection: glob-style pattern matching directory name at server, realm and list of elements where the username and password of the allowed users are separated by a colon"
+		    }
+	    }
 	    package require api::wapi
 	    set yaml [resolve pfx]
 	    # Pass all arguments to the web API service initialisation
@@ -595,8 +720,16 @@ proc ::api::cli::command { cmd args } {
 	"search" {
             # Search for components, arguments are glob-style patterns
             # to match against container names.
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Search for components by their names within the cluster and list them.  This command takes glob-style patterns to match against the component names.  No arguments is the same as providing the pattern *, matching any component name" \
+		    { -help "Print this help" }
+	    }
 	    set cluster [init]
 	    set locations {}
+	    if { [llength $args] == 0 } {
+		set args [list "*"]
+	    }
 	    foreach ptn $args {
 		set locations [concat $locations [cluster search $cluster $ptn]]
 	    }
@@ -609,6 +742,11 @@ proc ::api::cli::command { cmd args } {
             # pattern to match against component name, second is
             # docker command to execute, remaining arguments are
             # options to the docker command.
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "Execute docker command on components in the cluster.  The first argument is a pattern to match against the name of the components within all machines, the second argument is the docker (sub-) command to execute and the remaining arguments are blindly passed to the command at execution time." \
+		    { -help "Print this help" }
+	    }
 	    set cluster [init]
 	    if { [llength $args] >= 2 } {
                 foreach {ptn cmd} $args break;  # Extract pattern and command
@@ -635,7 +773,10 @@ proc ::api::cli::command { cmd args } {
 #       Considers the list passed as argument to represent a table of
 #       x lines and sz columns and pretty print its content onto a
 #       file descriptor by padding all column items with spaces so
-#       that the length of the maximum string decides.
+#       that the length of the maximum string decides.  The last item
+#       in columns is treated slightly differently, as it will be
+#       allowed to span several lines (and thus align with the rest)
+#       whenever it is too long.
 #
 # Arguments:
 #	sz	Number of columns.
@@ -668,17 +809,36 @@ proc ::api::cli::Tabulate { sz lst { fd stdout } {pre "" } { sep " "} } {
     # whole line one at a time.
     for {set i 0} {$i<[llength $lst]} {incr i $sz} {
 	set line $pre
-	for {set j 0} {$j<$sz} {incr j} {
-	    set prm [lindex $lst [expr {$i+$j}]]
-	    set len [lindex $lens $j]
-	    incr len -1;  # Back one to make sure range below works properly
-	    append prm [string repeat " " $len]
-	    append line [string range $prm 0 $len]
-	    if { $j<[expr {$sz-1}] } {
-		append line $sep;  # Add separator unless last element.
+	# Take care of all the first $sz-1 parameters
+	if { $sz > 1 } {
+	    for {set j 0} {$j<$sz-1} {incr j} {
+		set prm [lindex $lst [expr {$i+$j}]]
+		set len [lindex $lens $j]
+		incr len -1;  # Back one to make sure range below works properly
+		append prm [string repeat " " $len]
+		append line [string range $prm 0 $len]
+		append line $sep;
 	    }
 	}
-	puts $fd [string trimright $line]
+	# Last param
+	set prm [lindex $lst [expr {$i+$sz-1}]]
+	if { [string length $prm] > $vars::justify } {
+	    set plines [split [Justify $prm $vars::justify] \n]
+	    append line [lindex $plines 0]
+	    puts $fd [string trimright $line]
+	    foreach l [lrange $plines 1 end] {
+		set line $pre
+		foreach len [lrange $lens 0 end-1] {
+		    append line [string repeat " " $len]
+		    append line $sep
+		}
+		append line $l
+		puts $fd [string trimright $line]
+	    }
+	} else {
+	    append line $prm
+	    puts $fd [string trimright $line]
+	}
     }
 }
 
@@ -723,5 +883,15 @@ proc ::api::cli::Config {fname} {
     return $configured
 }
 
+proc ::api::cli::Justify {text {width 72}} {
+    for {set result {}} {[string length $text] > $width} {
+	set text [string range $text [expr {$brk+1}] end]
+    } {
+	set brk [string last " " $text $width]
+	if { $brk < 0 } {set brk $width}
+	append result [string trim [string range $text 0 $brk]] \n
+    }
+    return $result$text
+}
 
 package provide api::cli 0.1
