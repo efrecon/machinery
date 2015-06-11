@@ -55,6 +55,7 @@ namespace eval ::api::cli {
 	variable yaml "";             # The cluster YAML file we ended up using!
 	variable justify 80;          # Justification for long text
 	variable default "./cluster.yml"
+	variable indent "  ";         # Indentification forward
     }
     
     namespace export {[a-z]*};         # Convention: export all lowercase 
@@ -83,17 +84,17 @@ proc ::api::cli::help { {hdr ""} {fd stderr} } {
 	puts $fd ""
     }
     puts $fd "NAME:"
-    puts $fd "\t${vars::appname} -\
-          Cluster creation and management via docker, machine, compose and swarm"
+    puts $fd "${vars::indent}${vars::appname} -\
+          Cluster lifecycle management via docker, machine, compose and swarm"
     puts $fd ""
     puts $fd "USAGE"
-    puts $fd "\t${vars::appname} \[global options\] command \[command options\] \[arguments...\]"
+    puts $fd "${vars::indent}${vars::appname} \[global options\] command \[command options\] \[arguments...\]"
     puts $fd ""
     puts $fd "VERSION"
-    puts $fd "\t${vars::version}"
+    puts $fd "${vars::indent}${vars::version}"
     puts $fd ""
     puts $fd "COMMANDS:"
-    Tabulate 2 $vars::cmds $fd "\t"
+    Tabulate 2 $vars::cmds $fd "${vars::indent}"
     puts $fd ""
     puts $fd "GLOBAL OPTIONS:"
     # Rewrite option descriptions, tabulate nicely and output
@@ -101,23 +102,40 @@ proc ::api::cli::help { {hdr ""} {fd stderr} } {
     foreach { arg val dsc } $vars::gopts {
         lappend optout $arg "$dsc (default: $val)"
     }
-    Tabulate 2 $optout $fd "\t"
+    Tabulate 2 $optout $fd "${vars::indent}"
     exit
 }
 
 
+# ::api::cli::chelp -- Dump command help and exit
+#
+#       Dump command specific help and exit.  The help message will
+#       automatically by justified and the option descriptions
+#       tabulated.
+#
+# Arguments:
+#	cmd	Command to give help for
+#	hlp	Help for command
+#	opts	Pairs of options and their descriptions.
+#	fd	Where to dump out the help.
+#
+# Results:
+#       None.
+#
+# Side Effects:
+#       Exit the program!
 proc ::api::cli::chelp { cmd hlp {opts {}} {fd stderr} } {
     puts $fd ""
     puts $fd [Justify $hlp $vars::justify]
     puts $fd ""
     puts $fd "USAGE"
     if { [llength $opts] > 0 } {
-	puts $fd "\t${vars::appname} \[global options\] $cmd \[command options\]"
+	puts $fd "${vars::indent}${vars::appname} \[global options\] $cmd \[command options\]"
 	puts $fd ""
 	puts $fd "COMMAND OPTIONS"
-	Tabulate 2 $opts $fd "\t"
+	Tabulate 2 $opts $fd "${vars::indent}"
     } else {
-	puts $fd "\t${vars::appname} \[global options\] $cmd"
+	puts $fd "${vars::indent}${vars::appname} \[global options\] $cmd"
     }
     puts $fd ""
     exit
@@ -822,17 +840,20 @@ proc ::api::cli::Tabulate { sz lst { fd stdout } {pre "" } { sep " "} } {
 	    }
 	}
 	# Last param
+	set indent $pre
+	foreach len [lrange $lens 0 end-1] {
+	    append indent [string repeat " " $len]
+	    append indent $sep
+	}
 	set prm [lindex $lst [expr {$i+$sz-1}]]
-	if { [string length $prm] > $vars::justify } {
-	    set plines [split [Justify $prm $vars::justify] \n]
+	set remaining [expr {$vars::justify-[string length $indent]}]
+	if { $remaining < 10 } { set remaining $vars::justify }
+	if { [string length $prm] > $remaining } {
+	    set plines [split [Justify $prm $remaining] \n]
 	    append line [lindex $plines 0]
 	    puts $fd [string trimright $line]
 	    foreach l [lrange $plines 1 end] {
-		set line $pre
-		foreach len [lrange $lens 0 end-1] {
-		    append line [string repeat " " $len]
-		    append line $sep
-		}
+		set line $indent
 		append line $l
 		puts $fd [string trimright $line]
 	    }
@@ -884,6 +905,22 @@ proc ::api::cli::Config {fname} {
     return $configured
 }
 
+
+# ::api::cli::Justify -- Justify text
+#
+#       Quick and dirty code justification, the code originates from
+#       http://wiki.tcl.tk/1774.  This does not check for line breaks
+#       in the text, and other corner cases.
+#
+# Arguments:
+#	text	(long) text to justify
+#	width	Max width of lines.
+#
+# Results:
+#       Return several lines separated by the line break.
+#
+# Side Effects:
+#       None.
 proc ::api::cli::Justify {text {width 72}} {
     for {set result {}} {[string length $text] > $width} {
 	set text [string range $text [expr {$brk+1}] end]
