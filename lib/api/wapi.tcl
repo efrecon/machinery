@@ -75,7 +75,7 @@ proc ::api::wapi::server { yaml pfx args } {
     # (more tcl-like) and nothing will default to the JSON behaviour.
     set api [string trimright ${vars::-endpoint} "/"]
     foreach entries {token names info version up destroy halt restart sync \
-			 ps reinit} {
+			 ps reinit search} {
 	# Extract entrypoint for API and name of procedure it should
 	# map to.  When no procedure is specified, it will be the same
 	# as the API entry point, with an uppercase first letter.
@@ -501,6 +501,27 @@ proc ::api::wapi::Ps {output prt sock url qry} {
     }
 }
 
+
+proc ::api::wapi::Search {output prt sock url qry} {
+    # Get the list of components out of the components query parameter
+    if { [dict exists $qry components] } {
+	set components [split [dict get $qry components] ,]
+    } else {
+	set components *
+    }
+
+    set cluster [Bind $prt]
+    set json "\["
+    foreach ptn $components {
+	foreach {mc nm id} [cluster search $cluster $ptn] {
+	    set d [dict create machine $mc name $nm id $id]
+	    append json [::json::stringify $d 0] ","
+	}
+    }
+    set json [string trimright $json ","]
+    append json "\]"
+    return $json
+}
 
 # ::api::wapi::Reinit -- API implementation for reinit
 #
