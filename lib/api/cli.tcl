@@ -48,6 +48,8 @@ namespace eval ::api::cli {
             forall  "Execute docker command on all matching containers"
             search  "Search for matching containers"
             ssh     "Execute command in cluster machine"
+            server  "Start a web server to respond to REST calls"
+	    ps      "List all existing containers in cluster or specific machines"
         }
 	
 	variable appname "";          # Name of main application.
