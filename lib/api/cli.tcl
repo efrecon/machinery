@@ -188,18 +188,22 @@ proc ::api::cli::globals { appname argv_ } {
 	set opts [lrange $argv 0 [expr {$ddash-1}]]
 	set argv [lrange $argv [expr {$ddash+1}] end]
     } else {
-	set found 0
+	# Find the first commands, since arguments to commands could
+	# be matching a command name we look for the closest one to
+	# the argument start.
+	set cmdloc -1
 	foreach {cmd hlp} $vars::cmds {
-	    set cmd [lsearch $argv $cmd]
-	    if { $cmd >= 0 } {
-		set opts [lrange $argv 0 [expr {$cmd-1}]]
-		set argv [lrange $argv $cmd end]
-		set found 1
-		break
+	    set i [lsearch $argv $cmd]
+	    if { $cmdloc < 0 || ($i >= 0 && $i < $cmdloc) } {
+		set cmdloc $i
 	    }
 	}
-
-	if { !$found } {
+	# We have a command, isolate global options from arguments,
+	# otherwise we don't know what to do!
+	if { $cmdloc > 0 } {
+	    set opts [lrange $argv 0 [expr {$cmdloc-1}]]
+	    set argv [lrange $argv $cmdloc end]
+	} else {
 	    help "Couldn't find a known command!"
 	}
     }
