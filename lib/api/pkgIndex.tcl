@@ -9,4 +9,4 @@
 # full path name of this file's directory.
 
 package ifneeded api::wapi 0.1 [list source [file join $dir wapi.tcl]]
-package ifneeded api::cli 0.1 [list source [file join $dir cli.tcl]]
+package ifneeded api::cli 0.2 [list source [file join $dir cli.tcl]]

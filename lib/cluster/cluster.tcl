@@ -101,6 +101,9 @@ namespace eval ::cluster {
 				 {^yi(b|)$}     [expr {pow(1024,8)}]]
 	# Dynamically discovered list of machine create options
 	variable machopts {}
+        # List of additional driver specific options that should be
+        # resolved into absolute path.
+        variable absPaths {azure-publish-settings-file azure-subscription-cert hyper-v-boot2docker-location}
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -294,31 +297,64 @@ proc ::cluster::names { cluster } {
 #       looking up without the prefix is guaranteed to work.
 #
 # Arguments:
-#        cluster        List of machine description dictionaries.
+#        cluster     List of machine description dictionaries.
 #        name        Name of machine to look for.
+#        truename    Set to 1 to ignore aliases
 #
 # Results:
 #       Full dictionary description of machine.
 #
 # Side Effects:
 #       None.
-proc ::cluster::find { cluster name } {
+proc ::cluster::find { cluster name { truename 0 } } {
     foreach vm $cluster {
-	if { [NameEq $name [dict get $vm -name]] } {
+	if { [NameCmp [dict get $vm -name] $name] } {
 	    return $vm
+	}
+
+	# Lookup by the aliases for a VM
+        if { [string is false $truename] } {
+            if { [dict exists $vm -aliases] } {
+                foreach nm [dict get $vm -aliases] {
+                    if { [NameCmp $nm $name] } {
+                        return $vm
+                    }
+                }
+            }
+	}
+    }
+
+    return {}
+}
+
+
+proc ::cluster::findAll { cluster {ptn *}} {
+    # Fill selection with all the true names of the machines that
+    # match the pattern.
+    set selection {}
+    foreach vm $cluster {
+	if { [NameCmp [dict get $vm -name] $ptn match] } {
+	    lappend selection [dict get $vm -name]
 	}
 
 	# Lookup by the aliases for a VM
 	if { [dict exists $vm -aliases] } {
 	    foreach nm [dict get $vm -aliases] {
-		if { [NameEq $name $nm] } {
-		    return $vm
+		if { [NameCmp $nm $ptn match] } {
+                    lappend selection [dict get $vm -name]
 		}
 	    }
 	}
     }
 
-    return {}
+    # Now sort away duplicates and return the unique list of cluster
+    # machines representations
+    set vms {}
+    foreach nm [lsort -unique $selection] {
+        lappend vms [find $cluster $nm 1]
+    }
+
+    return $vms
 }
 
 
@@ -539,12 +575,7 @@ proc ::cluster::forall { cluster ptn cmd args } {
 
 proc ::cluster::swarm { master op fpath {opts {}}} {
     # Make sure we resolve in proper directory.
-    if { [dict exists $master origin] } {
-        set dirname [file dirname [dict get $master origin]]
-        log DEBUG "Joining $dirname and $fpath to get final path"
-        set fpath [file join $dirname $fpath]
-    }
-    set fpath [file normalize $fpath]
+    set fpath [AbsolutePath $master $fpath]
 
     EnvSet $master;    # Pass environment to composition.
     if { [file exists $fpath] } {
@@ -627,12 +658,7 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
             set fpath [dict get $project file]
             # Resolve with initial location of YAML description to
             # make sure we can have relative paths.
-            if { [dict exists $vm origin] } {
-                set dirname [file dirname [dict get $vm origin]]
-                log DEBUG "Joining $dirname and $fpath to get final path"
-                set fpath [file join $dirname $fpath]
-            }
-            set fpath [file normalize $fpath]
+            set fpath [AbsolutePath $vm $fpath]
             if { [file exists $fpath] } {
                 set descr [string map \
                                [list "UP" "Creating and starting up" \
@@ -1720,7 +1746,8 @@ proc ::cluster::Create { vm { token "" } } {
     }
 
     # Blindly append driver specific options, if any.  Make sure these
-    # are available options, at least!
+    # are available options, at least!  Also convert these to absolute
+    # files so locally stored cached arguments will keep working.
     if { [dict exists $vm -options] } {
 	if { [llength $vars::machopts] <= 0 } {
 	    set vars::machopts [MachineOptions]
@@ -1728,7 +1755,11 @@ proc ::cluster::Create { vm { token "" } } {
         dict for {k v} [dict get $vm -options] {
 	    set k [string trimleft $k "-"]
 	    if { [dict exists $vars::machopts $k] } {
-		lappend cmd --$k $v
+                if { [lsearch $vars::absPaths $k] >= 0 } {
+                    lappend cmd --$k [AbsolutePath $vm $v]
+                } else {
+                    lappend cmd --$k $v
+                }
 	    } else {
 		log WARM "--$k is not an option supported by 'create'"
 	    }
@@ -3091,7 +3122,7 @@ proc ::cluster::CacheFile { yaml ext } {
 }
 
 
-# ::cluster::NameEq -- Match machine names
+# ::cluster::NameCmp -- Match machine names
 #
 #       This procedure matches if the name of a machine matches a name
 #       that would have been entered on the command line.  This is
@@ -3100,23 +3131,24 @@ proc ::cluster::CacheFile { yaml ext } {
 # Arguments:
 #	name	Real name of machine
 #	nm	User-entered name
+#	op	(Valid!) string comparison operation to use
 #
 # Results:
-#       1 if names are equal, 0 otherwise
+#       1 if names compare positively, 0 otherwise
 #
 # Side Effects:
 #       None.
-proc ::cluster::NameEq { name nm } {
+proc ::cluster::NameCmp { name nm {op equal}} {
     # Lookup with proper name
-    if { $name eq $nm } {
+    if { [string $op $nm $name] } {
 	return 1
     }
     # Lookup the separator separating the prefix from the machine name
     # and match on the name.
-    set sep [string first ${vars::-separator} $nm]
+    set sep [string first ${vars::-separator} $name]
     if { $sep >= 0 } {
 	incr sep [string length ${vars::-separator}]
-	if { [string range $nm $sep end] eq $name } {
+	if { [string $op $nm [string range $name $sep end]] } {
 	    return 1
 	}
     }
@@ -3476,5 +3508,17 @@ proc ::cluster::OSIdentifier { vm } {
 	return ""
     }
 }
+
+proc ::cluster::AbsolutePath { vm fpath } {
+    if { [dict exists $vm origin] } {
+        set dirname [file dirname [dict get $vm origin]]
+        log DEBUG "Joining $dirname and $fpath to get final path"
+        set fpath [file join $dirname $fpath]
+    }
+    set fpath [file normalize $fpath]
+
+    return $fpath
+}
+
 
 package provide cluster 0.4

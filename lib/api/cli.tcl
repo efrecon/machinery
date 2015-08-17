@@ -438,8 +438,8 @@ proc ::api::cli::token {{force 0} {yaml ""}} {
 #       dictionaries.
 #
 # Arguments:
-#	cluster		Cluster to select from (i.e. list of VM dicts).
-#	shortnames	List of names to select within cluster, empty for all.
+#	cluster	    Cluster to select from (i.e. list of VM dicts).
+#	shortnames  List of name patterns to select within cluster, empty == all
 #
 # Results:
 #       Return a list of VM dictionaries for the machines whose name
@@ -454,9 +454,12 @@ proc ::api::cli::machines { cluster {shortnames {}} } {
 
     set machines {}
     foreach nm $shortnames {
-	set vm [cluster find $cluster $nm]
-	if { $vm ne "" } {
-	    lappend machines $vm
+        foreach vm [cluster findAll $cluster $nm] {
+            # Add only if not yet in the found list of machines, to
+            # avoid duplicates.
+            if { [cluster find $machines [dict get $vm -name] 1] eq {} } {
+                lappend machines $vm
+            }
 	}
     }
 
@@ -748,15 +751,19 @@ proc ::api::cli::command { cmd args } {
 	    if { [cluster getopt args -help] } {
 		chelp $cmd \
 		    "Search for components by their names within the cluster and list them.  This command takes glob-style patterns to match against the component names.  No arguments is the same as providing the pattern *, matching any component name" \
-		    { -help "Print this help" }
+		    { -help "Print this help" 
+                      -restrict "Comma-separated list of patterns for machine subset selection"}
 	    }
 	    set cluster [init]
+            cluster getopt args -restrict subset {}
+            set subset [split $subset ","]
+            set machines [machines $cluster $subset]
 	    set locations {}
 	    if { [llength $args] == 0 } {
 		set args [list "*"]
 	    }
 	    foreach ptn $args {
-		set locations [concat $locations [cluster search $cluster $ptn]]
+		set locations [concat $locations [cluster search $machines $ptn]]
 	    }
 	    if { [llength $locations] > 0 } {
 		Tabulate 3 [concat MACHINE NAME ID $locations]
@@ -770,12 +777,16 @@ proc ::api::cli::command { cmd args } {
 	    if { [cluster getopt args -help] } {
 		chelp $cmd \
 		    "Execute docker command on components in the cluster.  The first argument is a pattern to match against the name of the components within all machines, the second argument is the docker (sub-) command to execute and the remaining arguments are blindly passed to the command at execution time." \
-		    { -help "Print this help" }
+		    { -help "Print this help"
+                      -restrict "Comma-separated list of patterns for machine subset selection" }
 	    }
 	    set cluster [init]
+            cluster getopt args -restrict subset {}
+            set subset [split $subset ","]
+            set machines [machines $cluster $subset]
 	    if { [llength $args] >= 2 } {
                 foreach {ptn cmd} $args break;  # Extract pattern and command
-		cluster forall $cluster $ptn $cmd {*}[lindex $args 2 end]
+		cluster forall $machines $ptn $cmd {*}[lindex $args 2 end]
 	    }
 	}
 	default {
@@ -938,4 +949,4 @@ proc ::api::cli::Justify {text {width 72}} {
     return $result$text
 }
 
-package provide api::cli 0.1
+package provide api::cli 0.2

@@ -32,9 +32,6 @@ cli command [lindex $argv 0] {*}[lrange $argv 1 end]
 
 # TODO:
 #
-# Add a -restrict option to command line commands such as forall, so
-# as to be able to run commands on a restricted set of the cluster.
-#
 # Add external drivers that can be taken into account with the new
 # generic type in docker machine.
 #
@@ -46,5 +43,5 @@ cli command [lindex $argv 0] {*}[lrange $argv 1 end]
 # information about the cluster.  Maybe also an "inspect" command
 # (returning JSON/YAML?), that can be ingested by other tools.
 #
-# Resolve, whenever possible, relative file references in the generic
-# "options", e.g. azure-subscripion-cert.
+# Adapt to new --file - option in docker compose, so we don't generate
+# temporary files anymore.

@@ -16,6 +16,15 @@
   execute docker commands on groups of components (by the same name
   patterns).
 
+* Adapting to new options in latest machine, which leads to quicker
+  machine creations as setting labels does not need a restart anymore.
+
+* Dynamically adapt to the OS on the created virtual machine when
+  installing necessary tools such as rsync.
+
+* Adding `-restrict` option to `forall` and `search` to restrict to a
+  subset of matching machine name patterns within the cluster.
+
 
 ## v 0.5.1
 
