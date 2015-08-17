@@ -8,7 +8,7 @@
 # script is sourced, the variable $dir must contain the
 # full path name of this file's directory.
 
-package ifneeded cluster 0.3 [list source [file join $dir cluster.tcl]]
+package ifneeded cluster 0.4 [list source [file join $dir cluster.tcl]]
 package ifneeded cluster::swarm 0.2 [list source [file join $dir swarm.tcl]]
 package ifneeded cluster::vcompare 0.1 [list source [file join $dir vcompare.tcl]]
 package ifneeded cluster::virtualbox 0.1 [list source [file join $dir virtualbox.tcl]]

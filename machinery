@@ -42,11 +42,6 @@ cli command [lindex $argv 0] {*}[lrange $argv 1 end]
 # the machines, app ports are closed, unless listed.  Implement on top
 # of ufw, or directly on top of iptables.
 #
-# Move to use --engine-label for setting the labels, do this in a
-# manner that respects machine versioning.
-#
-# Start supporting other OS than B2D, i.e. ubuntu. This is urgent.
-#
 # Implement a "ls" command, or similar, that would print out current
 # information about the cluster.  Maybe also an "inspect" command
 # (returning JSON/YAML?), that can be ingested by other tools.

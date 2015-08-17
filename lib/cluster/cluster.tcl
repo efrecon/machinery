@@ -70,10 +70,6 @@ namespace eval ::cluster {
 	variable -prefix    "MACHINERY_"
 	# Sharing mapping between drivers (pattern matching) and types
 	variable -sharing   "virtualbox vboxsf * rsync"
-	# OS types based on drivers (should be dynamic in the long
-	# run).  "local" hypervisors will run b2d (boot2docker), all
-	# others ubuntu.
-	variable -os        "virtualbox b2d hyper-v b2d vmware*fusion b2d * ubuntu"
 	# ssh command to use towards host
 	variable -ssh       ""
 	# Supported sharing types.
@@ -391,7 +387,7 @@ proc ::cluster::bind { vm {ls -}} {
 #
 # Arguments:
 #        vm        Dictionary description of machine (as of YAML parsing)
-#        token        Swarm token to use.
+#        token     Swarm token to use.
 #
 # Results:
 #       The name of the machine on success, empty string otherwise.
@@ -405,8 +401,12 @@ proc ::cluster::create { vm token } {
     if { $nm ne "" } {
 	set vm [Running $vm]
 	if { $vm ne {} } {
-            # Tag virtual machine with labels.
-            set vm [tag $vm]
+            # Tag virtual machine with labels the hard-way, on older
+            # versions.
+            if { [vcompare lt [Version machine] 0.4] } {
+                set vm [tag $vm]
+            }
+
 	    if { $vm ne {} } {
 		# Open the ports and creates the shares
 		ports $vm
@@ -1718,6 +1718,7 @@ proc ::cluster::Create { vm { token "" } } {
             log WARN "Cannot set disk size for driver $driver!"
         }
     }
+
     # Blindly append driver specific options, if any.  Make sure these
     # are available options, at least!
     if { [dict exists $vm -options] } {
@@ -1734,7 +1735,7 @@ proc ::cluster::Create { vm { token "" } } {
         }
     }
 
-    # Take care of swam.  Turn it on in the first place, and recognise
+    # Take care of swarm.  Turn it on in the first place, and recognise
     # the key master (and request for a swarm master when it is on).
     if { $token ne "" } {
         lappend cmd --swarm --swarm-discovery token://$token
@@ -1747,6 +1748,15 @@ proc ::cluster::Create { vm { token "" } } {
         } else {
             log WARM "Swarm is turned off for this machine,\
                       cannot understand 'master'"
+        }
+    }
+
+    # Add the tags, if version permits.
+    if { [vcompare ge [Version machine] 0.4] } {
+        if { [dict exists $vm -labels] } {
+            foreach {k v} [dict get $vm -labels] {
+                lappend cmd --engine-label ${k}=${v};   # Should we quote?
+            }
         }
     }
 
@@ -3426,31 +3436,45 @@ proc ::cluster::InstallRSync { vm } {
     set nm [dict get $vm -name]
     
     set installer ""
-    foreach {driver os} ${vars::-os} {
-	if { [string match $driver [dict get $vm -driver]] } {
-	    switch -glob -nocase -- $os {
-		"u*" {
-		    # Ubuntu
-		    set installer "sudo apt-get update -y; sudo apt-get install -y rsync"
-		}
-		"tcl*" -
-		"b*" {
-		    # Boot2docker
-		    set installer "tce-load -wi rsync"
-		}
-	    }
-	    break
+    set id [OSIdentifier $vm]
+    switch -glob -nocase -- $id {
+	"debian*" -
+	"ubuntu*" {
+	    # Ubuntu
+	    set installer "sudo apt-get update; sudo apt-get install -y rsync"
+	}
+	"*docker" {
+	    # Boot2docker
+	    set installer "tce-load -wi rsync"
 	}
     }
 
     if { $installer eq "" } {
-	log WARN "Cannot install rsync in $nm: OS for $nm unknown"
+	log WARN "Cannot install rsync in $nm: OS '$id' in $nm\
+                  is not (yet?) supported"
     } else {
 	log NOTICE "Installing rsync in $nm"
 	Machine ssh $nm $installer
     }
 }
 
+proc ::cluster::OSInfo { vm } {
+    set nfo {}
+    set nm [dict get $vm -name]
+    foreach l [Machine -return -- ssh $nm "cat /etc/os-release"] {
+	set k [EnvLine nfo $l]
+    }
+    
+    return $nfo
+}
 
+proc ::cluster::OSIdentifier { vm } {
+    set nfo [OSInfo $vm]
+    if { [dict exists $nfo ID] } {
+	return [dict get $nfo ID]
+    } else {
+	return ""
+    }
+}
 
-package provide cluster 0.3
+package provide cluster 0.4
