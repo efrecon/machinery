@@ -70,6 +70,10 @@ namespace eval ::cluster {
 	variable -prefix    "MACHINERY_"
 	# Sharing mapping between drivers (pattern matching) and types
 	variable -sharing   "virtualbox vboxsf * rsync"
+	# OS types based on drivers (should be dynamic in the long
+	# run).  "local" hypervisors will run b2d (boot2docker), all
+	# others ubuntu.
+	variable -os        "virtualbox b2d hyper-v b2d vmware*fusion b2d * ubuntu"
 	# ssh command to use towards host
 	variable -ssh       ""
 	# Supported sharing types.
@@ -99,6 +103,8 @@ namespace eval ::cluster {
 				 {^zi(b|)$}     [expr {pow(1024,7)}] \
 				 {^y(?!i)(b|)$} [expr {pow(1000,8)}] \
 				 {^yi(b|)$}     [expr {pow(1024,8)}]]
+	# Dynamically discovered list of machine create options
+	variable machopts {}
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -918,8 +924,7 @@ proc ::cluster::shares { vm { shares {}} } {
     # we'll have rsync on the machine!  The following code only works
     # on the Tinycore linux-based boot2docker.
     if { [info exists SHARINFO(rsync)] } {
-	log NOTICE "Installing rsync in $nm"
-	Machine ssh $nm "tce-load -wi rsync"
+	InstallRSync $vm
     }
 
     # Find out id of main user on virtual machine to be able to mount
@@ -1426,7 +1431,7 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
 #       docker-machine for maximum compatibility.
 #
 # Arguments:
-#        fname        Path to YAML description
+#        fname       Path to YAML description
 #        args        List of dash-led options and arguments, see above.
 #
 # Results:
@@ -1713,10 +1718,19 @@ proc ::cluster::Create { vm { token "" } } {
             log WARN "Cannot set disk size for driver $driver!"
         }
     }
-    # Blindly append driver specific options, if any
+    # Blindly append driver specific options, if any.  Make sure these
+    # are available options, at least!
     if { [dict exists $vm -options] } {
+	if { [llength $vars::machopts] <= 0 } {
+	    set vars::machopts [MachineOptions]
+	}
         dict for {k v} [dict get $vm -options] {
-            lappend cmd --[string trimleft $k "-"] $v
+	    set k [string trimleft $k "-"]
+	    if { [dict exists $vars::machopts $k] } {
+		lappend cmd --$k $v
+	    } else {
+		log WARM "--$k is not an option supported by 'create'"
+	    }
         }
     }
 
@@ -1763,6 +1777,56 @@ proc ::cluster::Create { vm { token "" } } {
     return [dict get $vm -name]
 }
 
+
+proc ::cluster::MachineOptions {} {
+    log INFO "Actively discovering creation options"
+    set machopts {};  # Empty list of discovered options
+
+    foreach l [Machine -return -- create -h] {
+	# Only considers indented lines, they contain the option
+	# descriptions (there are a lot!).
+	if { [string trim $l] ne "" && [string trimleft $l] ne $l } {
+	    set l [string trim $l]
+	    # Now only consider lines that start with a dash.
+	    if { [string index $l 1] eq "-" } {
+		# Get rid of the option textual description behind the
+		# first tab.
+		set tab [string first "\t" $l]
+		set lead [string trim [string range $l 0 $tab]]
+		# Now isolate the real option, starting from the back
+		# of the string.  Try capturing the default value if
+		# any.
+		set def_val {};   # Default value is empty by default
+		set back [expr {[string length $lead]-1}];  # End of lead
+		# Default value is at end, between quotes.
+		if { [string index $lead end] eq "\"" } {
+		    set op_quote [string last "\"" $lead end-1]
+		    set back [expr {$op_quote-1}];  # Skip default val
+		    set def_val [string trim [string range $lead $op_quote end] "\""]
+		}
+		# Skip multioption specification, which is enclosed by
+		# brackets.
+		set idx [string last "\]" $lead]
+		if { $idx >= 0 } {
+		    set back [expr {[string last "\[" $lead $idx]-1}]
+		}
+		# When we are here, the variable back contains the
+		# location within the lead where the options
+		# specifications are contained.  Split on coma and
+		# pick up the first with a double dash.
+		foreach opt [split [string range $lead 0 $back] ","] {
+		    set opt [string trim $opt]
+		    if { [string range $opt 0 1] eq "--" } {
+			lappend machopts [string range $opt 2 end] $def_val
+			break;   # Done, we have found one!
+		    }
+		}
+	    }
+	}
+    }
+
+    return $machopts
+}
 
 # ::cluster::POpen4 -- Pipe open
 #
@@ -3357,5 +3421,36 @@ proc ::cluster::SCommand { vm } {
 
     return $ssh
 }
+
+proc ::cluster::InstallRSync { vm } {
+    set nm [dict get $vm -name]
+    
+    set installer ""
+    foreach {driver os} ${vars::-os} {
+	if { [string match $driver [dict get $vm -driver]] } {
+	    switch -glob -nocase -- $os {
+		"u*" {
+		    # Ubuntu
+		    set installer "sudo apt-get update -y; sudo apt-get install -y rsync"
+		}
+		"tcl*" -
+		"b*" {
+		    # Boot2docker
+		    set installer "tce-load -wi rsync"
+		}
+	    }
+	    break
+	}
+    }
+
+    if { $installer eq "" } {
+	log WARN "Cannot install rsync in $nm: OS for $nm unknown"
+    } else {
+	log NOTICE "Installing rsync in $nm"
+	Machine ssh $nm $installer
+    }
+}
+
+
 
 package provide cluster 0.3
