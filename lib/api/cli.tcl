@@ -635,16 +635,32 @@ proc ::api::cli::command { cmd args } {
 	    set state {MACHINE STATE URL MASTER DRIVER MEMORY SIZE}
 	    foreach vm $cluster {
 		lappend state [dict get $vm -name]
-		lappend state [dict get $vm state]
-		lappend state [dict get $vm url]
-		if { [string is true [dict get $vm -master]] } {
+		if { [dict exists $vm state] } {
+		    lappend state [dict get $vm state]
+		} else {
+		    lappend state Void
+		}
+		if { [dict exists $vm url] } {
+		    lappend state [dict get $vm url]
+		} else {
+		    lappend state ""
+		}
+		if { [dict exists $vm -master] && [string is true [dict get $vm -master]] } {
 		    lappend state *
 		} else {
 		    lappend state ""
 		}
 		lappend state [dict get $vm -driver]
-		lappend state [::cluster::Convert [dict get $vm -memory] MiB MiB]MiB
-		lappend state [::cluster::Convert [dict get $vm -size] MiB GiB]GiB
+		if { [dict exists $vm -memory] } {
+		    lappend state [::cluster::Convert [dict get $vm -memory] MiB MiB]MiB
+		} else {
+		    lappend state -
+		}
+		if { [dict exists $vm -size] } {
+		    lappend state [::cluster::Convert [dict get $vm -size] MiB GiB]GiB
+		} else {
+		    lappend state -
+		}
 	    }
 	    Tabulate 7 $state
 	}
@@ -850,7 +866,7 @@ proc ::api::cli::command { cmd args } {
 #
 # Side Effects:
 #       Output tabulated data.
-proc ::api::cli::Tabulate { sz lst { fd stdout } {pre "" } { sep " "} } {
+proc ::api::cli::Tabulate { sz lst { fd stdout } {pre "" } { sep "  "} } {
     # Compute maximum length of each column and put this into list
     # called 'lens' (which will then contain $sz items).
     set lens [lrepeat $sz -1]
@@ -874,8 +890,8 @@ proc ::api::cli::Tabulate { sz lst { fd stdout } {pre "" } { sep " "} } {
 	    for {set j 0} {$j<$sz-1} {incr j} {
 		set prm [lindex $lst [expr {$i+$j}]]
 		set len [lindex $lens $j]
-		incr len -1;  # Back one to make sure range below works properly
 		append prm [string repeat " " $len]
+		incr len -1;  # Back one to make sure range below works properly
 		append line [string range $prm 0 $len]
 		append line $sep;
 	    }

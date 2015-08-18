@@ -39,9 +39,8 @@ cli command [lindex $argv 0] {*}[lrange $argv 1 end]
 # the machines, app ports are closed, unless listed.  Implement on top
 # of ufw, or directly on top of iptables.
 #
-# Implement a "ls" command, or similar, that would print out current
-# information about the cluster.  Maybe also an "inspect" command
-# (returning JSON/YAML?), that can be ingested by other tools.
+# Implement an "inspect" command (returning JSON/YAML?), that can be
+# ingested by other tools.
 #
 # Adapt to new --file - option in docker compose, so we don't generate
 # temporary files anymore.
