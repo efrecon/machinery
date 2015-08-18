@@ -34,6 +34,10 @@
 * Added a `ls` CLI sub-command, this will print out the list of
   cluster machines and their state.
 
+* Use a dash-led marker at the beginning of YAML files to
+  automatically pick up the cluster description from the current
+  directory as a default failover.
+
 
 ## v 0.5.1
 

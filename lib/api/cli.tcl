@@ -201,7 +201,7 @@ proc ::api::cli::globals { appname argv_ } {
 	}
 	# We have a command, isolate global options from arguments,
 	# otherwise we don't know what to do!
-	if { $cmdloc > 0 } {
+	if { $cmdloc >= 0 } {
 	    set opts [lrange $argv 0 [expr {$cmdloc-1}]]
 	    set argv [lrange $argv $cmdloc end]
 	} else {
@@ -319,6 +319,7 @@ proc ::api::cli::version {} {
 proc ::api::cli::resolve { pfx_ {fname ""} } {
     # Access prefix in caller's stack
     upvar $pfx_ pfx
+    set pfx ""
 
     # Default to value from global options if nothing specified.
     if { $fname eq "" } {
@@ -328,9 +329,24 @@ proc ::api::cli::resolve { pfx_ {fname ""} } {
     # Set the prefix and filename depending on the filename that we
     # ended up picking.
     if { $fname eq "" } {
-	set pfx ""
-	set fname ${vars::default}
-    } else {
+	if { [file exists ${vars::default}] } {
+	    set fname ${vars::default}
+	    return $fname
+	} else {
+	    set candidates [cluster candidates]
+	    if { [llength $candidates] > 1 } {
+		cluster log WARN "Found [llength $candidates] possible cluster\
+                                  files, cannot pickup one automatically!"
+	    } else {
+		# Pick the only possible candidate
+		set fname [lindex $candidates 0]
+		cluster log NOTICE "Automatically picking YAML file at:\
+                                    $fname"
+	    }
+	}
+    }
+
+    if { $fname ne "" } {
 	set pfx [file rootname [file tail $fname]]
     }
 

@@ -104,6 +104,10 @@ namespace eval ::cluster {
         # List of additional driver specific options that should be
         # resolved into absolute path.
         variable absPaths {azure-publish-settings-file azure-subscription-cert hyper-v-boot2docker-location}
+	# Finding good file candidates
+	variable lookup "*.yml";    # Which files to consider for YAML parsing
+	variable marker {^#\s*docker\-machinery}
+
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -217,7 +221,7 @@ proc ::cluster::log { lvl msg } {
     set current [LogLevel ${vars::-verbose}]
     # If we should output (i.e. level of message is below the global
     # module level), pretty print and output.
-    if { ${vars::-verbose} >= $lvl } {
+    if { $current >= $lvl } {
         set toTTY [dict exists [fconfigure ${vars::-log}] -mode]
         # Output the whole line.
         if { $toTTY } {
@@ -1416,8 +1420,8 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
         set retries ${vars::-retries}
     }
     while { $retries > 0 } {
-        log NOTICE "Bringing up machine $nm..."
-        Machine start $nm
+	# Check if the machine is already running at once, to avoid
+	# unecessary attempts to (re)start.
         set state [Wait $vm [list "running" "stopped" "error"]]
         if { $state eq "running" } {
             # Start by putting back all changes that might have
@@ -1430,6 +1434,8 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
             Discovery $vm
             return 1
         }
+        log NOTICE "Bringing up machine $nm..."
+        Machine start $nm
         incr retries -1
         if { $retries > 0 } {
             log INFO "Machine $nm could not start, trying again..."
@@ -1585,6 +1591,30 @@ proc ::cluster::env { cluster {force 0} {fd ""} } {
     } else {
         return [EnvRead $env_path]
     }
+}
+
+
+proc ::cluster::candidates { {dir .} } {
+    set candidates {}
+    foreach fpath [glob -nocomplain -directory $dir -- $vars::lookup] {
+	if { [catch {open $fpath} fd] == 0 } {
+	    log DEBUG "Polling $fpath for leading YAML marker"
+	    while { ![eof $fd] } {
+		set line [string trim [gets $fd]]
+		if { $line ne "" } {
+		    if { [regexp $vars::marker $line] } {
+			lappend candidates $fpath
+		    }
+		    break;   # Jump out on first non empty line
+		}
+	    }
+	    close $fd
+	} else {
+	    log WARN "Cannot consider $fpath as a cluster description file: $fd"
+	}
+    }
+
+    return $candidates
 }
 
 
@@ -2006,7 +2036,7 @@ proc ::cluster::LineRead { c fd } {
     if { ( !$CMD(keep) && [string trim $line] ne "") || $CMD(keep) } {
 	if { $CMD(back) } {
 	    if { ( $CMD(outerr) && $fd eq "stderr" ) || $fd eq "stdout" } {
-		log DEBUG "Appending $line to result"
+		log TRACE "Appending '$line' to result"
 		lappend CMD(result) $line
 	    }
 	} elseif { $CMD(relay) } {
@@ -3455,8 +3485,10 @@ proc ::cluster::SCommand { vm } {
     }
 
     # Extract user name and host name from last argument if possible.
+    # This follows RFC1123 for the extraction of the hostname (but is
+    # probably wrong for non-latin chars?
     set last [lindex $ssh end]
-    if { [regexp {(\w+)@([\w.]+)} $last x uname hname] } {
+    if { [regexp {(\w+)@((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)} $last x uname hname] } {
 	set ssh [lrange $ssh 0 end-1]
 	lappend ssh -l $uname $hname
     }
