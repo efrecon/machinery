@@ -79,21 +79,27 @@ to avoid having to solve the few dependencies `machinery` has yourself.
 
 ## Operating on the cluster
 
-`machinery` takes a number of global options (dash-led) followed by a command.
-These commands can be followed by command-specific options and the names of one
-or several virtual machines, as specified in the YAML cluster description.
+`machinery` takes a number of global options (dash-led) followed by a
+command.  These commands can be followed by command-specific options
+and patterns matching the names of one or several virtual machines, as
+specified in the YAML cluster description.  Those patterns are
+glob-style patterns, where `*` matches any number of characters, `?` a
+single character and `[` and `]` can be used to specify ranges of
+characters.  UNIX shells may be inclined to resolve these patterns for
+you, so you might have to quote your arguments.
 
 ### Commands
 
 #### up
 
-The command `up` will bring up one or several machines, which names would follow
-on the command line.  If no machines are specified, `machinery` will bring up
-all machines in the cluster.  Machines that do not exist yet will be created
-prior to being brought up, and a swarm token for the cluster will be generated
-if necessary during that process.  More details are available in the section on
-the supported YAML format.  Note that instead of `up`, machinery also supports
-the synonym `start`.
+The command `up` will bring up one or several machines, which names
+matching patterns would follow on the command line.  If no machines
+are specified, `machinery` will bring up all machines in the cluster.
+Machines that do not exist yet will be created prior to being brought
+up, and a swarm token for the cluster will be generated if necessary
+during that process.  More details are available in the section on the
+supported YAML format.  Note that instead of `up`, machinery also
+supports the synonym `start`.
 
 `machinery` is able to mount local host shares within the virtual
 machines that runs the virtualbox driver.  Mounting is made persistent
@@ -110,20 +116,21 @@ cluster YAML file, but with a leading `.` to hide it and the extension
 
 #### halt
 
-The command `halt` will bring down one or several machines, which
-names would follow on the command line.  If no machines are specified,
-`machinery` will bring down all machines in the cluster.  Note that
-instead of `halt`, machinery also supports the synonym `stop`.  All
-directories that should be synchronised will be copied back to the
-host before their respective machines are brought down.
+The command `halt` will bring down one or several machines, which name
+matching patterns would follow on the command line.  If no machines
+are specified, `machinery` will bring down all machines in the
+cluster.  Note that instead of `halt`, machinery also supports the
+synonym `stop`.  All directories that should be synchronised will be
+copied back to the host before their respective machines are brought
+down.
 
 #### destroy
 
 The command `destroy` will destroy entirely and irrevocably one or
-several machines, which names would follow on the command line.  If no
-machines are specified, `machinery` will destroy all machines in the
-cluster.  Synchronised directories will be copied before machine
-destruction.
+several machines, which name matching patterns would follow on the
+command line.  If no machines are specified, `machinery` will destroy
+all machines in the cluster.  Synchronised directories will be copied
+before machine destruction.
 
 #### sync
 
@@ -216,14 +223,28 @@ provided.
 
 When called without any argument, the command `ps` will ask the swarm
 master to return the list of all running components, as of
-`docker-machine ps`.  When called with arguments, each should
-correspond to the name of a known virtual machine and the command will
-return the list of running components for that/those machine(s)
-instead.
+`docker-machine ps`.  When called with arguments, these should be name
+matching patterns and the command will return the list of running
+components for that/those machine(s) instead.  Note that calling `ps`
+with no argument, is different from running `ps "*"`.  In the first
+case, only the components scheduled via swarm are printed out.  In the
+second case, all components currently running in the cluster are
+printed out, including those that would be issued from compose files
+attached specifically attached to machines.
 
 #### version
 
-Print out the current version of the program on the standard output and exit.
+Print out the current version of the program on the standard output
+and exit.
+
+#### ls
+
+Print out a static and dynamic summary of all the machines that are
+comprised in the cluster.
+
+#### search
+
+#### forall
 
 ### Interaction with system components
 
@@ -274,7 +295,7 @@ directory.  This mimics the operation of related commands such as
 definition file through its `-cluster` global option and its behaviour will
 slightly change in that case.  Whenever started with the `-cluster` option
 pointing at another file than the default `cluster.yml`, `machinery` will create
-virtual machines which name uses the rootname (sans the directory path) of the
+virtual machines which names uses the rootname (sans the directory path) of the
 cluster definition file as a prefix.  Supposed you had started `machinery` with
 a YAML file called `mycluster.yml` and that it contained the definition for a
 machine called `db`, running `machinery -cluster mycluster.yml create db` would
@@ -284,6 +305,16 @@ with the name `db` at the command-line.  However, calling `docker-machine ls`
 will show up its real name, i.e. `mycluster-db`.  This behaviour will help you
 managing several clusters from the same directory, for example when staging or
 when running sub-sets of your architecture for development.
+
+Note, that when neither a specifiy YAML file is pointed at using
+`-cluster`, nor a default file called `cluster.yml` is found in the
+current directory, `machinery` will try to find a good candidate YAML
+description file automatically.  It will list all files ending with
+`.yml` in the current directory and will consider those which first
+empty line contains the marker `#docker-machinery`.  Whenever, only
+one candidate is found, this file will be taken into consideration as
+if it had been specifically pointed at using the `-cluster` global
+option.
 
 #### Interaction with `docker-compose` <a name="docker-compose" />
 
@@ -354,10 +385,12 @@ token that would otherwise be generated and/or read from the (hidden) cache.
 
 #### `-cluster`
 
-This options takes the path to a YAML definition for your cluster.  The
-directory specified using this option will be the directory where the cache for
-the swarm token is searched for and stored in.  It defaults to the file
-`cluster.yml` in the current directory.
+This options takes the path to a YAML definition for your cluster.
+The directory specified using this option will be the directory where
+the cache for the swarm token is searched for and stored in.  It
+defaults to the file `cluster.yml` in the current directory, when
+present, or the only file ending with `.yml` and containing
+`#docker-machinery` as its first non-empty line.
 
 #### `-driver`
 
@@ -586,6 +619,22 @@ for more information.
 Finally a key called `project` can be set and is a string.  It will contain the
 name of the compose project and will replace the one that usually is extracted
 from the directory name.
+
+#### `addendum`
+
+`addendum` should be a list of dictionary that will, each, reference a
+program or script to be run once a machine has been completely
+initialised.
+
+These dictionaries should at least contain a key called `exec`, which
+content points to the program or script to run.  A relative path will
+be understood as relative to the directory containing the YAML
+description file for the cluster.
+
+Additionally, the content of the optional key `args` will be given as
+arguments when starting the program.  Finally, if a key called
+`substitution` is present and set to a positive boolean, substitution
+will occur in the run script, as for compose files above.
 
 ## Giving it a quick test
 
