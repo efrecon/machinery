@@ -668,12 +668,12 @@ proc ::api::cli::command { cmd args } {
 		}
 		lappend state [dict get $vm -driver]
 		if { [dict exists $vm -memory] } {
-		    lappend state [::cluster::Convert [dict get $vm -memory] MiB MiB]MiB
+		    lappend state [::cluster::Convert [dict get $vm -memory] MiB GiB]GiB
 		} else {
 		    lappend state -
 		}
 		if { [dict exists $vm -size] } {
-		    lappend state [::cluster::Convert [dict get $vm -size] MiB GiB]GiB
+		    lappend state [::cluster::Convert [dict get $vm -size] MB GB]GB
 		} else {
 		    lappend state -
 		}

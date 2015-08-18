@@ -3277,7 +3277,7 @@ proc ::cluster::Version { tool } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::Convert { spec {dft ""} { unit "" } } {
+proc ::cluster::Convert { spec {dft ""} { unit "" } { precision "%.01f"} } {
     # Extract value and first letter of unit specification from
     # string.
     set len [scan $spec "%f %c" val ustart]
@@ -3303,7 +3303,7 @@ proc ::cluster::Convert { spec {dft ""} { unit "" } } {
     if { [string match "*.0" $val] } {
 	return [expr {int($val)}]
     }
-    return $val
+    return [format $precision $val]
 }
 
 
