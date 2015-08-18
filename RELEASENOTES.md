@@ -38,6 +38,11 @@
   automatically pick up the cluster description from the current
   directory as a default failover.
 
+* Adding an `addendum` section to VMs, this contains a list of scripts
+  (or similar) that will automatically be run once the machine has
+  been created.  They can be used to control access to ports,
+  etc. using provider-specific command-line tools.
+
 
 ## v 0.5.1
 

@@ -685,10 +685,10 @@ proc ::api::cli::command { cmd args } {
 		chelp $cmd \
 		    "Reinitialise one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
 		    { -help "Print this help" 
-		      -steps "List of comma separated steps to perform, the steps are named after the YAML description, i.e. registries, compose, images, etc." }
+		      -steps "List of comma separated steps to perform, the steps are named after the YAML description, i.e. registries, compose, images, addendum, etc." }
 	    }
 	    set cluster [init]
-	    cluster getopt args -steps steps "registries,images,compose"
+	    cluster getopt args -steps steps "registries,images,compose,addendum"
 	    if { [string first "," $steps] } {
 		set steps [split $steps ","]
 	    }

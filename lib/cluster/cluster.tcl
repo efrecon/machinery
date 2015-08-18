@@ -38,7 +38,8 @@ namespace eval ::cluster {
         variable -separator "-"
         # Allowed VM keys
         variable -keys      {cpu size memory master labels driver options \
-                                 ports shares images compose registries aliases}
+                                 ports shares images compose registries aliases \
+				 addendum}
         # Path to common executables
         variable -machine   docker-machine
         variable -docker    docker
@@ -480,7 +481,7 @@ proc ::cluster::create { vm token } {
 }
 
 
-proc ::cluster::init { vm {steps {shares registries images compose}} } {
+proc ::cluster::init { vm {steps {shares registries images compose addendum}} } {
     # Poor man's discovery: write down a description of all the
     # network interfaces existing on the virtual machines,
     # including the most important one (e.g. the one returned by
@@ -507,6 +508,10 @@ proc ::cluster::init { vm {steps {shares registries images compose}} } {
 	# environment variables.
 	if { [lsearch -nocase $steps compose] >= 0 } {
 	    compose $vm UP
+	}
+
+	if { [lsearch -nocase $steps addendum] >= 0 } {
+	    addendum $vm
 	}
     } else {
 	log WARN "No docker daemon running on $nm!"
@@ -706,6 +711,70 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
     }
 
     return $composed
+}
+
+
+proc ::cluster::addendum { vm { execs {} } } {
+    # Get scripts/programs to execute from parameters of from VM object
+    if { [string length $execs] == 0 } {
+	if { ![dict exists $vm -addendum] } {
+	    return {}
+	}
+	set execs [dict get $vm -addendum]
+    }
+
+    # Pass the environment variables in case they were needed
+    EnvSet $vm
+
+    set nm [dict get $vm -name]
+    foreach exe $execs {
+	if { [dict exists $exe exec] } {
+	    # Resolve using initial location of YAML description file
+	    set fpath [AbsolutePath $vm [dict get $exe exec]]
+	    if { [file exists $fpath] } {
+		set substitution 0
+		if { [dict exists $exe substitution] } {
+		    set substitution \
+			[string is true [dict get $exe substitution]]
+		}
+
+		if { [dict exists $exe args] } {
+		    set args [dict get $exe args]
+		}
+
+		if { $substitution } {
+		    # Read and substitute content of file
+		    set fd [open $fpath]
+		    set dta [Resolve [read $fd]]
+		    close $fd
+
+		    # Dump to temporary location
+		    set rootname [file rootname [file tail $fpath]]
+		    set ext [file extension $fpath]
+		    set tmp_fpath [Temporary \
+				       [file join ${vars::-tmp} $rootname]]$ext
+		    set fd [open $tmp_fpath w]
+		    puts -nonewline $fd $dta
+		    close $fd
+
+		    set cmd $tmp_fpath
+		} else {
+		    set tmp_fpath ""
+		    set cmd $fpath
+		}
+
+		log NOTICE "Executing $fpath (args: $args)"
+		Run2 -keepblanks -stderr -raw -- $cmd {*}$args
+
+		# Remove temporary (subsituted) file, if any.
+		if { $tmp_fpath ne "" } {
+		    file delete -force -- $tmp_fpath
+		}
+	    } else {
+		log WARN "Cannot find external app to execute at: $fpath"
+	    }
+	}
+    }
 }
 
 
