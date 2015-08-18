@@ -25,6 +25,15 @@
 * Adding `-restrict` option to `forall` and `search` to restrict to a
   subset of matching machine name patterns within the cluster.
 
+* Now accepting wildcards instead of (shortened) machine names in most
+  CLI commands.  Most usefull is for `ps` sub-command: when called
+  without arguments it will return the components in the swarm, when
+  called with `*` (matching all machine names), it will list *all*
+  components in the cluster.
+
+* Added a `ls` CLI sub-command, this will print out the list of
+  cluster machines and their state.
+
 
 ## v 0.5.1
 

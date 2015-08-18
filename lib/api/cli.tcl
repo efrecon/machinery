@@ -50,6 +50,7 @@ namespace eval ::api::cli {
             ssh     "Execute command in cluster machine"
             server  "Start a web server to respond to REST calls"
 	    ps      "List all existing containers in cluster or specific machines"
+	    ls      "List all machines in the cluster and their state"
         }
 	
 	variable appname "";          # Name of main application.
@@ -623,6 +624,29 @@ proc ::api::cli::command { cmd args } {
 		    cluster ps $vm
 		}
 	    }
+	}
+	"ls" {
+	    if { [cluster getopt args -help] } {
+		chelp $cmd \
+		    "List current machines in cluster and their state" \
+		    { -help "Print this help" }
+	    }
+	    set cluster [init]
+	    set state {MACHINE STATE URL MASTER DRIVER MEMORY SIZE}
+	    foreach vm $cluster {
+		lappend state [dict get $vm -name]
+		lappend state [dict get $vm state]
+		lappend state [dict get $vm url]
+		if { [string is true [dict get $vm -master]] } {
+		    lappend state *
+		} else {
+		    lappend state ""
+		}
+		lappend state [dict get $vm -driver]
+		lappend state [::cluster::Convert [dict get $vm -memory] MiB MiB]MiB
+		lappend state [::cluster::Convert [dict get $vm -size] MiB GiB]GiB
+	    }
+	    Tabulate 7 $state
 	}
 	"reinit" {
 	    if { [cluster getopt args -help] } {
