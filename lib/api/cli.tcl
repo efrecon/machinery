@@ -877,6 +877,7 @@ proc ::api::cli::command { cmd args } {
 		    set cargs [lrange $args 1 end]
 		} else {
 		    foreach {ptn cmd} $args break;  # Extract pattern and command
+		    set cargs [lrange $args 2 end]
 		}
 	    }
 	    cluster forall $machines $ptn $cmd {*}$cargs

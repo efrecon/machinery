@@ -2921,7 +2921,7 @@ proc ::cluster::Discovery { vm } {
             # usefull most of the time.
             set ip [lindex [Machine -return -- ip $nm] 0]
             if { $ip ne "" \
-                     && [regexp {\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}} $ip] } {
+                     && [regexp {((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)|(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})} $ip] } {
 		foreach pfx $prefixes {
 		    dict set environment ${pfx}_IP $ip
 		}
