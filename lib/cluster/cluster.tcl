@@ -2923,7 +2923,14 @@ proc ::cluster::Discovery { vm } {
             if { $ip ne "" \
                      && [regexp {((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)|(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})} $ip] } {
 		foreach pfx $prefixes {
-		    dict set environment ${pfx}_IP $ip
+		    if { [regexp {\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}} $ip] } {
+			dict set environment ${pfx}_IP $ip
+			dict set environment ${pfx}_HOSTNAME $ip
+		    }
+		    if { [regexp {(\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*} $ip] } {
+			dict set environment ${pfx}_HOSTNAME $ip
+			dict set environment ${pfx}_IP [::cluster::unix::resolve $ip]
+		    }
 		}
             }
         }

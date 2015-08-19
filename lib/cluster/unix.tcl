@@ -399,6 +399,20 @@ proc ::cluster::unix::mount { nm dev path { uid "" } {type "vboxsf"} {sleep 1} {
     return 0
 }
 
+proc ::cluster::unix::resolve { hostname } {
+    if { [regexp {\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}} $hostname] } {
+	return $hostname
+    }
+    
+    # This forces back IPv4 addresses, perhaps not a good idea?
+    foreach l [Run2 -return -- getent ahostsv4 $hostname] {
+	set entries [split $l]
+	if { [lindex $entries end] eq $hostname } {
+	    return [lindex $entries 0]
+	}
+    }
+    return ""
+}
 
 proc ::cluster::unix::mnt.sh { dev path { uid "" } { type "vboxsf" } } {
     set commands {}
