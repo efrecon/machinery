@@ -7,6 +7,9 @@ namespace eval ::cluster::swarm {
     namespace eval vars {
         # Extension for token storage files
         variable -ext       .tkn
+	# Name of master agent and agents
+	variable -agent     "swarm-agent"
+	variable -master    "swarm-agent-master"
     }
     # Export all lower case procedure, arrange to be able to access
     # commands from the parent (cluster) namespace from here and
@@ -47,10 +50,33 @@ proc ::cluster::swarm::info { cluster } {
     # Dump out swarm master information
     set master [master $cluster]
     if { $master ne "" } {
-        log NOTICE "Getting cluster info via\
-                    [dict get $master -name]"
-        [namespace parent]::Attach $master 1
-        [namespace parent]::Docker info
+	if { [dict exists $master state] \
+		 && [string match -nocase "running" [dict get $master state]] } {
+	    log NOTICE "Getting cluster info via\
+                        [dict get $master -name]"
+	    [namespace parent]::Attach $master 1
+	    [namespace parent]::Docker info
+	} else {
+	    log WARN "Cluster not bound or master not running"
+	}
+    } else {
+	log WARN "Cluster has no swarm master"
+    }
+}
+
+proc ::cluster::swarm::recapture { cluster } {
+    set master [master $cluster]
+    if { $master ne "" } {
+	if { [dict exists $master state] \
+		 && [string match -nocase "running" [dict get $master state]] } {
+	    log NOTICE "Capturing current list of live machines in swarm"
+	    [namespace parent]::Attach $master
+	    [namespace parent]::Docker restart ${vars::-master}
+	} else {
+	    log WARN "Cluster not bound or master not running"
+	}
+    } else {
+	log WARN "Cluster has no swarm master"
     }
 }
 

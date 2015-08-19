@@ -567,6 +567,7 @@ proc ::api::cli::command { cmd args } {
 	    foreach vm [machines $cluster $args] {
 		up $vm $token
 	    }
+	    ::cluster::swarm::recapture $cluster
 	}
 	"swarm" {
 	    if { [cluster getopt args -help] } {
@@ -671,15 +672,17 @@ proc ::api::cli::command { cmd args } {
 		lappend state [dict get $vm -driver]
 		if { [dict exists $vm -memory] } {
 		    set mem [dict get $vm -memory]
-		    lappend state [::cluster::Convert $mem MiB GiB]GiB
-		    incr total_memory $mem
+		    set mem [::cluster::Convert $mem MiB GiB]
+		    lappend state ${mem}GiB
+		    set total_memory [expr {$total_memory+$mem}]
 		} else {
 		    lappend state -
 		}
 		if { [dict exists $vm -size] } {
 		    set size [dict get $vm -size]
-		    lappend state [::cluster::Convert $size MB GB]GB
-		    incr total_size $size
+		    set size [::cluster::Convert $size MB GB]
+		    lappend state ${size}GB
+		    set total_size [expr {$total_size+$size}]
 		} else {
 		    lappend state -
 		}
@@ -687,8 +690,8 @@ proc ::api::cli::command { cmd args } {
 	    if { $total_memory != 0 || $total_size != 0 } {
 		lappend state "" "" "" "" "" "======" "======"
 		lappend state "" "" "" "" "" \
-		    [::cluster::Convert $total_memory MiB GiB]GiB \
-		    [::cluster::Convert $total_size MB GB]GB
+		    ${total_memory}GiB \
+		    ${total_size}GB
 	    }
 	    Tabulate 7 $state
 	}
@@ -723,6 +726,7 @@ proc ::api::cli::command { cmd args } {
 	    foreach vm [machines $cluster $args] {
 		cluster halt $vm
 	    }
+	    ::cluster::swarm::recapture $cluster
 	}
 	"restart" {
 	    # Halt one or several machines (or the whole cluster if no
@@ -751,6 +755,7 @@ proc ::api::cli::command { cmd args } {
 	    foreach vm [machines $cluster $args] {
 		cluster destroy $vm
 	    }
+	    ::cluster::swarm::recapture $cluster
 	}
 	"sync" {
 	    # Destroy one or several machines (or the whole cluster if no
