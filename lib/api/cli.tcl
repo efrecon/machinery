@@ -649,6 +649,8 @@ proc ::api::cli::command { cmd args } {
 	    }
 	    set cluster [init]
 	    set state {MACHINE STATE URL MASTER DRIVER MEMORY SIZE}
+	    set total_memory 0
+	    set total_size 0
 	    foreach vm $cluster {
 		lappend state [dict get $vm -name]
 		if { [dict exists $vm state] } {
@@ -668,15 +670,25 @@ proc ::api::cli::command { cmd args } {
 		}
 		lappend state [dict get $vm -driver]
 		if { [dict exists $vm -memory] } {
-		    lappend state [::cluster::Convert [dict get $vm -memory] MiB GiB]GiB
+		    set mem [dict get $vm -memory]
+		    lappend state [::cluster::Convert $mem MiB GiB]GiB
+		    incr total_memory $mem
 		} else {
 		    lappend state -
 		}
 		if { [dict exists $vm -size] } {
-		    lappend state [::cluster::Convert [dict get $vm -size] MB GB]GB
+		    set size [dict get $vm -size]
+		    lappend state [::cluster::Convert $size MB GB]GB
+		    incr total_size $size
 		} else {
 		    lappend state -
 		}
+	    }
+	    if { $total_memory != 0 || $total_size != 0 } {
+		lappend state "" "" "" "" "" "======" "======"
+		lappend state "" "" "" "" "" \
+		    [::cluster::Convert $total_memory MiB GiB]GiB \
+		    [::cluster::Convert $total_size MB GB]GB
 	    }
 	    Tabulate 7 $state
 	}
