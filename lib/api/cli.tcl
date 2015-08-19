@@ -840,10 +840,29 @@ proc ::api::cli::command { cmd args } {
             cluster getopt args -restrict subset {}
             set subset [split $subset ","]
             set machines [machines $cluster $subset]
-	    if { [llength $args] >= 2 } {
-                foreach {ptn cmd} $args break;  # Extract pattern and command
-		cluster forall $machines $ptn $cmd {*}[lindex $args 2 end]
+	    # When we have a double-dash, it explicitely separates the
+	    # patterns to match against the component names from the
+	    # command to execute.  When we don't we peek to see if the
+	    # first argument is actually the name of a docker command.
+	    # If it is, then we'll execute that command on no
+	    # particular components (think commands like pull here).
+	    set idx [lsearch $args --]
+	    if { $idx >= 1 } {
+		set ptn [lindex $args 0]
+		incr idx
+		set cmd [lindex $args $idx]
+		incr idx
+		set cargs [lrange $args $idx end]
+	    } else {
+		if { [lsearch [cluster commands docker] [lindex $args 0]] >= 0 } {
+		    set ptn ""
+		    set cmd [lindex $args 0]
+		    set cargs [lrange $args 1 end]
+		} else {
+		    foreach {ptn cmd} $args break;  # Extract pattern and command
+		}
 	    }
+	    cluster forall $machines $ptn $cmd {*}$cargs
 	}
 	default {
 	    help "$cmd is an unknown command!"

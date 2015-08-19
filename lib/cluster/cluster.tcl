@@ -77,6 +77,8 @@ namespace eval ::cluster {
 	variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
         variable attached   ""
+        # CLI commands supported by tools (on demand)
+        variable commands   {docker "" compose "" machine ""}
         # version numbers for our tools (on demand)
         variable versions   {docker "" compose "" machine ""}
 	# Object generation identifiers
@@ -566,14 +568,20 @@ proc ::cluster::search { cluster ptn } {
 proc ::cluster::forall { cluster ptn cmd args } {
     set locations {}
     foreach vm $cluster {
-	foreach c [ps $vm 0 0] {
-	    if { [dict exists $c names] && [dict exists $c container_id] } {
-		foreach nm [split [dict get $c names] ","] {
-		    if { [string match $ptn $nm] } {
-			set id [dict get $c container_id]
-			log NOTICE "Executing on $nm: $cmd $args $id"
-			Attach $vm;   # We should really already be attached!
-			Docker -- $cmd {*}$args $id
+	if { $ptn eq "" } {
+	    log NOTICE "Executing on [dict get $vm -name]: $cmd $args"
+	    Attach $vm
+	    Docker -- $cmd {*}$args
+	} else {
+	    foreach c [ps $vm 0 0] {
+		if { [dict exists $c names] && [dict exists $c container_id] } {
+		    foreach nm [split [dict get $c names] ","] {
+			if { [string match $ptn $nm] } {
+			    set id [dict get $c container_id]
+			    log NOTICE "Executing on $nm: $cmd $args $id"
+			    Attach $vm;   # We should really already be attached!
+			    Docker -- $cmd {*}$args $id
+			}
 		    }
 		}
 	    }
@@ -1684,6 +1692,23 @@ proc ::cluster::candidates { {dir .} } {
     }
 
     return $candidates
+}
+
+
+proc ::cluster::commands { tool } {
+    switch -nocase -- $tool {
+	compose -
+	machine -
+	docker {
+	    if { [dict get $vars::commands $tool] eq "" } {
+		dict set vars::commands $tool [CommandsQuery $tool]
+		log DEBUG "Current set of commands for $tool is\
+                           [join [dict get $vars::commands $tool] ,\ ]"
+	    }
+	    return [dict get $vars::commands $tool]
+	}
+    }
+    return {}
 }
 
 
@@ -3287,6 +3312,67 @@ proc ::cluster::VersionQuery { tool } {
         }
     }
     return [vcompare extract $vline];    # Catch all for errors
+}
+
+
+proc ::cluster::CommandsQuery { tool } {
+    set hlp {}
+    switch -nocase -- $tool {
+	docker {
+	    set hlp [Docker -return -keepblanks -- --help]
+	}
+	machine {
+	    set hlp [Machine -return -keepblanks -- --help]
+	}
+	compose {
+	    set hlp [Compose -return -keepblanks -- --help]
+	}
+	default {
+	    log WARN "$tool isn't a tool that we can query the commands for"
+	}
+    }
+
+    # Analyse the output of the help for the tool, they are all
+    # formatted more or less the same way.  We look for a line that
+    # starts with commands and considers that it marks the beginning
+    # of the list of commands.
+    set commands {}
+    set c_group 0
+    foreach l $hlp {
+	if { $c_group } {
+	    set l [string trim $l]
+	    # Empty line marks the end of the command description
+	    # group, return what we've found.
+	    if { $l eq "" } {
+		return $commands
+	    }
+	    # Look for a separator between the command name(s) and
+	    # its/their description.  We prefer the tab, but accept
+	    # also a double space.
+	    set sep [string first "\t" $l]
+	    if { $sep < 0 } {
+		set sep [string first "  " $l]
+	    }
+	    # Separate the command name(s) from the description, split
+	    # on the coma sign in case there were aliases, then add
+	    # each command in turns.
+	    if { $sep < 0 } {
+		log WARN "Cannot find command leading '$l'"
+	    } else {
+		set spec [string trim [string range $l 0 $sep]]
+		foreach c [split $spec ,] {
+		    lappend commands [string trim $c]
+		}
+	    }
+	} else {
+	    # We don't do anything until we've found a line that marks
+	    # the start of the command description group.
+	    if { [string match -nocase "commands*" $l] } {
+		set c_group 1
+	    }
+	}
+    }
+    return $commands
 }
 
 
