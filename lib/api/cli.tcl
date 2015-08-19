@@ -763,18 +763,21 @@ proc ::api::cli::command { cmd args } {
 	    if { [cluster getopt args -help] } {
 		chelp $cmd \
 		    "Synchronise rsync-based shared from one or several machines (or the whole cluster if no arguments is given).  Data will move from the machine to the host.  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
-		    { -help "Print this help" }
+		    { -help "Print this help" 
+                      -op "Operation to execute: 'get' from VM or 'put' to VM"}
 	    }
 	    set cluster [init]
+            cluster getopt args -op direction "get"
 	    foreach vm [machines $cluster $args] {
-		cluster sync $vm
+		cluster sync $vm $direction
 	    }
 	}
 	"env" {
 	    if { [cluster getopt args -help] } {
 		chelp $cmd \
 		    "Print out exporting commands to get (discovery) environment of one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
-		    { -help "Print this help" }
+		    { -help "Print this help"
+                      -force "Force recreation of cache" }
 	    }
 	    set cluster [init]
 	    cluster env $cluster [cluster getopt args -force] stdout
