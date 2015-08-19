@@ -73,6 +73,8 @@ namespace eval ::cluster {
 	variable -sharing   "virtualbox vboxsf * rsync"
 	# ssh command to use towards host
 	variable -ssh       ""
+        # List of "on" state
+        variable -running   {running timeout}
 	# Supported sharing types.
 	variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
@@ -619,6 +621,11 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
                     }
                     "options" {
                         set options $v
+                    }
+                    "keep" {
+                        if { [string is true $v] } {
+                            set substitution 2
+                        }
                     }
                 }
             }
@@ -1192,9 +1199,7 @@ proc ::cluster::shares { vm { shares {}} } {
 proc ::cluster::sync { vm {op get} {shares {}} } {
     set synchronised {}
     set nm [dict get $vm -name]
-    if { ([dict exists $vm state] \
-              && ![string equal -nocase [dict get $vm state] "running"]) \
-             || ![dict exists $vm state] } {
+    if { ! [IsRunning $vm] } {
         log WARN "Machine $nm not running, cannot sync"
         return $synchronised
     }
@@ -1257,8 +1262,7 @@ proc ::cluster::halt { vm } {
     log NOTICE "Bringing down machine $nm..."
     # First attempt to be gentle against the machine, i.e. using the
     # stop command of docker-machine.
-    if { [dict exists $vm state] \
-             && [string equal -nocase [dict get $vm state] "running"] } {
+    if { [IsRunning $vm] } {
         log INFO "Attempting graceful shutdown of $nm"
         Machine stop $nm
     }
@@ -1499,7 +1503,7 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
     while { $retries > 0 } {
 	# Check if the machine is already running at once, to avoid
 	# unecessary attempts to (re)start.
-        set state [Wait $vm [list "running" "stopped" "error"]]
+        set state [Wait $vm [list "running" "timeout" "stopped" "error"]]
         if { $state eq "running" } {
             # Start by putting back all changes that might have
             # occured onto the the VM, if relevant...
@@ -2652,7 +2656,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     }
 
     # Cleanup files in temporaries list.
-    if { [llength $temporaries] > 0 } {
+    if { $substitution < 2 && [llength $temporaries] > 0 } {
         log INFO "Cleaning up [llength $temporaries] temporary file(s)\
                   from ${vars::-tmp}"
         foreach tmp_fpath $temporaries {
@@ -2847,6 +2851,17 @@ proc ::cluster::ListParser { state { hdrfix {}} } {
 }
 
 
+proc ::cluster::IsRunning { vm } {
+    if { [dict exists $vm state] } {
+        set state [dict get $vm state]
+        if { [lsearch -nocase ${vars::-running} $state] >= 0 } {
+            return 1
+        }
+    }
+    return 0
+}
+
+
 # ::cluster::Discovery -- Poor man's discovery
 #
 #       Arrange for a cache file to contain all network information
@@ -2898,8 +2913,7 @@ proc ::cluster::Discovery { vm } {
 
         # If the machine is running, go get all information we can
         # about its network interfaces and its (main) IP address.
-        if { [dict exists $vm state] \
-                 && [string equal -nocase [dict get $vm state] "running"] } {
+        if { [IsRunning $vm] } {
             # Get complete network interface description (except the
             # virtual interfaces)
             foreach itf [unix ifs $nm] {

@@ -10,6 +10,8 @@ namespace eval ::cluster::swarm {
 	# Name of master agent and agents
 	variable -agent     "swarm-agent"
 	variable -master    "swarm-agent-master"
+        # List of "on" state
+        variable -running   {running timeout}
     }
     # Export all lower case procedure, arrange to be able to access
     # commands from the parent (cluster) namespace from here and
@@ -50,8 +52,7 @@ proc ::cluster::swarm::info { cluster } {
     # Dump out swarm master information
     set master [master $cluster]
     if { $master ne "" } {
-	if { [dict exists $master state] \
-		 && [string match -nocase "running" [dict get $master state]] } {
+	if { [[namespace parent]::IsRunning $master] } {
 	    log NOTICE "Getting cluster info via\
                         [dict get $master -name]"
 	    [namespace parent]::Attach $master 1
@@ -67,8 +68,7 @@ proc ::cluster::swarm::info { cluster } {
 proc ::cluster::swarm::recapture { cluster } {
     set master [master $cluster]
     if { $master ne "" } {
-	if { [dict exists $master state] \
-		 && [string match -nocase "running" [dict get $master state]] } {
+	if { [[namespace parent]::IsRunning $master] } {
 	    log NOTICE "Capturing current list of live machines in swarm"
 	    [namespace parent]::Attach $master
 	    [namespace parent]::Docker restart ${vars::-master}
