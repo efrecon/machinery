@@ -263,6 +263,7 @@ proc ::cluster::ls { {machines *} } {
     # Get current state of cluster and arrange for cols to be the list
     # of keys (this is the first line of docker-machine ls output,
     # meaning the header).
+    log NOTICE "Capturing current overview of cluster"
     set state [Machine -return -- ls]
     foreach nfo [ListParser $state] {
         # Add only machines which name matches the incoming pattern.

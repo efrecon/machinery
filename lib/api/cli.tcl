@@ -849,10 +849,12 @@ proc ::api::cli::command { cmd args } {
             # Execute docker commands, first argument is glob-style
             # pattern to match against component name, second is
             # docker command to execute, remaining arguments are
-            # options to the docker command.
+            # options to the docker command.  First argument is
+            # optional, so we can run commands that are not bound to
+            # components.
 	    if { [cluster getopt args -help] } {
 		chelp $cmd \
-		    "Execute docker command on components in the cluster.  The first argument is a pattern to match against the name of the components within all machines, the second argument is the docker (sub-) command to execute and the remaining arguments are blindly passed to the command at execution time." \
+		    "Execute docker command on components in the cluster.  The first argument is a pattern to match against the name of the components within all machines, the second argument is the docker (sub-) command to execute and the remaining arguments are blindly passed to the command at execution time.  The first argument is optional, in which case the docker command and its argument will be executed in all machines as of the -respect option.  For the (rare!) cases where the pattern is also docker command, you can separate the pattern and the command by a double-dash to make these argument types explicit." \
 		    { -help "Print this help"
                       -restrict "Comma-separated list of patterns for machine subset selection" }
 	    }
