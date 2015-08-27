@@ -1,7 +1,7 @@
 # Release Notes
 
 
-## v 0.6 (in development)
+## v 0.6
 
 * Fixed better exit from interactive ssh sessions.
 
