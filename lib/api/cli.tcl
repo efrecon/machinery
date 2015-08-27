@@ -51,6 +51,7 @@ namespace eval ::api::cli {
             server  "Start a web server to respond to REST calls"
 	    ps      "List all existing containers in cluster or specific machines"
 	    ls      "List all machines in the cluster and their state"
+	    version "Print out current version number"
         }
 	
 	variable appname "";          # Name of main application.

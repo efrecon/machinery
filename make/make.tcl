@@ -13,6 +13,7 @@ set dstdir [file join $dirname distro]
 
 lappend auto_path [file join $dirname .. lib]
 package require cluster;    # So we can call Run...
+cluster defaults -verbose INFO
 
 # Build for all platforms
 if { [llength $argv] == 0 } {
@@ -75,7 +76,9 @@ set sdx [file join $kitdir sdx.kit]
 ::cluster::Run2 $tclkit $sdx qwrap ../machinery
 ::cluster::Run2 $tclkit $sdx unwrap machinery.kit
 foreach fname [glob -directory [file join $dirname .. lib] -nocomplain -- *] {
-    file copy -force -- $fname machinery.vfs/lib
+    set r_fname [file dirname [file normalize ${fname}/___]]
+    cluster log DEBUG "Copying $r_fname -> machinery.vfs/lib"
+    file copy -force -- $r_fname machinery.vfs/lib
 }
 
 # Install the modules of tcllib into the lib directory of the VFS
@@ -106,9 +109,10 @@ foreach platform $argv {
 	::cluster::Run2 $tclkit $sdx wrap machinery.kit
 	# Copy runtime to temporary because won't work if same as the
 	# one we are starting from.
+	cluster log DEBUG "Creating temporary kit for final wrapping: ${binkit}.temp"
 	file copy $binkit ${binkit}.temp
 	::cluster::Run2 $tclkit $sdx wrap machinery -runtime ${binkit}.temp
-	file delete ${binkit}.temp
+	file delete -force -- ${binkit}.temp
     } else {
 	cluster log ERROR "Cannot build for $platform, no main kit available"
     }
