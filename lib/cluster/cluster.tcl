@@ -1879,7 +1879,7 @@ proc ::cluster::Create { vm { token "" } } {
     # files so locally stored cached arguments will keep working.
     if { [dict exists $vm -options] } {
 	if { [llength $vars::machopts] <= 0 } {
-	    set vars::machopts [MachineOptions]
+	    set vars::machopts [MachineOptions $driver]
 	}
         dict for {k v} [dict get $vm -options] {
 	    set k [string trimleft $k "-"]
@@ -1948,11 +1948,11 @@ proc ::cluster::Create { vm { token "" } } {
 }
 
 
-proc ::cluster::MachineOptions {} {
+proc ::cluster::MachineOptions { driver } {
     log INFO "Actively discovering creation options"
     set machopts {};  # Empty list of discovered options
 
-    foreach l [Machine -return -- create -h] {
+    foreach l [Machine -return -- create --driver $driver] {
 	# Only considers indented lines, they contain the option
 	# descriptions (there are a lot!).
 	if { [string trim $l] ne "" && [string trimleft $l] ne $l } {
