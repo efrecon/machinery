@@ -14,6 +14,14 @@
   use the global option `-storage` and set it to something like
   `~/.docker/machine`, which is the default location for machine.
   
+* Machine specification now takes a list of `files` specifications. These are
+  formatted as the path to the source, possibly followed by a colon `:`
+  character and the path to the destination; modelled after the volume mounting
+  command of `docker`. These files (or directories) will be copied early in the
+  initialisation process. They are meant to provide a quick way to initialise
+  machines and ensure that they, for example, host all necessary secrets, ready
+  to be mounted onto the containers running on those machines.
+  
 
 ## v 0.6
 

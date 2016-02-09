@@ -39,7 +39,7 @@ namespace eval ::cluster {
         # Allowed VM keys
         variable -keys      {cpu size memory master labels driver options \
                                  ports shares images compose registries aliases \
-				 addendum}
+				 addendum files}
         # Path to common executables
         variable -machine   docker-machine
         variable -docker    docker
@@ -517,7 +517,7 @@ proc ::cluster::storage { vm } {
 }
 
 
-proc ::cluster::init { vm {steps {shares registries images compose addendum}} } {
+proc ::cluster::init { vm {steps {shares registries files images compose addendum}} } {
     # Poor man's discovery: write down a description of all the
     # network interfaces existing on the virtual machines,
     # including the most important one (e.g. the one returned by
@@ -538,6 +538,10 @@ proc ::cluster::init { vm {steps {shares registries images compose addendum}} } 
 	if { [lsearch -nocase $steps images] >= 0 } {
 	    pull $vm 1
 	}
+        
+        if { [lsearch -nocase $steps files] >= 0 } {
+            mcopy $vm
+        }
 
 	# And iteratively run compose.  Compose will get the complete
 	# description of the discovery status in the form of
@@ -758,6 +762,40 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
     }
 
     return $composed
+}
+
+
+proc ::cluster::mcopy { vm { fspecs {}} } {
+    # Get list of files to copy from parameters of from VM object
+    if { [llength $fspecs] == 0 } {
+	if { ![dict exists $vm -files] } {
+	    return {}
+	}
+	set fspecs [dict get $vm -files]
+    }
+    
+    set nm [dict get $vm -name]
+    foreach fspec $fspecs {
+        lassign [split $fspec ":"] src dst hint
+        set src [AbsolutePath $vm $src]
+        if { [file exists $src] } {
+            if { $dst eq "" } {
+                set dst $src
+            }
+            # Create directory at target
+            Machine -- -s [storage $vm] ssh $nm mkdir -p [file dirname $dst]
+            # Copy file(s)
+            if { [lsearch -nocase [split $hint ","] "norecurse"] >= 0 } {
+                log INFO "Copying $src to ${nm}:$dst"
+                SCopy $vm $src $dst 0
+            } else {
+                log INFO "Copying $src to ${nm}:$dst recursively"
+                SCopy $vm $src $dst 1
+            }
+        } else {
+            log WARN "Source path $src does not exist!"
+        }
+    }
 }
 
 
@@ -3678,14 +3716,18 @@ proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
 #
 # Side Effects:
 #       Copy the file using scp
-proc ::cluster::SCopy { vm s_fname {d_fname ""}} {
+proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
     set nm [dict get $vm -name]
     if { $d_fname eq "" } {
 	set d_fname $s_fname
     }
 
     if { [vcompare ge [Version machine] 0.3] } {
-        Machine -- -s [storage $vm] scp $s_fname ${nm}:${d_fname}
+        if { [string is true $recurse] } {
+            Machine -- -s [storage $vm] scp -r $s_fname ${nm}:${d_fname}            
+        } else {
+            Machine -- -s [storage $vm] scp $s_fname ${nm}:${d_fname}            
+        }
     } else {
 	unix defaults -ssh [SCommand $vm]
         unix scp $vm $s_fname $d_fname

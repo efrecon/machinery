@@ -214,7 +214,7 @@ proc ::cluster::unix::mounts { vm } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::scp { vm src_fname { dst_fname "" } } {
+proc ::cluster::unix::scp { vm src_fname { dst_fname "" } { recurse 1 } } {
     # Make destination identical to source if necessary.
     if { $dst_fname eq "" } {
         set dst_fname $src_fname
@@ -251,7 +251,11 @@ proc ::cluster::unix::scp { vm src_fname { dst_fname "" } } {
 
     # Finalise the scp command by adding file paths information and
     # execute it.
-    lappend scp $src_fname ${uname}@${hname}:$dst_fname
+    if { [string is true $recurse] } {
+	lappend scp -r $src_fname ${uname}@${hname}:$dst_fname
+    } else {
+	lappend scp $src_fname ${uname}@${hname}:$dst_fname
+    }
     eval [linsert $scp 0 Run]
     return 1
 }
