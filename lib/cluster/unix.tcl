@@ -69,11 +69,12 @@ proc ::cluster::unix::defaults { args } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::ps { nm {filter *}} {
+proc ::cluster::unix::ps { vm {filter *}} {
+    set nm [dict get $vm -name]
     log DEBUG "Getting list of processes on $nm..."
     set processes {}
     set skip 1
-    foreach l [Machine -return -- ssh $nm "sudo ps -o pid,comm,args"] {
+    foreach l [Machine -return -- -s [storage $vm] ssh $nm "sudo ps -o pid,comm,args"] {
 	if { $skip } {
 	    # Skip header!
 	    set skip 0
@@ -111,16 +112,16 @@ proc ::cluster::unix::ps { nm {filter *}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::daemon { nm daemon cmd args } {
+proc ::cluster::unix::daemon { vm daemon cmd args } {
     switch -nocase -- $cmd {
 	"pid" {
 	    return [eval [linsert $args 0 \
-			      [namespace current]::DaemonPID $nm $daemon]]
+			      [namespace current]::DaemonPID $vm $daemon]]
 	}
 	"up" -
 	"start" {
 	    return [eval [linsert $args 0 \
-			      [namespace current]::DaemonUp $nm $daemon]]
+			      [namespace current]::DaemonUp $vm $daemon]]
 	}
 	default {
 	    return -code error "$cmd is not a known sub-command!"
@@ -146,13 +147,14 @@ proc ::cluster::unix::daemon { nm daemon cmd args } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::mounts { nm } {
+proc ::cluster::unix::mounts { vm } {
+    set nm [dict get $vm -name]
     log DEBUG "Detecting mounts on $nm..."
     set mounts {};
     # Parse the output of the 'mount' command line by line, we do this
     # by looking for specific keywords in the string, but we might be
     # better off using regular expressions?
-    foreach l [Machine -return -- ssh $nm mount] {
+    foreach l [Machine -return -- -s [storage $vm] ssh $nm mount] {
 	# Advance to word "on" and isolate the device specification
 	# that should be placed before.
 	set on [string first " on " $l]
@@ -212,19 +214,20 @@ proc ::cluster::unix::mounts { nm } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::scp { nm src_fname { dst_fname "" } } {
+proc ::cluster::unix::scp { vm src_fname { dst_fname "" } } {
     # Make destination identical to source if necessary.
     if { $dst_fname eq "" } {
         set dst_fname $src_fname
     }
 
+    set nm [dict get $vm -name]
     log NOTICE "Copying local $src_fname to ${nm}:$dst_fname"
 
     # Construct an scp command out of the ssh command!  This converts
     # the arguments between the ssh and scp namespaces, which are not
     # exactly the same.
     if { ${vars::-ssh} eq "" } {
-	set cmd [remote $nm]
+	set cmd [remote $vm]
     } else {
 	set cmd ${vars::-ssh}
     }
@@ -254,12 +257,13 @@ proc ::cluster::unix::scp { nm src_fname { dst_fname "" } } {
 }
 
 
-proc ::cluster::unix::remote { nm } {
+proc ::cluster::unix::remote { vm } {
+    set nm [dict get $vm -name]
     log DEBUG "Detecting SSH command into $nm"
 
     # Start looking starting from last lines as newer versions output
     # more when debug is on...
-    foreach l [lreverse [Machine -return -stderr -- --debug ssh $nm echo ""]] {
+    foreach l [lreverse [Machine -return -stderr -- -s [storage $vm] --debug ssh $nm echo ""]] {
 	foreach bin [list "/usr/bin/ssh" "ssh"] {
 	    if { [string first $bin $l] >= 0 } {
 		set sshinfo $l
@@ -297,13 +301,14 @@ proc ::cluster::unix::remote { nm } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::id { nm { mode "alpha" } {uname ""}} {
+proc ::cluster::unix::id { vm { mode "alpha" } {uname ""}} {
+    set nm [dict get $vm -name]
     if { $uname eq "" } {
 	set idinfo [string map [list "=" " "] \
-			[lindex [Machine -return -- ssh $nm id] 0]]
+			[lindex [Machine -return -- -s [storage $vm] ssh $nm id] 0]]
     } else {
 	set idinfo [string map [list "=" " "] \
-			[lindex [Machine -return -- ssh $nm "id $uname"] 0]]
+			[lindex [Machine -return -- -s [storage $vm] ssh $nm "id $uname"] 0]]
     }
     
     set response [dict create]
@@ -375,11 +380,12 @@ proc ::cluster::unix::id { nm { mode "alpha" } {uname ""}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::mount { nm dev path { uid "" } {type "vboxsf"} {sleep 1} {retries 3}} {
+proc ::cluster::unix::mount { vm dev path { uid "" } {type "vboxsf"} {sleep 1} {retries 3}} {
+    set nm [dict get $vm -name]
     while { $retries > 0 } {
 	log INFO "Mounting $dev onto ${nm}:${path} (UID:$uid)"
 	foreach cmd [mnt.sh $dev $path $uid $type] {
-	    Machine ssh $nm "sudo $cmd"
+	    Machine -- -s [storage $vm] ssh $nm "sudo $cmd"
 	}
 
 	# Test that we managed to mount properly.
@@ -445,12 +451,13 @@ proc ::cluster::unix::mnt.sh { dev path { uid "" } { type "vboxsf" } } {
 #
 # Side Effects:
 #       Will call ifconfig on the target machine
-proc ::cluster::unix::ifs { nm } {
+proc ::cluster::unix::ifs { vm } {
+    set nm [dict get $vm -name]
     log DEBUG "Detecting network interfaces of $nm..."
     set interfaces {};   # List of interface dictionaries.
     set ifs {};          # List of interface names, for logging.
     set iface ""
-    foreach l [Machine -return -- ssh $nm ifconfig] {
+    foreach l [Machine -return -- -s [storage $vm] ssh $nm ifconfig] {
         # The output of ifconfig is formatted so that each new
         # interface is described with a line without leading
         # whitespaces, while extra information for that interface
@@ -530,13 +537,14 @@ proc ::cluster::unix::ifs { nm } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::DaemonUp { nm daemon {cmd "start"} {force 0} {sleep 1} {retries 5} } {
+proc ::cluster::unix::DaemonUp { vm daemon {cmd "start"} {force 0} {sleep 1} {retries 5} } {
+    set nm [dict get $vm -name]
     while { $retries > 0 } {
-	set pid [DaemonPID $nm $daemon]
+	set pid [DaemonPID $vm $daemon]
 	if { $pid < 0 || [string is true $force] } {
 	    log INFO "Daemon $daemon not running on $nm, trying to $cmd..."
 	    set dctrl [file join ${vars::-daemon} $daemon]
-	    Machine ssh $nm "sudo $dctrl $cmd"
+	    Machine -- -s [storage $vm] ssh $nm "sudo $dctrl $cmd"
             after [expr {int($sleep*1000)}]
 	    set force 0;  # Now let's do it the normal way for the next retries
 	} else {
@@ -565,11 +573,12 @@ proc ::cluster::unix::DaemonUp { nm daemon {cmd "start"} {force 0} {sleep 1} {re
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::DaemonPID { nm daemon } {
+proc ::cluster::unix::DaemonPID { vm daemon } {
+    set nm [dict get $vm -name]
     # Look for pid file in /var/run
     set rundir [string trimright ${vars::-run} "/"]
     set pidfile ""
-    foreach l [Machine -return -- ssh $nm "ls -1 ${rundir}/*.pid"] {
+    foreach l [Machine -return -- -s [storage $vm] ssh $nm "ls -1 ${rundir}/*.pid"] {
 	if { [string match "${rundir}/${daemon}*" $l] } {
 	    log DEBUG "Found PIDfile for $daemon at $l"
 	    set pidfile $l
@@ -579,9 +588,9 @@ proc ::cluster::unix::DaemonPID { nm daemon } {
     # If we have a PID file, make sure there is a process that is
     # running at that PID (should we check it's really the daemon?)
     if { $pidfile ne "" } {
-	set dpid [lindex [Machine -return -- ssh $nm "cat $pidfile"] 0]
+	set dpid [lindex [Machine -return -- -s [storage $vm] ssh $nm "cat $pidfile"] 0]
 	log DEBUG "Checking that there is a running process with id: $dpid"
-	foreach {pid cmd args} [ps $nm] {
+	foreach {pid cmd args} [ps $vm] {
 	    if { $pid == $dpid } {
 		return $pid
 	    }
@@ -666,4 +675,4 @@ proc ::cluster::unix::InterfaceLine { l } {
     return $dict
 }
 
-package provide cluster::unix 0.2
+package provide cluster::unix 0.3

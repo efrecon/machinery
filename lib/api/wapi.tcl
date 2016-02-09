@@ -191,7 +191,7 @@ proc ::api::wapi::Bind { prt } {
     # Get state from docker machine and merge into VM descriptions so
     # as complete the information for each machine.
     if { [dict exists $vars::clusters $prt cluster] } {
-	set state [cluster ls]
+	set state [cluster ls [cluster storage [lindex [dict get $vars::clusters $prt cluster] 0]]]
 	foreach vm [dict get $vars::clusters $prt cluster] {
 	    lappend cluster [cluster bind $vm $state]
 	}

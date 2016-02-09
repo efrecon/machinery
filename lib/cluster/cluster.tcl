@@ -49,6 +49,9 @@ namespace eval ::cluster {
         variable -verbose   NOTICE
 	# Locally cache images?
 	variable -cache     on
+        # Path to storage directory for docker machine cache, empty string will
+        # default to a directory co-located with the cluster YAML file.
+        variable -storage   ""
         # Location of boot2docker profile
         variable -profile   /var/lib/boot2docker/profile
 	# Location of boot2docker bootlocal
@@ -59,6 +62,8 @@ namespace eval ::cluster {
         variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG 7 TRACE}
         # Extension for env storage cache files
         variable -ext       .env
+        # Extension for machine storage cache directory
+        variable -storageExt .mch
         # File descriptor to dump log messages to
         variable -log       stderr
         # Date log output
@@ -112,6 +117,8 @@ namespace eval ::cluster {
 	# Finding good file candidates
 	variable lookup "*.yml";    # Which files to consider for YAML parsing
 	variable marker {^#\s*docker\-machinery}
+        # Characters to keep in temporary filepath
+        variable fpathCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.,=_"
 
     }
     # Automatically export all procedures starting with lower case and
@@ -249,6 +256,7 @@ proc ::cluster::log { lvl msg } {
 #       the dictionary as is.
 #
 # Arguments:
+#        yaml        Path to YAML description of cluster
 #        machines    glob-style pattern to match on machine names
 #
 # Results:
@@ -257,14 +265,14 @@ proc ::cluster::log { lvl msg } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::ls { {machines *} } {
+proc ::cluster::ls { yaml {machines *} } {
     set cluster {};   # The list of dictionaries we will return
 
     # Get current state of cluster and arrange for cols to be the list
     # of keys (this is the first line of docker-machine ls output,
     # meaning the header).
     log NOTICE "Capturing current overview of cluster"
-    set state [Machine -return -- ls]
+    set state [Machine -return -- -s [StorageDir $yaml] ls]
     foreach nfo [ListParser $state] {
         # Add only machines which name matches the incoming pattern.
         if { [dict exists $nfo name] \
@@ -389,7 +397,7 @@ proc ::cluster::findAll { cluster {ptn *}} {
 proc ::cluster::bind { vm {ls -}} {
     # Get current status of cluster.
     if { $ls eq "-" } {
-        set ls [ls]
+        set ls [ls [storage $vm]]
     }
 
     # Traverse current cluster state and stop as soon as we have found
@@ -460,7 +468,7 @@ proc ::cluster::create { vm token } {
 		# Test that machine is properly working by echoing its
 		# name using a busybox component and checking we get that
 		# name back.
-		if { [unix daemon $nm docker up] } {
+		if { [unix daemon $vm docker up] } {
 		    log DEBUG "Testing that machine $nm has a working docker\
                                via busybox"
 		    Attach $vm
@@ -486,6 +494,29 @@ proc ::cluster::create { vm token } {
 }
 
 
+# ::cluster::storage -- Path to machine storage cache 
+#
+#       Return the path to the machine storage cache directory.
+#
+# Arguments:
+#	yaml	Path to YAML description of cluster
+#
+# Results:
+#       Full path to directory for storage
+#
+# Side Effects:
+#       Create the directory if it did not exist prior to this call.
+proc ::cluster::storage { vm } {
+    if { [dict exists $vm origin] } {
+        return [StorageDir [dict get $vm origin]]
+    }
+    # XXX: We should perhaps look for the environment variable
+    # MACHINE_STORAGE_PATH, return that one. And if not present, parse the
+    # output of machine help and look for the default value of -s global option.
+    return -code error "Cannot find storage directory for [dict get $vm -name]"
+}
+
+
 proc ::cluster::init { vm {steps {shares registries images compose addendum}} } {
     # Poor man's discovery: write down a description of all the
     # network interfaces existing on the virtual machines,
@@ -499,7 +530,7 @@ proc ::cluster::init { vm {steps {shares registries images compose addendum}} } 
     if { [lsearch -nocase $steps shares] >= 0 } {
 	shares $vm
     }
-    if { [unix daemon $nm docker up] } {
+    if { [unix daemon $vm docker up] } {
 	# Now pull images if any
 	if { [lsearch -nocase $steps registries] >= 0 } {
 	    login $vm
@@ -838,7 +869,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # quoting.
     log DEBUG "Getting current boot2docker profile"
     set k ""
-    foreach l [Machine -return -- ssh $nm cat ${vars::-profile}] {
+    foreach l [Machine -return -- -s [storage $vm] ssh $nm cat ${vars::-profile}] {
         if { $k eq "" } {
             set l [string trim $l]
             if { $l ne "" && [string index $l 0] ne "\#" } {
@@ -883,8 +914,8 @@ proc ::cluster::tag { vm { lbls {}}} {
     Run2 ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
 
     # Cleanup and restart machine to make sure the labels get live.
-    file delete -force -- $fname;      # Remove local file, not needed anymore
-    Machine restart $nm;               # Restart machine to activate tags
+    file delete -force -- $fname;        # Remove local file, not needed anymore
+    Machine -- -s [storage $vm] restart $nm;# Restart machine to activate tags
 
     return [Running $vm]
 }
@@ -1044,7 +1075,7 @@ proc ::cluster::shares { vm { shares {}} } {
 
     # Find out id of main user on virtual machine to be able to mount
     # shares and/or create directories under that UID.
-    set idinfo [unix id $nm id]
+    set idinfo [unix id $vm id]
     if { [dict exists $idinfo uid] } {
         set uid [dict get $idinfo uid]
         log DEBUG "User identifier in machine $nm is $uid"
@@ -1058,7 +1089,7 @@ proc ::cluster::shares { vm { shares {}} } {
 		# And arrange for the destination directories to exist
 		# within the guest and perform the mount.
 		foreach {host mchn share} $SHARINFO(vboxsf) {
-		    if { [unix mount $nm $share $mchn $uid] } {
+		    if { [unix mount $vm $share $mchn $uid] } {
 			lappend mounted $mchn
 		    }
 		}
@@ -1070,10 +1101,12 @@ proc ::cluster::shares { vm { shares {}} } {
 		# recreation of data would be possible.
 		set b2d_dir [file dirname ${vars::-bootlocal}]
 		set bootlocal {}
-		foreach f [Machine -return -- ssh $nm "ls -1 $b2d_dir"] {
+		foreach f [Machine -return -- \
+                                -s [storage $vm] ssh $nm "ls -1 $b2d_dir"] {
 		    if { $f eq [file tail ${vars::-bootlocal}] } {
 			set bootlocal [Machine -return -- \
-					   ssh $nm "cat ${vars::bootlocal}"]
+                                            -s [storage $vm] \
+                                            ssh $nm "cat ${vars::bootlocal}"]
 		    }
 		}
 
@@ -1128,8 +1161,8 @@ proc ::cluster::shares { vm { shares {}} } {
 		log INFO "Persisting shares at reboot through\
                           ${vars::-bootlocal}"
 		SCopy $vm $fname
-		Machine ssh $nm "chmod a+x $fname"
-		Machine ssh $nm "sudo mv $fname ${vars::-bootlocal}"
+		Machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
+		Machine -- -s [storage $vm] ssh $nm "sudo mv $fname ${vars::-bootlocal}"
 	    }
 	    "rsync" {
 		# Detect SSH command
@@ -1141,9 +1174,9 @@ proc ::cluster::shares { vm { shares {}} } {
 		foreach {host mchn} $SHARINFO(rsync) {
 		    # Create directory on remote VM and arrange for
 		    # the UID to match (should we?)
-		    Machine ssh $nm "sudo mkdir -p $mchn"
+		    Machine -- -s [storage $vm] ssh $nm "sudo mkdir -p $mchn"
 		    if { $uid ne "" } {
-			Machine ssh $nm "sudo chown $uid $mchn"
+			Machine -- -s [storage $vm] ssh $nm "sudo chown $uid $mchn"
 		    }
 		    # Synchronise the content of the local host
 		    # directory onto the remote VM directory.  Arrange
@@ -1265,15 +1298,15 @@ proc ::cluster::halt { vm } {
     # stop command of docker-machine.
     if { [IsRunning $vm] } {
         log INFO "Attempting graceful shutdown of $nm"
-        Machine stop $nm
+        Machine -- -s [storage $vm] stop $nm
     }
     # Ask state of cluster again and if the machine still isn't
     # stopped, force a kill.
-    set state [ls $nm]
+    set state [ls [storage $vm] $nm]
     if { [dict exists $state state] \
              && ![string equal -nocase [dict get $vm state] "stopped"] } {
         log NOTICE "Forcing stop of $nm"
-        Machine kill $nm
+        Machine -- -s [storage $vm] kill $nm
     }
 
     Discovery [bind $vm]
@@ -1299,7 +1332,7 @@ proc ::cluster::ssh { vm args } {
     set nm [dict get $vm -name]
     log NOTICE "Entering machine $nm..."
     if { [llength $args] > 0 } {
-        set res [eval [linsert $args 0 Machine -return -keepblanks -- ssh $nm]]
+        set res [eval [linsert $args 0 Machine -return -keepblanks -- -s [storage $vm] ssh $nm]]
         foreach l [lrange $res 0 end-1] {
             puts stdout $l
         }
@@ -1315,7 +1348,7 @@ proc ::cluster::ssh { vm args } {
 	    log ERROR "Cannot find machine at ${vars::-machine}!"
 	    return
 	}
-	if { [catch {exec $mchn ssh $nm >@stdout 2>@stderr <@stdin} err] } {
+	if { [catch {exec $mchn -s [storage $vm] ssh $nm >@stdout 2>@stderr <@stdin} err] } {
 	    log WARN "Child returned: $err"
 	}
     }
@@ -1346,7 +1379,7 @@ proc ::cluster::login { vm {regs {}} } {
                 }
             }
             append cmd [dict get $reg server]
-            Machine ssh $nm $cmd
+            Machine -- -s [storage $vm] ssh $nm $cmd
         }
     }
 }
@@ -1416,7 +1449,7 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 		# Cleanup
 		log DEBUG "Cleaning up localhost:$tmp_fpath and $nm:$tmp_fpath"
 		file delete -force -- $tmp_fpath
-		Machine ssh $nm "rm -f $tmp_fpath"
+		Machine -- -s [storage $vm] ssh $nm "rm -f $tmp_fpath"
 	    }
 	}
     } else {
@@ -1424,7 +1457,7 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 	if { [llength $images] > 0 } {
 	    foreach img $images {
 		log INFO "Pulling $img in $nm..."
-		Machine ssh $nm "docker pull $img"
+		Machine -- -s [storage $vm] ssh $nm "docker pull $img"
 	    }
 	}
     }
@@ -1449,7 +1482,7 @@ proc ::cluster::destroy { vm } {
     set nm [dict get $vm -name]
     if { [dict exists $vm state] } {
         log NOTICE "Removing machine $nm..."
-        Machine rm $nm
+        Machine -- -s [storage $vm] rm $nm
     } else {
         log INFO "Machine $nm does not exist, nothing to do"
     }
@@ -1476,7 +1509,7 @@ proc ::cluster::destroy { vm } {
 proc ::cluster::inspect { vm } {
     set nm [dict get $vm -name]
     set json ""
-    foreach l [Machine -return -- inspect $nm] {
+    foreach l [Machine -return -- -s [storage $vm] inspect $nm] {
 	append json $l
 	append json " "
     }
@@ -1517,7 +1550,7 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
             return 1
         }
         log NOTICE "Bringing up machine $nm..."
-        Machine start $nm
+        Machine -- -s [storage $vm] start $nm
         incr retries -1
         if { $retries > 0 } {
             log INFO "Machine $nm could not start, trying again..."
@@ -1751,6 +1784,34 @@ proc ::cluster::LogLevel { lvl } {
 }
 
 
+# ::cluster::StorageDir -- Path to machine storage cache 
+#
+#       Return the path to the machine storage cache directory.
+#
+# Arguments:
+#	yaml	Path to YAML description of cluster
+#
+# Results:
+#       Full path to directory for storage
+#
+# Side Effects:
+#       Create the directory if it did not exist prior to this call.
+proc ::cluster::StorageDir { yaml } {
+    if { ${vars::-storage} eq "" } {
+        set dir [CacheFile $yaml ${vars::-storageExt}]
+    } else {
+        set dir ${vars::-storage}
+    }
+    
+    if { ![file isdirectory $dir] } {
+        log NOTICE "Creating machine storage directory at $dir"
+        file mkdir $dir;   # Let it fail since we can't continue otherwise
+    }        
+    
+    return $dir
+}
+
+
 # ::cluster::+ -- Implements ANSI colouring codes.
 #
 #       Output ANSI colouring codes, inspired by wiki code at
@@ -1809,7 +1870,7 @@ proc ::cluster::Create { vm { token "" } } {
     # machine creation: first insert creation command with proper
     # driver.
     set driver [dict get $vm -driver]
-    set cmd [list Machine create -d $driver]
+    set cmd [list Machine -- -s [storage $vm] create -d $driver]
 
     # Now translate the standard memory (in MB), size (in MB) and cpu
     # (in numbers) options into options that are specific to the
@@ -1929,7 +1990,7 @@ proc ::cluster::Create { vm { token "" } } {
     # This seems to be necessary to make docker-machine happy and
     # we'll compare to our local version below for upgrades.
     log DEBUG "Testing SSH connection to $nm"
-    set rv_line [lindex [Machine -return -- ssh $nm "docker --version"] 0]
+    set rv_line [lindex [Machine -return -- -s [storage $vm] ssh $nm "docker --version"] 0]
     set remote_version [vcompare extract $rv_line]
     if { $remote_version eq "" } {
         log FATAL "Cannot log into $nm!"
@@ -1940,7 +2001,7 @@ proc ::cluster::Create { vm { token "" } } {
         if { [vcompare gt $docker_version $remote_version] } {
             log NOTICE "Local docker version greater than machine,\
                         trying an upgrade"
-            Machine upgrade $nm
+            Machine -- -s [storage $vm] upgrade $nm
         }
     }
 
@@ -2388,9 +2449,9 @@ proc ::cluster::Attach { vm { swarm 0 } { force 0 }} {
              || $force } {
         log INFO "Attaching to $nm"
         if { $swarm } {
-            set cmd [list Machine -return -- env --swarm $nm]
+            set cmd [list Machine -return -- -s [storage $vm] env --swarm $nm]
         } else {
-            set cmd [list Machine -return -- env $nm]
+            set cmd [list Machine -return -- -s [storage $vm] env $nm]
         }
         foreach l [eval $cmd] {
             set k [EnvLine d $l]
@@ -2917,7 +2978,7 @@ proc ::cluster::Discovery { vm } {
         if { [IsRunning $vm] } {
             # Get complete network interface description (except the
             # virtual interfaces)
-            foreach itf [unix ifs $nm] {
+            foreach itf [unix ifs $vm] {
 		foreach pfx $prefixes {
 		    set k ${pfx}_[string toupper [dict get $itf interface]]
 		    if { [dict exists $itf inet] } {
@@ -2934,7 +2995,7 @@ proc ::cluster::Discovery { vm } {
             }
             # Add the official IP address, as this is what will be
             # usefull most of the time.
-            set ip [lindex [Machine -return -- ip $nm] 0]
+            set ip [lindex [Machine -return -- -s [storage $vm] ip $nm] 0]
             if { $ip ne "" \
                      && [regexp {((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)|(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})} $ip] } {
 		foreach pfx $prefixes {
@@ -3225,7 +3286,9 @@ proc ::cluster::LogStandard { lvl msg } {
 # ::cluster::Temporary -- Temporary name
 #
 #       Generate a rather unique temporary name (to be used, for
-#       example, when creating temporary files).
+#       example, when creating temporary files). The procedure only keep
+#       worthwhile characters, trying to ensure minimal problems when it comes
+#       to file paths.
 #
 # Arguments:
 #        pfx        Prefix before unicity taggers
@@ -3237,8 +3300,16 @@ proc ::cluster::LogStandard { lvl msg } {
 # Side Effects:
 #       None.
 proc ::cluster::Temporary { pfx } {
-    return ${pfx}-[pid]-[expr {int(rand()*1000)}]
-
+    set nm ""
+    set allowed [split $vars::fpathCharacters ""]
+    foreach c [split $pfx ""] {
+        if { [lsearch $allowed $c] >= 0 } {
+            append nm $c
+        } else {
+            append nm "-"
+        }
+    }
+    return ${nm}-[pid]-[expr {int(rand()*1000)}]
 }
 
 
@@ -3260,7 +3331,7 @@ proc ::cluster::Temporary { pfx } {
 #       None.
 proc ::cluster::CacheFile { yaml ext } {
     set dirname [file dirname $yaml]
-    set rootname [file rootname [file tail $yaml]]
+    set rootname [string trimleft [file rootname [file tail $yaml]] .]
     set path [file join $dirname \
                   ".$rootname.[string trimleft $ext .]"]
 
@@ -3522,7 +3593,7 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 5 } } {
         set retries ${vars::-retries}
     }
     while { $retries > 0 } {
-        set machines [ls $nm]
+        set machines [ls [storage $vm] $nm]
         if { [llength $machines] == 1 } {
             set mchn [lindex $machines 0]
 	    # If we have a state in the dictionary, match it against
@@ -3552,7 +3623,7 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 5 } } {
 # ::cluster::Running -- Wait for machine to be running
 #
 #       This will actively wait for a virtual machine to be in the
-#       running state and have a docker daemon that is up and running.q
+#       running state and have a docker daemon that is up and running.
 #
 # Arguments:
 #	vm	Virtual machine description
@@ -3614,10 +3685,10 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""}} {
     }
 
     if { [vcompare ge [Version machine] 0.3] } {
-        Machine scp $s_fname ${nm}:${d_fname}
+        Machine -- -s [storage $vm] scp $s_fname ${nm}:${d_fname}
     } else {
 	unix defaults -ssh [SCommand $vm]
-        unix scp $nm $s_fname $d_fname
+        unix scp $vm $s_fname $d_fname
     }
 }
 
@@ -3658,7 +3729,7 @@ proc ::cluster::SCommand { vm } {
 	}
 	set ssh [string map $mapper ${vars::-ssh}]
     } else {
-	set ssh [unix remote $nm]
+	set ssh [unix remote $vm]
     }
 
     # Extract user name and host name from last argument if possible.
@@ -3695,14 +3766,14 @@ proc ::cluster::InstallRSync { vm } {
                   is not (yet?) supported"
     } else {
 	log NOTICE "Installing rsync in $nm"
-	Machine ssh $nm $installer
+	Machine -- -s [storage $vm] ssh $nm $installer
     }
 }
 
 proc ::cluster::OSInfo { vm } {
     set nfo {}
     set nm [dict get $vm -name]
-    foreach l [Machine -return -- ssh $nm "cat /etc/os-release"] {
+    foreach l [Machine -return -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
 	set k [EnvLine nfo $l]
     }
     

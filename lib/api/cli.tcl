@@ -31,6 +31,7 @@ namespace eval ::api::cli {
 	    -cache     "on"             "Use locally cached docker images?"
 	    -ssh       ""               "SSH command to use into host, dynamic replacement of %-surrounded keys will happen, e.g. ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectionAttempts=30 -o LogLevel=quiet -p %port% -i %identity% %user%@%host%.  Empty to guess."
 	    -config    ""               "Path to config file, command-line arguments will override configure content"
+	    -storage   ""               "Location of machine storage cache, empty for co-located with YAML description"
 	}
         # This is the list of recognised commands that will be print
         # when help is requested.
@@ -245,7 +246,7 @@ proc ::api::cli::globals { appname argv_ } {
 
     # Pass arguments from the command-line as the defaults for the cluster
     # module.
-    foreach k [list -machine -docker -compose -verbose -cache -ssh] {
+    foreach k [list -machine -docker -compose -verbose -cache -ssh -storage] {
 	cluster defaults $k [set vars::$k]
     }
 }
@@ -407,7 +408,7 @@ proc ::api::cli::init { {fname ""} } {
     # descriptions that represent the whole cluster that we should
     # operate on.
     set cluster {}
-    set state [cluster ls]
+    set state [cluster ls $vars::yaml]
     foreach vm $vms {
 	lappend cluster [cluster bind $vm $state]
     }

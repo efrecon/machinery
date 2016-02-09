@@ -1,6 +1,20 @@
 # Release Notes
 
 
+## v 0.7
+
+* Suppress most unexpected characters from temporary paths so as to minimise
+  problems (scp uses, for example, the colon sign as a separator between the
+  host and the path).
+  
+* Default is now to create and use a machine storage cache in the same directory
+  as the main YAML cluster file. This is a *breaking change*, but should allow
+  you to put everything under a version control system, including key pairs. To
+  revert to prior behaviour and keep using `machinery` on an existing cluster,
+  use the global option `-storage` and set it to something like
+  `~/.docker/machine`, which is the default location for machine.
+  
+
 ## v 0.6
 
 * Fixed better exit from interactive ssh sessions.
