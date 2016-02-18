@@ -1470,24 +1470,34 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 		Detach
 		# Pull image locally
 		Docker pull $img
-		# Save it to the local disk
-		set rootname [file rootname [file tail $img]]; # Cheat!...
-		set tmp_fpath [Temporary \
-				   [file join ${vars::-tmp} $rootname]].tar
-		log INFO "Creating local snapshot on $tmp_fpath and\
-                          copying to $nm..."
-		Docker save -o $tmp_fpath $img
-		log DEBUG "Created local snapshot of $img at $tmp_fpath"
-		# Copy the tar to the machine, we use the same path, it's tmp
-		SCopy $vm $tmp_fpath
-		# Give the tar to docker on the remote machine
-		Attach $vm
-		log DEBUG "Loading $nm:$tmp_fpath into $img at $nm"
-		Docker load -i $tmp_fpath
-		# Cleanup
-		log DEBUG "Cleaning up localhost:$tmp_fpath and $nm:$tmp_fpath"
-		file delete -force -- $tmp_fpath
-		Machine -- -s [storage $vm] ssh $nm "rm -f $tmp_fpath"
+                # Get unique identifier for image locally and remotely
+                set local_id [Docker -return -- images -q --no-trunc $img]
+                Attach $vm 
+                set remote_id [Docker -return -- images -q --no-trunc $img]
+                if { $local_id eq $remote_id } {
+                    log INFO "Image $img already present on $nm at version $local_id"
+                } else {
+                    # Detach again, we are going to get it locally first!
+                    Detach
+                    # Save it to the local disk
+                    set rootname [file rootname [file tail $img]]; # Cheat!...
+                    set tmp_fpath [Temporary \
+                                       [file join ${vars::-tmp} $rootname]].tar
+                    log INFO "Creating local snapshot on $tmp_fpath and\
+                              copying to $nm..."
+                    Docker save -o $tmp_fpath $img
+                    log DEBUG "Created local snapshot of $img at $tmp_fpath"
+                    # Copy the tar to the machine, we use the same path, it's tmp
+                    SCopy $vm $tmp_fpath
+                    # Give the tar to docker on the remote machine
+                    Attach $vm
+                    log DEBUG "Loading $nm:$tmp_fpath into $img at $nm"
+                    Docker load -i $tmp_fpath
+                    # Cleanup
+                    log DEBUG "Cleaning up localhost:$tmp_fpath and $nm:$tmp_fpath"
+                    file delete -force -- $tmp_fpath
+                    Machine -- -s [storage $vm] ssh $nm "rm -f $tmp_fpath"
+                }
 	    }
 	}
     } else {
