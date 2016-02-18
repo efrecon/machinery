@@ -14,8 +14,9 @@ package require Tcl 8.6;    # The cluster module requires chan pipe
 
 # Arrange to access all libraries under lib sub-directory.  There is
 # only one, but we want to be sure to be able to expand if necessary.
-set dirname [file dirname [file normalize [info script]]]
-set appname [file rootname [file tail [info script]]]
+set resolvedArgv0 [file dirname [file normalize $argv0/___]];  # Trick to resolve last symlink
+set dirname [file dirname [file normalize $resolvedArgv0]]
+set appname [file rootname [file tail $resolvedArgv0]]
 lappend auto_path [file join $dirname lib] [file join $dirname lib til]
 package require cluster;   # This implements the core of our routines!
 package require api::cli
@@ -27,7 +28,7 @@ cli globals $appname argv
 
 # Extract command (the first item of the remaining arguments) and pass
 # further the remaining arguments to the main command dispatcher.
-cli command [lindex $argv 0] {*}[lrange $argv 1 end]
+cli command $resolvedArgv0 {*}[lrange $argv 1 end]
 
 
 # TODO:
