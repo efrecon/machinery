@@ -28,7 +28,7 @@ cli globals $appname argv
 
 # Extract command (the first item of the remaining arguments) and pass
 # further the remaining arguments to the main command dispatcher.
-cli command $resolvedArgv0 {*}[lrange $argv 1 end]
+cli command [lindex $argv 0] {*}[lrange $argv 1 end]
 
 
 # TODO:
