@@ -44,7 +44,7 @@ proc ::http::geturl_followRedirects {url args} {
 
 # Run machinery and ask it for its current version number.
 cluster log NOTICE "Getting version"
-set version [lindex [::cluster::Run2 -return -- ../machinery version] 0]
+set version [lindex [::cluster::Run2 -return -- [info nameofexecutable] ../machinery version] 0]
 
 # Get the tcllib, this is a complete overkill, but is generic and
 # might help us in the future.  We get it from the github mirror as
@@ -96,7 +96,7 @@ if { $xdir eq "" } {
 } else {
     cluster log NOTICE "Installing tcllib into VFS"
     set installer [file join $xdir installer.tcl]
-    ::cluster::Run2 -- $installer -no-html -no-nroff -no-examples \
+    ::cluster::Run2 -- [info nameofexecutable] $installer -no-html -no-nroff -no-examples \
         -no-gui -no-apps -no-wait -pkg-path machinery.vfs/lib
 }
 
