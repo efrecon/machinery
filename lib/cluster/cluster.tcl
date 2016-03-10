@@ -1382,13 +1382,23 @@ proc ::cluster::ssh { vm args } {
 	    fconfigure $fd -buffering none -translation binary
 	}
 	set mchn [auto_execok ${vars::-machine}]
+        if { ![file exists $mchn] } {
+            set mchn ${vars::-machine}
+        }
 	if { $mchn eq "" } {
 	    log ERROR "Cannot find machine at ${vars::-machine}!"
 	    return
 	}
-	if { [catch {exec $mchn -s [storage $vm] ssh $nm >@stdout 2>@stderr <@stdin} err] } {
-	    log WARN "Child returned: $err"
-	}
+
+        set cmd [list $mchn -s [storage $vm]]
+        if { [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
+            lappend cmd --native-ssh
+        }
+        lappend cmd ssh $nm
+
+        if { [catch {exec {*}$cmd >@ stdout 2>@ stderr <@ stdin} err] } {
+            log WARN "Child returned: $err"
+        }
     }
 }
 
@@ -2465,6 +2475,9 @@ proc ::cluster::Machine { args } {
     # level.
     if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --debug]
+    }
+    if { [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
+        set args [linsert $args 0 --native-ssh]
     }
 
     return [eval Run2 $opts -- [auto_execok ${vars::-machine}] $args]
