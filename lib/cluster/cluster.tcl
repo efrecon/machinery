@@ -18,6 +18,7 @@
 ##
 ##################
 package require Tcl 8.6;  # We require chan pipe
+package require platform
 package require yaml;     # This is found in tcllib
 package require cluster::virtualbox
 package require cluster::vcompare
