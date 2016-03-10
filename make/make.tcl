@@ -125,3 +125,4 @@ file delete -force -- $tcllib_path
 file delete -force -- $xdir
 file delete -force -- machinery.vfs
 file delete -force -- machinery.kit
+file delete -force -- machinery.bat
