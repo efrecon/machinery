@@ -40,7 +40,7 @@ namespace eval ::cluster {
         # Allowed VM keys
         variable -keys      {cpu size memory master labels driver options \
                                  ports shares images compose registries aliases \
-				 addendum files}
+				 addendum files swarm}
         # Path to common executables
         variable -machine   docker-machine
         variable -docker    docker
@@ -114,7 +114,7 @@ namespace eval ::cluster {
 	variable machopts {}
         # List of additional driver specific options that should be
         # resolved into absolute path.
-        variable absPaths {azure-publish-settings-file azure-subscription-cert hyper-v-boot2docker-location}
+        variable absPaths {azure-publish-settings-file azure-subscription-cert hyper-v-boot2docker-location generic-ssh-key}
 	# Finding good file candidates
 	variable lookup "*.yml";    # Which files to consider for YAML parsing
 	variable marker {^#\s*docker\-machinery}
@@ -2005,7 +2005,7 @@ proc ::cluster::Create { vm { token "" } } {
 	    set k [string trimleft $k "-"]
 	    if { [dict exists $vars::machopts $k] } {
                 if { [lsearch $vars::absPaths $k] >= 0 } {
-                    lappend cmd --$k [AbsolutePath $vm $v]
+                    lappend cmd --$k [AbsolutePath $vm $v on]
                 } else {
                     lappend cmd --$k $v
                 }
@@ -2018,17 +2018,19 @@ proc ::cluster::Create { vm { token "" } } {
     # Take care of swarm.  Turn it on in the first place, and recognise
     # the key master (and request for a swarm master when it is on).
     if { $token ne "" } {
-        lappend cmd --swarm --swarm-discovery token://$token
-    }
-    if { [dict exists $vm -master] } {
-        if { $token ne "" } {
-            if { [string is true [dict get $vm -master]] } {
+        if { ([dict exists $vm -swarm] \
+                        && [string is true [dict get $vm -swarm]]) \
+                || ![dict exists $vm -swarm] } {
+            lappend cmd --swarm --swarm-discovery token://$token
+            if { [dict exists $vm -master] \
+                    && [string is true [dict get $vm -master]] } {
                 lappend cmd --swarm-master
             }
         } else {
-            log WARM "Swarm is turned off for this machine,\
-                      cannot understand 'master'"
+            log NOTICE "Swarm is turned off for this machine"
         }
+    } else {
+        log NOTICE "Swarm is turned off for this machine"
     }
 
     # Add the tags, if version permits.
@@ -3855,13 +3857,16 @@ proc ::cluster::OSIdentifier { vm } {
     }
 }
 
-proc ::cluster::AbsolutePath { vm fpath } {
+proc ::cluster::AbsolutePath { vm fpath { native 0 } } {
     if { [dict exists $vm origin] } {
         set dirname [file dirname [dict get $vm origin]]
         log DEBUG "Joining $dirname and $fpath to get final path"
         set fpath [file join $dirname $fpath]
     }
     set fpath [file normalize $fpath]
+    if { [string is true $native] } {
+        set fpath [file nativename $fpath]
+    }
 
     return $fpath
 }
