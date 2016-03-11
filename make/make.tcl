@@ -4,7 +4,7 @@ package require platform
 package require http
 package require tls
 
-set tcllib_ver 1.17
+set tcllib_ver 1.18
 
 set dirname [file dirname [file normalize [info script]]]
 set kitdir [file join $dirname kits]
