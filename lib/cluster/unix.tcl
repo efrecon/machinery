@@ -74,7 +74,7 @@ proc ::cluster::unix::ps { vm {filter *}} {
     log DEBUG "Getting list of processes on $nm..."
     set processes {}
     set skip 1
-    foreach l [Machine -return -- -s [storage $vm] ssh $nm "sudo ps -o pid,comm,args"] {
+    foreach l [Machine -return -- -s [storage $vm] ssh $nm "sudo ps -e -o pid,comm,args"] {
 	if { $skip } {
 	    # Skip header!
 	    set skip 0
