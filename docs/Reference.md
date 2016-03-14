@@ -16,6 +16,10 @@ bringing the components up.  Together with conventions for the dynamic
 construction of network-related environment variables, this provides for a
 simple mechanism for service discovery.
 
+`machinery` has been thoroughly tested on Linux, but is also able to run on
+Windows, in the shell of the Docker
+[Toolbox](https://www.docker.com/products/docker-toolbox).
+
 ## Command-Line API
 
 `machinery` takes a number of global options (dash-led) followed by a
@@ -394,18 +398,27 @@ the token, whenever this is relevant.
 
 #### `-cache`
 
-This option takes a boolean as an argument and will conduct the
-behaviour of `machinery` when it installs images on the machines that
-it creates.  Boolean values can be `on`, `false` or `1`, for example.
-When the cache is used, `machinery` will use the docker on the host to
-fetch the image and will then copy a `tar` of the image onto the
-machine where it will be unpacked and installed as a docker image.
-This has the advantage of cutting down download times in some
-situations, but also to arrange for login credentials to private
-registries not being present on the machines.  Instead, only local
-access to the images on the host is necessary.  When the cache is
-turned off, `machinery` will ask the docker daemon running on the
-machine to pull the images.
+This option takes the name of a machine known to docker machine as an argument
+and will conduct the behaviour of `machinery` when it installs images on the
+machines that it creates.
+
+When the cache is an empty string, `machinery` will use the local daemon to
+fetch the image and create a `tar` of the image locally, before the `tar` file
+is installed as a docker image on the remote machine. This has the advantage of
+cutting down download times in some situations, but also to arrange for login
+credentials to private registries not being present on the machines. Instead,
+only local access to the images on the host is necessary.
+
+When `-cache` is the name of a machine known to `docker-machine`, this machine
+is used as a cache for image downloading. This behaviour is necessary on Windows
+using the [Toolbox](https://www.docker.com/products/docker-toolbox) as there is
+no local daemon, but rather a daemon running in a virtual machine.
+
+To turn caching completely off, set this option to the `-`. When the
+cache is turned off, `machinery` will ask the docker daemon running on the
+remote machine to pull the images. This means that you will have to ensure that
+proper credentials have been specified in the YAML file using the `registries`
+section.
 
 #### `-ssh`
 

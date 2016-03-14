@@ -22,6 +22,16 @@
   machines and ensure that they, for example, host all necessary secrets, ready
   to be mounted onto the containers running on those machines.
   
+* Preliminary support for running from windows, using the
+  [DockerToolbox](https://www.docker.com/products/docker-toolbox).
+  
+* Ability to use another machine as a cache for the storage of images before
+  they are transmitted to the remote machines in the cluster. This is a
+  *breaking change* as it modifies the semantics of the `-cache` global option
+  (contains the name of the machine used for cache). This new behaviour is
+  necessary for the windows port as the daemon runs within a machine created in
+  [VirtualBox](https://www.virtualbox.org/).
+  
 
 ## v 0.6
 
