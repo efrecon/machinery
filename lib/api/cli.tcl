@@ -28,7 +28,7 @@ namespace eval ::api::cli {
 	    -token     ""               "Override token for cluster"
 	    -cluster   ""               "YAML description, empty for cluster.yml"
 	    -driver    "virtualbox"     "Default driver for VM creation"
-	    -cache     "on"             "Use locally cached docker images?"
+	    -cache     ""               "Name of machine to locally cached docker images, - to turn off, empty for local machine"
 	    -ssh       ""               "SSH command to use into host, dynamic replacement of %-surrounded keys will happen, e.g. ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectionAttempts=30 -o LogLevel=quiet -p %port% -i %identity% %user%@%host%.  Empty to guess."
 	    -config    ""               "Path to config file, command-line arguments will override configure content"
 	    -storage   ""               "Location of machine storage cache, empty for co-located with YAML description"

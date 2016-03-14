@@ -415,7 +415,7 @@ proc ::cluster::unix::resolve { hostname } {
     }
     
     # This forces back IPv4 addresses, perhaps not a good idea?
-    foreach l [Run2 -return -- getent ahostsv4 $hostname] {
+    foreach l [Run -return -- getent ahostsv4 $hostname] {
 	set entries [split $l]
 	if { [lindex $entries end] eq $hostname } {
 	    return [lindex $entries 0]

@@ -69,8 +69,8 @@ namespace eval ::cluster {
         variable -log       stderr
         # Date log output
         variable -date      "%Y%m%d %H%M%S"
-        # Temporary directory
-        variable -tmp       "/tmp"
+        # Temporary directory, empty for good platform guess
+        variable -tmp       ""
 	# Default number of retries when polling
 	variable -retries   3
 	# Environement variable prefix
@@ -81,6 +81,8 @@ namespace eval ::cluster {
 	variable -ssh       ""
         # List of "on" state
         variable -running   {running timeout}
+        # Force attachment via command line options
+        variable -sticky    off
 	# Supported sharing types.
 	variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
@@ -560,7 +562,7 @@ proc ::cluster::init { vm {steps {shares registries files images compose addendu
 }
 
 proc ::cluster::tempfile { pfx ext } {
-    return [Temporary [file join ${vars::-tmp} $pfx].[string trimleft $ext .]
+    return [Temporary [file join [TempDir] $pfx].[string trimleft $ext .]
 }
 
 
@@ -569,10 +571,11 @@ proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
     set nm [dict get $vm -name]
     if { $swarm } {
 	log NOTICE "Getting components of cluster"
+        Attach $vm -swarm
     } else {
 	log NOTICE "Getting components of $nm"
+        Attach $vm
     }
-    Attach $vm $swarm
     if { $direct } {
 	Docker -raw -- ps
     } else {
@@ -666,7 +669,7 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
                     }
                 }
             }
-            Attach $master 1
+            Attach $master -swarm
             Project $fpath $op $substitution $projname $options
         }
     } else {
@@ -711,7 +714,11 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
     EnvSet $vm
 
     set nm [dict get $vm -name]
-    Attach $vm $swarm
+    if { $swarm } {
+        Attach $vm -swarm
+    } else {
+        Attach $vm
+    }
     set composed {}
     set maindir [pwd]
     foreach project $projects {
@@ -837,8 +844,7 @@ proc ::cluster::addendum { vm { execs {} } } {
 		    # Dump to temporary location
 		    set rootname [file rootname [file tail $fpath]]
 		    set ext [file extension $fpath]
-		    set tmp_fpath [Temporary \
-				       [file join ${vars::-tmp} $rootname]]$ext
+		    set tmp_fpath [Temporary [file join [TempDir] $rootname]]$ext
 		    set fd [open $tmp_fpath w]
 		    puts -nonewline $fd $dta
 		    close $fd
@@ -850,7 +856,7 @@ proc ::cluster::addendum { vm { execs {} } } {
 		}
 
 		log NOTICE "Executing $fpath (args: $args)"
-		Run2 -keepblanks -stderr -raw -- $cmd {*}$args
+		Run -keepblanks -stderr -raw -- $cmd {*}$args
 
 		# Remove temporary (subsituted) file, if any.
 		if { $tmp_fpath ne "" } {
@@ -944,13 +950,13 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Create a local temporary file with the new content.  This is far
     # from perfect, but should do as we are only creating one file and
     # will be removing it soon.
-    set fname [Temporary [file join ${vars::-tmp} profile]]
+    set fname [Temporary [file join [TempDir] profile]]
     EnvWrite $fname [array get DARGS] "'"
 
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
     SCopy $vm $fname
-    Run2 ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
+    Run ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
 
     # Cleanup and restart machine to make sure the labels get live.
     file delete -force -- $fname;        # Remove local file, not needed anymore
@@ -1186,7 +1192,7 @@ proc ::cluster::shares { vm { shares {}} } {
 		}
 
 		# Now create a temporary file with the new content
-		set fname [Temporary [file join ${vars::-tmp} bootlocal]]
+		set fname [Temporary [file join [TempDir] bootlocal]]
 		set fd [open $fname w]
 		foreach l $bootlocal {
 		    puts $fd $l
@@ -1221,7 +1227,7 @@ proc ::cluster::shares { vm { shares {}} } {
 		    # directory onto the remote VM directory.  Arrange
 		    # for rsync to understand those properly as
 		    # directories and not only files.
-		    Run2 -- [auto_execok ${vars::-rsync}] -az -e $ssh \
+		    Run -- [auto_execok ${vars::-rsync}] -az -e $ssh \
 			[string trimright $host "/"]/ \
 			$hname:[string trimright $mchn "/"]/
 		    lappend mounted $mchn
@@ -1292,7 +1298,7 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
     switch -nocase -glob -- $op {
 	"g*" {
 	    foreach {host mchn type} $sharing {
-		Run2 -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
+		Run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
 		    $hname:[string trimright $mchn "/"]/ \
 		    [string trimright $host "/"]/
 		lappend synchronised $mchn
@@ -1300,7 +1306,7 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
 	}
 	"p*" {
 	    foreach {host mchn type} $sharing {
-		Run2 -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
+		Run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
 		    [string trimright $host "/"]/ \
 		    $hname:[string trimright $mchn "/"]/
 		lappend synchronised $mchn
@@ -1466,8 +1472,17 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
     }
 
     set nm [dict get $vm -name]
-    if { [string is true ${vars::-cache}] } {
-	log NOTICE "Pulling images locally and transfering to $nm:\
+    if { ${vars::-cache} eq "-" } {
+	log NOTICE "Pulling images in $nm: $images..."
+	if { [llength $images] > 0 } {
+	    foreach img $images {
+		log INFO "Pulling $img in $nm..."
+		Machine -- -s [storage $vm] ssh $nm "docker pull $img"
+	    }
+	}
+    } else {
+        set origin [expr {${vars::-cache} eq "" ? "locally" : "via ${vars::-cache}"}]
+	log NOTICE "Pulling images $origin and transfering to $nm:\
                     [join $images {, }]..."
 	if { [llength $images] > 0 } {
 	    # When using the cache, we download the image on the
@@ -1478,45 +1493,47 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 	    # and then load it there.
 	    foreach img $images {
 		# Detach so we can pull locally!
-		Detach
+                if { ${vars::-cache} eq "" } {
+                    Detach    
+                } else {
+                    Attach ${vars::-cache} -external
+                }
 		# Pull image locally
-		Docker pull $img
+		Docker -stderr -- pull $img
                 # Get unique identifier for image locally and remotely
                 set local_id [Docker -return -- images -q --no-trunc $img]
-                Attach $vm 
+                log TRACE "Identifier for local image is $local_id"
+                Attach $vm
                 set remote_id [Docker -return -- images -q --no-trunc $img]
+                log TRACE "Identifier for remote image is $remote_id"
                 if { $local_id eq $remote_id } {
                     log INFO "Image $img already present on $nm at version $local_id"
                 } else {
                     # Detach again, we are going to get it locally first!
-                    Detach
+                    if { ${vars::-cache} eq "" } {
+                        Detach    
+                    } else {
+                        Attach ${vars::-cache} -external
+                    }
+                    
                     # Save it to the local disk
                     set rootname [file rootname [file tail $img]]; # Cheat!...
                     set tmp_fpath [Temporary \
-                                       [file join ${vars::-tmp} $rootname]].tar
-                    log INFO "Creating local snapshot on $tmp_fpath and\
-                              copying to $nm..."
-                    Docker save -o $tmp_fpath $img
+                                       [file join [TempDir] $rootname]].tar
+                    log INFO "Using a local snapshot at $tmp_fpath to copy $img\
+                              to $nm..."
+                    Docker -stderr -- save -o $tmp_fpath $img
                     log DEBUG "Created local snapshot of $img at $tmp_fpath"
-                    # Copy the tar to the machine, we use the same path, it's tmp
-                    SCopy $vm $tmp_fpath
+                    
                     # Give the tar to docker on the remote machine
+                    log DEBUG "Loading $tmp_fpath into $img at $nm..."
                     Attach $vm
-                    log DEBUG "Loading $nm:$tmp_fpath into $img at $nm"
                     Docker load -i $tmp_fpath
+                    
                     # Cleanup
-                    log DEBUG "Cleaning up localhost:$tmp_fpath and $nm:$tmp_fpath"
+                    log DEBUG "Cleaning up $tmp_fpath"
                     file delete -force -- $tmp_fpath
-                    Machine -- -s [storage $vm] ssh $nm "rm -f $tmp_fpath"
                 }
-	    }
-	}
-    } else {
-	log NOTICE "Pulling images in $nm: $images..."
-	if { [llength $images] > 0 } {
-	    foreach img $images {
-		log INFO "Pulling $img in $nm..."
-		Machine -- -s [storage $vm] ssh $nm "docker pull $img"
 	    }
 	}
     }
@@ -2144,19 +2161,27 @@ proc ::cluster::POpen4 { args } {
         lassign [chan pipe] read$chan write$chan
     } 
 
-    set pid [exec {*}$args <@ $readIn >@ $writeOut 2>@ $writeErr &]
+    if { [catch {exec {*}$args <@$readIn >@$writeOut 2>@$writeErr &} pid] } {
+        puts "OISDFJOIJF"
+        foreach chan {In Out Err} {
+            chan close write$chan
+            chan close read$chan
+        }
+        log CRITICAL "Cannot execute $args: $pid"
+        return [list]
+    }
     chan close $writeOut
     chan close $writeErr
 
     foreach chan [list stdout stderr $readOut $readErr $writeIn] {
         chan configure $chan -buffering line -blocking false
     }
-
+    
     return [list $pid $writeIn $readOut $readErr]
 }
 
 
-proc ::cluster::Run2 { args } {
+proc ::cluster::RunChan { args } {
     # Isolate -- that will separate options to procedure from options
     # that would be for command.  Using -- is MANDATORY if you want to
     # specify options to the procedure.
@@ -2307,7 +2332,7 @@ proc ::cluster::LineRead { c fd } {
 #
 # Side Effects:
 #       Run local command and (possibly) show its output.
-proc ::cluster::Run { args } {
+proc ::cluster::RunPipe { args } {
     set ret {}
 
     # Isolate -- that will separate options to procedure from options
@@ -2374,6 +2399,14 @@ proc ::cluster::Run { args } {
     return $ret
 }
 
+proc ::cluster::Run {args} {
+    if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
+        return [RunPipe {*}$args]
+    } else {
+        return [RunChan {*}$args]
+    }
+}
+
 
 # ::cluster::Docker -- Run docker binary
 #
@@ -2406,7 +2439,26 @@ proc ::cluster::Docker { args } {
     if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --debug]
     }
-    return [eval Run2 $opts -- [auto_execok ${vars::-docker}] $args]
+    if { [string is true ${vars::-sticky}] } {
+        if { [info exists ::env(DOCKER_TLS_VERIFY)] } {
+            if { [string is true $::env(DOCKER_TLS_VERIFY)] } {
+                set args [linsert $args 0 --tls --tlsverify=true]
+            }
+        }
+        if { [info exists ::env(DOCKER_CERT_PATH)] } {
+            foreach {opt fname} [list cacert ca.pem cert cert.pem key key.pem] {
+                set fpath [file join $::env(DOCKER_CERT_PATH) $fname]
+                if { [file exists $fpath] } {
+                    set args [linsert $args 0 --tls$opt [file nativename $fpath]]
+                }
+            }
+        }
+        if { [info exists ::env(DOCKER_HOST)] } {
+            set args [linsert $args 0 -H $::env(DOCKER_HOST)]
+        }
+        log INFO "Automatically added command line arguments to docker: $args"
+    }
+    return [eval Run $opts -- [auto_execok ${vars::-docker}] $args]
 }
 
 
@@ -2442,7 +2494,7 @@ proc ::cluster::Compose { args } {
     if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --verbose]
     }
-    return [eval Run2 $opts -- [auto_execok ${vars::-compose}] $args]
+    return [eval Run $opts -- [auto_execok ${vars::-compose}] $args]
 }
 
 
@@ -2479,11 +2531,11 @@ proc ::cluster::Machine { args } {
     if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --debug]
     }
-    if { [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
+    if { 0 && [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
         set args [linsert $args 0 --native-ssh]
     }
 
-    return [eval Run2 $opts -- [auto_execok ${vars::-machine}] $args]
+    return [eval Run $opts -- [auto_execok ${vars::-machine}] $args]
 }
 
 
@@ -2493,12 +2545,15 @@ proc ::cluster::Machine { args } {
 #       necessary environment variables so that the next call to
 #       "docker" will connect to the proper machine.  We perform a
 #       simplistic parsing of the output of "docker-machine env" for
-#       this purpose.
+#       this purpose. The procedure takes a number of dash-led flags to modify
+#       its behaviour, these are:
+#       -swarm     Attach to swarm master instead
+#       -force     Force attaching even if we were already attached
+#       -external  Attach to machine out of cluster under our control
 #
 # Arguments:
 #        vm        Virtual machine description dictionary
-#        swarm     Contact swarm master?
-#        force     Force attaching
+#        args      List of dash led flags (see above)
 #
 # Results:
 #       None.
@@ -2506,24 +2561,64 @@ proc ::cluster::Machine { args } {
 # Side Effects:
 #       Modify current environment so as to be able to pass it further
 #       to docker on next call.
-proc ::cluster::Attach { vm { swarm 0 } { force 0 }} {
-    set nm [dict get $vm -name]
+proc ::cluster::Attach { vm args } {
+    global env;   # Access program environment.
+    
+    set swarm [getopt args -swarm]
+    set force [getopt args -force]
+    set external [getopt args -external]
+    
+    if { $external } {
+        set nm $vm
+    } else {
+        set nm [dict get $vm -name]    
+    }
     if { $nm ne [lindex $vars::attached 0] \
              || $swarm != [lindex $vars::attached 1] \
              || $force } {
         log INFO "Attaching to $nm"
+        array set DENV {};   # Will hold the set of variables to be set.
+
+        set cmd [list Machine -return --]
+        if { !$external } {
+            lappend cmd -s [storage $vm]
+        }
+        lappend cmd env
         if { $swarm } {
-            set cmd [list Machine -return -- -s [storage $vm] env --swarm $nm]
-        } else {
-            set cmd [list Machine -return -- -s [storage $vm] env $nm]
+            lappend cmd --swarm
         }
-        foreach l [eval $cmd] {
-            set k [EnvLine d $l]
-            if { $k ne "" } {
-                set ::env($k) [dict get $d $k]
+        lappend cmd $nm
+
+        set response [eval $cmd]
+        if { [llength $response] > 0 } {
+            foreach l $response {
+                set k [EnvLine d $l]
+                if { $k ne "" } {
+                    set DENV($k) [dict get $d $k]
+                }
             }
+        } else {
+            log INFO "Could not request environment through machine, trying a good guess through inspection"
+            set cmd [list Machine -return --]
+            if { !$external } {
+                lappend cmd -s [storage $vm]
+            }
+            lappend cmd inspect $nm
+            
+            set json [join [eval $cmd] \n]
+            set response [::json::parse $json]
+            set DENV(DOCKER_TLS_VERIFY) [string is true [dict get $response HostOptions EngineOptions TlsVerify]]
+            set DENV(DOCKER_CERT_PATH) [dict get $response HostOptions AuthOptions CertDir]
+            set DENV(DOCKER_MACHINE_NAME) [dict get $response Driver MachineName]
+            set DENV(DOCKER_HOST) tcp://[dict get $response Driver IPAddress]:2376
         }
-        set vars::attached [list $nm $swarm]
+
+        if { [llength [array names DENV]] > 0 } {
+            array set env [array get DENV]
+            set vars::attached [list $nm $swarm]
+        } else {
+            log ERROR "Could not attach to $nm!"
+        }
     }
 }
 
@@ -2546,7 +2641,7 @@ proc ::cluster::Attach { vm { swarm 0 } { force 0 }} {
 proc ::cluster::Detach {} {
     if { [llength $vars::attached] != 0 } {
         log INFO "Detaching from vm..."
-        foreach e [list TLS_VERIFY CERT_PATH HOST] {
+        foreach e [list TLS_VERIFY CERT_PATH HOST MACHINE_NAME] {
             if { [info exists ::env(DOCKER_$e)] } {
                 unset ::env(DOCKER_$e)
             }
@@ -2681,7 +2776,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
                 set rootname [file rootname [file tail $f]]
 		set ext [file extension $f]
                 set tmp_fpath [Temporary \
-                                   [file join ${vars::-tmp} $rootname]]$ext
+                                   [file join [TempDir] $rootname]]$ext
                 log INFO "Copying a resolved version of $src_path to\
                           $tmp_fpath"
                 set in_fd [open $src_path]
@@ -2732,7 +2827,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
         # Copy resolved result to temporary file
         set projdirname [file tail [file dirname $fpath]]
         set projname [file rootname [file tail $fpath]]
-        set tmp_fpath [Temporary [file join ${vars::-tmp} $projname]].yml
+        set tmp_fpath [Temporary [file join [TempDir] $projname]].yml
         set fd [open $tmp_fpath w]
         puts -nonewline $fd $yaml
         close $fd
@@ -2784,7 +2879,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     # Cleanup files in temporaries list.
     if { $substitution < 2 && [llength $temporaries] > 0 } {
         log INFO "Cleaning up [llength $temporaries] temporary file(s)\
-                  from ${vars::-tmp}"
+                  from [TempDir]"
         foreach tmp_fpath $temporaries {
             file delete -force -- $tmp_fpath
         }
@@ -3364,16 +3459,23 @@ proc ::cluster::LogStandard { lvl msg } {
 # Side Effects:
 #       None.
 proc ::cluster::Temporary { pfx } {
+    set dirname [file dirname $pfx]
+    set fname [file tail $pfx]
+    
     set nm ""
     set allowed [split $vars::fpathCharacters ""]
-    foreach c [split $pfx ""] {
+    foreach c [split $fname ""] {
         if { [lsearch $allowed $c] >= 0 } {
             append nm $c
         } else {
             append nm "-"
         }
     }
-    return ${nm}-[pid]-[expr {int(rand()*1000)}]
+    if { $dirname eq "." || $dirname eq "" } {
+        return ${nm}-[pid]-[expr {int(rand()*1000)}]        
+    } else {
+        return [file join $dirname ${nm}-[pid]-[expr {int(rand()*1000)}]]
+    }
 }
 
 
@@ -3750,9 +3852,9 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
 
     if { [vcompare ge [Version machine] 0.3] } {
         if { [string is true $recurse] } {
-            Machine -- -s [storage $vm] scp -r $s_fname ${nm}:${d_fname}            
+            Machine -stderr -- -s [storage $vm] scp -r $s_fname ${nm}:${d_fname}            
         } else {
-            Machine -- -s [storage $vm] scp $s_fname ${nm}:${d_fname}            
+            Machine -stderr -- -s [storage $vm] scp $s_fname ${nm}:${d_fname}            
         }
     } else {
 	unix defaults -ssh [SCommand $vm]
@@ -3871,5 +3973,36 @@ proc ::cluster::AbsolutePath { vm fpath { native 0 } } {
     return $fpath
 }
 
+
+proc ::cluster::TempDir {} {
+    if { ${vars::-tmp} ne "" } {
+        return ${vars::-tmp}
+    }
+    
+    if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
+        set resolutions [list USERPROFILE AppData/Local/Temp \
+                                    windir TEMP \
+                                    SystemRoot TEMP \
+                                    TEMP "" TMP "" \
+                                    "" "C:/TEMP" "" "C:/TMP" "" "C:/"]
+    } else {
+        set resolutions [list TMP "" "" /tmp]
+    }
+    
+    foreach { var subdir }  $resolutions {
+        set dir ""
+        if { $var eq "" } {
+            set dir $subdir
+        } elseif { [info exists ::env($var)] && [set ::env($var)] ne "" } {
+            set dir [file join [set ::env($var)] $subdir]
+        }
+        if { $dir ne "" && [file isdirectory $dir] } {
+            log TRACE "Using $dir as a temporary directory"
+            return $dir
+        }
+    }
+    
+    return [cwd]
+}
 
 package provide cluster 0.4

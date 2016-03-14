@@ -55,7 +55,7 @@ proc ::cluster::swarm::info { cluster } {
 	if { [[namespace parent]::IsRunning $master] } {
 	    log NOTICE "Getting cluster info via\
                         [dict get $master -name]"
-	    [namespace parent]::Attach $master 1
+	    [namespace parent]::Attach $master -swarm
 	    [namespace parent]::Docker info
 	} else {
 	    log WARN "Cluster not bound or master not running"

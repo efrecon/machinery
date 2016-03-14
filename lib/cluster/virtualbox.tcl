@@ -264,7 +264,7 @@ proc ::cluster::virtualbox::Manage { args } {
         set opts [list]
     }
 
-    return [eval [namespace parent]::Run2 $opts -- \
+    return [eval [namespace parent]::Run $opts -- \
 		[auto_execok ${vars::-manage}] $args]
 }
 
