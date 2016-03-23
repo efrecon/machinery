@@ -412,7 +412,8 @@ proc ::cluster::bind { vm {ls -}} {
                 # Convert active (which is marked as a "start",
                 # *-sign) to a boolean.
                 if { [dict exists $m active] } {
-                    if { [dict get $m active] eq "" } {
+                    if { [dict get $m active] eq "" \
+			     || [dict get $m active] eq "-" } {
                         dict set vm active off
                     } else {
                         dict set vm active on
