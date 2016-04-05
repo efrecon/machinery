@@ -116,8 +116,13 @@ foreach platform $argv {
     } else {
 	cluster log ERROR "Cannot build for $platform, no main kit available"
     }
-    file rename -force -- machinery \
-	[file join $dstdir machinery-$version-$platform]
+    if { [string match -nocase "win*" $platform] } {
+        file rename -force -- machinery \
+            [file join $dstdir machinery-$version-$platform].exe
+    } else {
+        file rename -force -- machinery \
+            [file join $dstdir machinery-$version-$platform]
+    }
 }
 
 # Big cleanup
