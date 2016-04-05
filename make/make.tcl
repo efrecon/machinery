@@ -44,7 +44,7 @@ proc ::http::geturl_followRedirects {url args} {
 
 # Run machinery and ask it for its current version number.
 cluster log NOTICE "Getting version"
-set version [lindex [::cluster::Run2 -return -- [info nameofexecutable] ../machinery version] 0]
+set version [lindex [::cluster::Run -return -- [info nameofexecutable] [file join $dirname .. machinery] version] 0]
 
 # Get the tcllib, this is a complete overkill, but is generic and
 # might help us in the future.  We get it from the github mirror as
@@ -73,8 +73,8 @@ if { [::http::ncode $tok] == 200 } {
 cluster log NOTICE "Creating skeleton and filling VFS"
 set tclkit [file join $bindir [::platform::generic] tclkit]
 set sdx [file join $kitdir sdx.kit]
-::cluster::Run2 $tclkit $sdx qwrap ../machinery
-::cluster::Run2 $tclkit $sdx unwrap machinery.kit
+::cluster::Run $tclkit $sdx qwrap ../machinery
+::cluster::Run $tclkit $sdx unwrap machinery.kit
 foreach fname [glob -directory [file join $dirname .. lib] -nocomplain -- *] {
     set r_fname [file dirname [file normalize ${fname}/___]]
     cluster log DEBUG "Copying $r_fname -> machinery.vfs/lib"
@@ -85,7 +85,7 @@ foreach fname [glob -directory [file join $dirname .. lib] -nocomplain -- *] {
 # directory.  We really could cleanup as we only need yaml and cmdline
 # really...
 cluster log NOTICE "Extracting tcllib"
-::cluster::Run2 -- tar zxf $tcllib_path
+::cluster::Run -- tar zxf $tcllib_path
 set xdir [lindex [glob -nocomplain -- *tcllib*$gver] 0]
 if { $xdir eq "" } {
     cluster log ERROR "Could not find where tcllib was extracted!"
@@ -96,7 +96,7 @@ if { $xdir eq "" } {
 } else {
     cluster log NOTICE "Installing tcllib into VFS"
     set installer [file join $xdir installer.tcl]
-    ::cluster::Run2 -- [info nameofexecutable] $installer -no-html -no-nroff -no-examples \
+    ::cluster::Run -- [info nameofexecutable] $installer -no-html -no-nroff -no-examples \
         -no-gui -no-apps -no-wait -pkg-path machinery.vfs/lib
 }
 
@@ -106,12 +106,12 @@ foreach platform $argv {
     set binkit [file join $bindir $platform tclkit]
     if { [file exists $binkit] } {
 	cluster log INFO "Final wrapping of binary for $platform"
-	::cluster::Run2 $tclkit $sdx wrap machinery.kit
+	::cluster::Run $tclkit $sdx wrap machinery.kit
 	# Copy runtime to temporary because won't work if same as the
 	# one we are starting from.
 	cluster log DEBUG "Creating temporary kit for final wrapping: ${binkit}.temp"
 	file copy $binkit ${binkit}.temp
-	::cluster::Run2 $tclkit $sdx wrap machinery -runtime ${binkit}.temp
+	::cluster::Run $tclkit $sdx wrap machinery -runtime ${binkit}.temp
 	file delete -force -- ${binkit}.temp
     } else {
 	cluster log ERROR "Cannot build for $platform, no main kit available"
