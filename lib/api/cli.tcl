@@ -56,7 +56,7 @@ namespace eval ::api::cli {
         }
 	
 	variable appname "";          # Name of main application.
-	variable version 0.7;         # GLOBAL Application version!
+	variable version 0.8-dev;     # GLOBAL Application version!
 	variable yaml "";             # The cluster YAML file we ended up using!
 	variable justify 80;          # Justification for long text
 	variable default "./cluster.yml"
