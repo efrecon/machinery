@@ -8,11 +8,11 @@
   host and the path).
   
 * Default is now to create and use a machine storage cache in the same directory
-  as the main YAML cluster file. This is a *breaking change*, but should allow
-  you to put everything under a version control system, including key pairs. To
-  revert to prior behaviour and keep using `machinery` on an existing cluster,
-  use the global option `-storage` and set it to something like
-  `~/.docker/machine`, which is the default location for machine.
+  as the main YAML cluster file. This is a *breaking change*, but eases project
+  migration between machines. To revert to prior behaviour and keep using
+  `machinery` on an existing cluster, use the global option `-storage` and set
+  it to something like `~/.docker/machine`, which is the default location for
+  machine.
   
 * Machine specification now takes a list of `files` specifications. These are
   formatted as the path to the source, possibly followed by a colon `:`

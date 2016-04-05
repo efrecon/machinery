@@ -313,6 +313,17 @@ one candidate is found, this file will be taken into consideration as
 if it had been specifically pointed at using the `-cluster` global
 option.
 
+`docker-machine` itself stores a number of files that are necessary for
+bootstrapping machines or for storing keys and certificates that are relevant
+for the cluster. To keep this storage separate, but also to ease project
+migration between machines, `machinery` creates a hidden directory using the
+same basename as the YAML definition file, but with a leading dash and an ending
+`.mch` extension in the same directory as the YAML definition file. Note that
+versions prior to 0.7 did have a way to specify this directory, meaning that
+they used the default directory `.docker` in your home directory. You can use
+the global option `-storage` to interact with projects created using those
+versions.
+
 #### Interaction with `docker-compose` <a name="docker-compose" />
 
 The combination of `machinery`, `docker-machine` and `docker-compose` enables a
@@ -466,6 +477,19 @@ will be considered as a comment and ignored.  Meaningful lines should
 contain the name of a global option (the leading dash can be omitted)
 followed by its value, separated by whitespaces.  The value can be put
 between quotes `"` if necessary.
+
+#### `-storage`
+
+This option is the directory where `docker-machine` should store all necessary
+files relevant for the cluster: bootstrapping OS images, certificates and keys,
+etc. When empty, `machinery` will default to a directory that has the same
+basename as the main YAML definition file, but starts with a `.` to be kept
+hidden and ends with a `.mch`. `machinery` will automatically create that
+directory and pass it further to `docker-machine` each time this is needed. This
+option was introduced in version 0.7, to run `machinery` on clusters that were
+created using prior versions, you will have to point out the default
+`docker-machine` location, i.e. usually under `.docker/machine` in your home
+directory.
 
 ## YAML Specification
 
@@ -641,3 +665,19 @@ Additionally, the content of the optional key `args` will be given as
 arguments when starting the program.  Finally, if a key called
 `substitution` is present and set to a positive boolean, substitution
 will occur in the run script, as for compose files above.
+
+### `swarm`
+
+By default, all machines specified in a YAML definition file will be part of the
+same swarm cluster. You can turn this feature off by explicitely setting the key
+`swarm` to a negative boolean.
+
+### `files`
+
+specifies a list of files and directory copy specifications between the host and
+the machine. Each specification is written as the source path (on the host)
+separated from the destination path (on the machine) using the `:` character.
+Copies are issued using the underlying `scp` command of `docker-machine`. This
+is still an experimental feature, but it eases migration of project relevant
+files to relevant machines on the cluster. This can even include secrets as
+transfers occured under securred conditions.
