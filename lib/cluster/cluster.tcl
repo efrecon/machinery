@@ -1559,7 +1559,7 @@ proc ::cluster::destroy { vm } {
     set nm [dict get $vm -name]
     if { [dict exists $vm state] } {
         log NOTICE "Removing machine $nm..."
-        Machine -- -s [storage $vm] rm $nm
+        Machine -- -s [storage $vm] rm -y $nm
     } else {
         log INFO "Machine $nm does not exist, nothing to do"
     }
