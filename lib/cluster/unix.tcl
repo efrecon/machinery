@@ -393,7 +393,7 @@ proc ::cluster::unix::mount { vm dev path { uid "" } {type "vboxsf"} {sleep 1} {
 	}
 
 	# Test that we managed to mount properly.
-	foreach { dv dst t opts } [mounts $nm] {
+	foreach { dv dst t opts } [mounts $vm] {
 	    if { $dst eq $path && $type eq $t } {
 		set retries 0;    # We'll get off the loop
 		return 1
