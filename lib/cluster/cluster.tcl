@@ -3502,7 +3502,7 @@ proc ::cluster::Temporary { pfx } {
 proc ::cluster::CacheFile { yaml ext } {
     set dirname [file dirname $yaml]
     set rootname [string trimleft [file rootname [file tail $yaml]] .]
-    set path [file join $dirname \
+    set path [file join [pwd] $dirname \
                   ".$rootname.[string trimleft $ext .]"]
 
     return $path
