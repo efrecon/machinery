@@ -2606,12 +2606,15 @@ proc ::cluster::Attach { vm args } {
             }
             lappend cmd inspect $nm
             
-            set json [join [eval $cmd] \n]
-            set response [::json::parse $json]
-            set DENV(DOCKER_TLS_VERIFY) [string is true [dict get $response HostOptions EngineOptions TlsVerify]]
-            set DENV(DOCKER_CERT_PATH) [dict get $response HostOptions AuthOptions CertDir]
-            set DENV(DOCKER_MACHINE_NAME) [dict get $response Driver MachineName]
-            set DENV(DOCKER_HOST) tcp://[dict get $response Driver IPAddress]:2376
+            set res [eval $cmd]
+            if { $res ne "" } {
+                set json [join $res \n]
+                set response [::json::parse $json]
+                set DENV(DOCKER_TLS_VERIFY) [string is true [dict get $response HostOptions EngineOptions TlsVerify]]
+                set DENV(DOCKER_CERT_PATH) [dict get $response HostOptions AuthOptions CertDir]
+                set DENV(DOCKER_MACHINE_NAME) [dict get $response Driver MachineName]
+                set DENV(DOCKER_HOST) tcp://[dict get $response Driver IPAddress]:2376
+            }
         }
 
         if { [llength [array names DENV]] > 0 } {
