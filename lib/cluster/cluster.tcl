@@ -3855,10 +3855,23 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
     }
 
     if { [vcompare ge [Version machine] 0.3] } {
-        if { [string is true $recurse] } {
-            Machine -stderr -- -s [storage $vm] scp -r $s_fname ${nm}:${d_fname}            
+        set storage [storage $vm]
+        if { $::tcl_platform(platform) eq "windows" } {
+            set src [file normalize $s_fname]
+            set dirname [file dirname $src]
+            set src [string map [list $dirname .] $s_fname]
+            set olddir [pwd]
+            cd $dirname
         } else {
-            Machine -stderr -- -s [storage $vm] scp $s_fname ${nm}:${d_fname}            
+            set src $s_fname
+        }
+        if { [string is true $recurse] } {
+            Machine -stderr -- -s $storage scp -r $src ${nm}:${d_fname}            
+        } else {
+            Machine -stderr -- -s $storage scp $src ${nm}:${d_fname}            
+        }
+        if { $::tcl_platform(platform) eq "windows" } {
+            cd $olddir
         }
     } else {
 	unix defaults -ssh [SCommand $vm]
