@@ -415,11 +415,20 @@ proc ::cluster::unix::resolve { hostname } {
     }
     
     # This forces back IPv4 addresses, perhaps not a good idea?
-    foreach l [Run -return -- getent ahostsv4 $hostname] {
-	set entries [split $l]
-	if { [lindex $entries end] eq $hostname } {
-	    return [lindex $entries 0]
+    if { [catch {Run -return -- getent ahostsv4 $hostname} result] == 0 } {
+	foreach l [Run -return -- getent ahostsv4 $hostname] {
+	    set entries [split $l]
+	    if { [lindex $entries end] eq $hostname } {
+		return [lindex $entries 0]
+	    }
 	}
+    } elseif { [catch {package require dns} ver] == 0 } {
+	set token [::dns::resolve $hostname]
+	set addr [::dns::address $token]
+	::dns::cleanup $token
+	return $addr
+    } else {
+	log ERROR "Cannot resolve $hostname: tried getent and internal resolver"
     }
     return ""
 }
