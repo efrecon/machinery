@@ -120,6 +120,8 @@ namespace eval ::cluster {
 	# Finding good file candidates
 	variable lookup "*.yml";    # Which files to consider for YAML parsing
 	variable marker {^#\s*docker\-machinery}
+        # Good default machine for local storage of images (for -cache)
+        variable defaultMachine ""
         # Characters to keep in temporary filepath
         variable fpathCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.,=_"
 
@@ -165,6 +167,12 @@ proc ::cluster::defaults { {args {}}} {
         if { [info exists vars::$k] } {
             set vars::$k $v
         }
+    }
+    
+    if { "win32" in [split [::platform::generic] -] \
+            && $vars::defaultMachine eq "" } {
+        set vars::defaultMachine [DefaultMachine]
+        log NOTICE "Will use '$vars::defaultMachine' as the default machine"
     }
     
     set state {}
@@ -1482,7 +1490,12 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 	    }
 	}
     } else {
-        set origin [expr {${vars::-cache} eq "" ? "locally" : "via ${vars::-cache}"}]
+        if { ${vars::-cache} eq "" } {
+            set cache $vars::defaultMachine
+        } else {
+            set cache ${vars::-cache}
+        }
+        set origin [expr {$cache eq "" ? "locally" : "via $cache"}]
 	log NOTICE "Pulling images $origin and transfering to $nm:\
                     [join $images {, }]..."
 	if { [llength $images] > 0 } {
@@ -1494,10 +1507,10 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
 	    # and then load it there.
 	    foreach img $images {
 		# Detach so we can pull locally!
-                if { ${vars::-cache} eq "" } {
+                if { $cache eq "" } {
                     Detach    
                 } else {
-                    Attach ${vars::-cache} -external
+                    Attach $cache -external
                 }
 		# Pull image locally
 		Docker -stderr -- pull $img
@@ -1511,10 +1524,10 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
                     log INFO "Image $img already present on $nm at version $local_id"
                 } else {
                     # Detach again, we are going to get it locally first!
-                    if { ${vars::-cache} eq "" } {
+                    if { $cache eq "" } {
                         Detach    
                     } else {
-                        Attach ${vars::-cache} -external
+                        Attach $cache -external
                     }
                     
                     # Save it to the local disk
@@ -4020,6 +4033,83 @@ proc ::cluster::TempDir {} {
     }
     
     return [cwd]
+}
+
+proc ::cluster::DefaultMachine {} {
+    set possible ""; # Will hold the name of a possible machine to use as default
+    
+    # Get docker system-wide information
+    set d_info [Docker -return -raw -- info]
+    if { [string match -nocase "*error occurred trying to connect*" $d_info] } {
+        # If we get an error, and since we know that we are on windows, we are
+        # probably running on top of the Docker Toolbox. Then the default
+        # machine is a good guess...
+        set possible "default"
+    } else {
+        # We did not get an error, then either we are running with the new
+        # Docker for Windows beta or we were attached to something (something
+        # else?)
+        set info [dict create]; # Dictionary to hold info parsing results
+
+        # Parse what was returned by docker info. As it is a tree, using
+        # indentation, we represent the different levels by dot-separated keys.
+        # (the format is not compatible with what Tcl considers as a dictionary)
+        set lvl [list]        
+        foreach l $d_info {
+            set clean [string trimleft $l]
+            # Key and value are composed of what is directly before and
+            # after the first : sign. This is important since the value can
+            # contain : signs.
+            set colon [string first ":" $clean]
+            if { $colon >= 0 } {
+                set k [string trim [string range $clean 0 [expr {$colon-1}]]]
+                set v [string trim [string range $clean [expr {$colon+1}] end]]
+
+                # Count the number of spaces and compare to the current level
+                # (this suppose one space for indentation)
+                set lead [expr {[string length $l]-[string length $clean]}]
+                if { $lead+1 > [llength $lvl] } {
+                    lappend lvl $k
+                } elseif { $lead+1 < [llength $lvl] } {
+                    set lvl [lrange $lvl 0 end-1]
+                } else {
+                    set lvl [lreplace $lvl end end $k]
+                }
+                dict set info [join $lvl .] $v
+            }
+        }
+
+        # If the machine against which we are running is a boot2docker machine,
+        # good chance is that we are running against the docker toolbox (and had
+        # attached to the default machine).
+        if { [dict exists $info "Operating System"] \
+                && [string match -nocase "*Boot2Docker*" [dict get $info "Operating System"]] } {
+            # Pick up the machine that we had attached to, or "default" if we
+            # can't find one.
+            if { [dict exists $info "Name"] } {
+                set possible [dict get $info "Name"]
+            } else {
+                set possible "default"
+            }
+        }
+    }
+    
+    # When here, the variable possible points at the name of a machine running
+    # locally on virtual box, thus as part of the docker toolbox. Check that
+    # this really is one of the default known machines and pick it up as the
+    # default machine for caching if it was.
+    if { $possible ne "" } {
+        set state [Machine -return -- ls]
+        foreach nfo [ListParser $state] {
+            # Add only machines which name matches the incoming pattern.
+            if { [dict exists $nfo name] \
+                     && [dict get $nfo name] eq "default" } {
+                return "default"
+            }
+        }
+    }
+    
+    return ""
 }
 
 package provide cluster 0.4
