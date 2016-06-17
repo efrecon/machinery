@@ -4039,7 +4039,7 @@ proc ::cluster::DefaultMachine {} {
     set possible ""; # Will hold the name of a possible machine to use as default
     
     # Get docker system-wide information
-    set d_info [Docker -return -raw -- info]
+    set d_info [Docker -return -raw -stderr -- info]
     if { [string match -nocase "*error occurred trying to connect*" $d_info] } {
         # If we get an error, and since we know that we are on windows, we are
         # probably running on top of the Docker Toolbox. Then the default
