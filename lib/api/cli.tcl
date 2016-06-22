@@ -705,7 +705,7 @@ proc ::api::cli::command { cmd args } {
 		      -steps "List of comma separated steps to perform, the steps are named after the YAML description, i.e. registries, compose, images, addendum, etc." }
 	    }
 	    set cluster [init]
-	    cluster getopt args -steps steps "registries,images,compose,addendum"
+	    cluster getopt args -steps steps "registries,files,images,compose,addendum"
 	    if { [string first "," $steps] } {
 		set steps [split $steps ","]
 	    }
