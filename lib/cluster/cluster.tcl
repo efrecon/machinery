@@ -40,7 +40,7 @@ namespace eval ::cluster {
         # Allowed VM keys
         variable -keys      {cpu size memory master labels driver options \
                                  ports shares images compose registries aliases \
-				 addendum files swarm}
+				 addendum files swarm prelude}
         # Path to common executables
         variable -machine   docker-machine
         variable -docker    docker
@@ -529,7 +529,7 @@ proc ::cluster::storage { vm } {
 }
 
 
-proc ::cluster::init { vm {steps {shares registries files images compose addendum}} } {
+proc ::cluster::init { vm {steps {shares registries files images prelude compose addendum}} } {
     # Poor man's discovery: write down a description of all the
     # network interfaces existing on the virtual machines,
     # including the most important one (e.g. the one returned by
@@ -553,6 +553,10 @@ proc ::cluster::init { vm {steps {shares registries files images compose addendu
         
         if { [lsearch -nocase $steps files] >= 0 } {
             mcopy $vm
+        }
+        
+        if { [lsearch -nocase $steps prelude] >= 0 } {
+            prelude $vm
         }
 
 	# And iteratively run compose.  Compose will get the complete
@@ -816,6 +820,25 @@ proc ::cluster::mcopy { vm { fspecs {}} } {
 }
 
 
+proc ::cluster::prelude { vm { execs {} }} {
+    # Get scripts/programs to execute from parameters of from VM object
+    if { [string length $execs] == 0 } {
+	if { ![dict exists $vm -prelude] } {
+	    return {}
+	}
+	set execs [dict get $vm -prelude]
+    }
+
+    # Pass the environment variables in case they were needed
+    EnvSet $vm
+
+    set nm [dict get $vm -name]
+    foreach exe $execs {
+        Exec $vm {*}$exe
+    }
+}
+
+
 proc ::cluster::addendum { vm { execs {} } } {
     # Get scripts/programs to execute from parameters of from VM object
     if { [string length $execs] == 0 } {
@@ -830,51 +853,7 @@ proc ::cluster::addendum { vm { execs {} } } {
 
     set nm [dict get $vm -name]
     foreach exe $execs {
-	if { [dict exists $exe exec] } {
-	    # Resolve using initial location of YAML description file
-	    set fpath [AbsolutePath $vm [dict get $exe exec]]
-	    if { [file exists $fpath] } {
-		set substitution 0
-		if { [dict exists $exe substitution] } {
-		    set substitution \
-			[string is true [dict get $exe substitution]]
-		}
-
-		if { [dict exists $exe args] } {
-		    set args [dict get $exe args]
-		}
-
-		if { $substitution } {
-		    # Read and substitute content of file
-		    set fd [open $fpath]
-		    set dta [Resolve [read $fd]]
-		    close $fd
-
-		    # Dump to temporary location
-		    set rootname [file rootname [file tail $fpath]]
-		    set ext [file extension $fpath]
-		    set tmp_fpath [Temporary [file join [TempDir] $rootname]]$ext
-		    set fd [open $tmp_fpath w]
-		    puts -nonewline $fd $dta
-		    close $fd
-
-		    set cmd $tmp_fpath
-		} else {
-		    set tmp_fpath ""
-		    set cmd $fpath
-		}
-
-		log NOTICE "Executing $fpath (args: $args)"
-		Run -keepblanks -stderr -raw -- $cmd {*}$args
-
-		# Remove temporary (subsituted) file, if any.
-		if { $tmp_fpath ne "" } {
-		    file delete -force -- $tmp_fpath
-		}
-	    } else {
-		log WARN "Cannot find external app to execute at: $fpath"
-	    }
-	}
+        Exec $vm {*}$exe
     }
 }
 
@@ -3097,6 +3076,90 @@ proc ::cluster::IsRunning { vm } {
         }
     }
     return 0
+}
+
+
+proc ::cluster::Exec { vm args } {
+    set nm [dict get $vm -name]
+    
+    # Convert dash-led arg-style into YAML internal, just in case...
+    foreach {k v} $args {
+        dict set exe [string trimleft $k -] $v
+    }
+    
+    if { [dict exists $exe exec] } {
+        set substitution 0
+        if { [dict exists $exe substitution] } {
+            set substitution \
+                [string is true [dict get $exe substitution]]
+        }
+
+        # NOTE: This replaces the args that had come in as an argument to the
+        # procedure!!
+        if { [dict exists $exe args] } {
+            set args [dict get $exe args]
+        }
+
+        set remotely 0
+        if { [dict exists $exe remote] } {
+            set remotely [string is true [dict get $exe remote]]
+        }
+
+        set copy 1
+        if { [dict exists $exe copy] } {
+            set copy [string is true [dict get $exe copy]]
+        }
+
+        # Resolve using initial location of YAML description file
+        set cmd ""
+        set tmp_fpath ""
+        if { $copy } {
+            set fpath [AbsolutePath $vm [dict get $exe exec]]
+            if { [file exists $fpath] } {
+                if { $substitution } {
+                    # Read and substitute content of file
+                    set fd [open $fpath]
+                    set dta [Resolve [read $fd]]
+                    close $fd
+        
+                    # Dump to temporary location
+                    set rootname [file rootname [file tail $fpath]]
+                    set ext [file extension $fpath]
+                    set tmp_fpath [Temporary [file join [TempDir] $rootname]]$ext
+                    set fd [open $tmp_fpath w]
+                    puts -nonewline $fd $dta
+                    close $fd
+        
+                    set cmd $tmp_fpath
+                } else {
+                    set cmd $fpath
+                }
+            } else {
+                log WARN "Cannot find external app to execute at: $fpath"
+            }
+        } else {
+            set cmd [dict get $exe exec]
+        }
+        
+        if { $cmd ne "" } {
+            if { $remotely } {
+                set dst [Temporary [file join /tmp [file tail $fpath]]]
+                SCopy $vm $cmd $dst 0
+                log NOTICE "Executing $fpath remotely (args: $args)"
+                ssh $vm chmod a+x $dst
+                ssh $vm $dst {*}$args
+                ssh $vm /bin/rm -f $dst
+            } else {
+                log NOTICE "Executing $fpath locally (args: $args)"
+                Run -keepblanks -stderr -raw -- $cmd {*}$args                
+            }
+
+            # Remove temporary (subsituted) file, if any.
+            if { $tmp_fpath ne "" } {
+                file delete -force -- $tmp_fpath
+            }
+        }
+    }
 }
 
 
