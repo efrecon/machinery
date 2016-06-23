@@ -1365,13 +1365,7 @@ proc ::cluster::ssh { vm args } {
     set nm [dict get $vm -name]
     log NOTICE "Entering machine $nm..."
     if { [llength $args] > 0 } {
-        set res [eval [linsert $args 0 Machine -return -keepblanks -- -s [storage $vm] ssh $nm]]
-        foreach l [lrange $res 0 end-1] {
-            puts stdout $l
-        }
-        if { [string trim [lindex $res end]] ne "" } {
-            puts stdout [lindex $res end]
-        }
+        set res [eval [linsert $args 0 Machine -raw -- -s [storage $vm] ssh $nm]]
     } else {
 	foreach fd {stdout stderr stdin} {
 	    fconfigure $fd -buffering none -translation binary
@@ -2174,53 +2168,6 @@ proc ::cluster::POpen4 { args } {
 }
 
 
-proc ::cluster::RunChan { args } {
-    # Isolate -- that will separate options to procedure from options
-    # that would be for command.  Using -- is MANDATORY if you want to
-    # specify options to the procedure.
-    set sep [lsearch $args "--"]
-    if { $sep >= 0 } {
-        set opts [lrange $args 0 [expr {$sep-1}]]
-        set args [lrange $args [expr {$sep+1}] end]
-    } else {
-        set opts [list]
-    }
-
-    # Create an array global to the namespace that we'll use for
-    # synchronisation and context storage.
-    set c [namespace current]::command[incr ${vars::generator}]
-    upvar \#0 $c CMD
-    set CMD(id) $c
-    set CMD(command) $args
-    log DEBUG "Executing $CMD(command) and capturing its output"
-
-    # Extract some options and start building the
-    # pipe.  As we want to capture output of the command, we will be
-    # using the Tcl command "open" with a file path that starts with a
-    # "|" sign.
-    set CMD(keep) [getopt opts -keepblanks]
-    set CMD(back) [getopt opts -return]
-    set CMD(outerr) [getopt opts -stderr]
-    set CMD(relay) [getopt opts -raw]
-    set CMD(done) 0
-    set CMD(result) {}
-
-    # Kick-off the command and wait for its end
-    lassign [POpen4 {*}$args] CMD(pid) CMD(stdin) CMD(stdout) CMD(stderr)
-    fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
-    fileevent $CMD(stderr) readable [namespace code [list LineRead $c stderr]]
-    vwait ${c}(done);   # Wait for command to end
-
-    catch {close $CMD(stdin)}
-    catch {close $CMD(stdout)}
-    catch {close $CMD(stderr)}
-
-    set res $CMD(result)
-    unset $c
-    return $res
-}
-
-
 # ::cluster::LineRead -- Read line output from started commands
 #
 #       This reads the output from commands that we have started, line
@@ -2292,13 +2239,12 @@ proc ::cluster::LineRead { c fd } {
     # we are done.
     if { [eof $CMD($fd)] } {
 	fileevent $CMD($fd) readable {}
-	if { [fileevent $CMD(stdout) readable] eq "" \
-		 && [fileevent $CMD(stderr) readable] eq "" } {
+	if { ($CMD(stdout) eq "" || [fileevent $CMD(stdout) readable] eq "" ) \
+		 && ($CMD(stderr) eq "" || [fileevent $CMD(stderr) readable] eq "" ) } {
 	    set CMD(done) 1
 	}
     }
 }
-
 
 
 # ::cluster::Run -- Run command
@@ -2325,9 +2271,7 @@ proc ::cluster::LineRead { c fd } {
 #
 # Side Effects:
 #       Run local command and (possibly) show its output.
-proc ::cluster::RunPipe { args } {
-    set ret {}
-
+proc ::cluster::Run { args } {
     # Isolate -- that will separate options to procedure from options
     # that would be for command.  Using -- is MANDATORY if you want to
     # specify options to the procedure.
@@ -2339,65 +2283,51 @@ proc ::cluster::RunPipe { args } {
         set opts [list]
     }
 
-    # Extract some options and start building the pipe.  As we want to
-    # capture output of the command, we will be using the Tcl command
-    # "open" with a file path that starts with a "|" sign.
-    set keep [getopt opts -keepblanks]
-    set back [getopt opts -return]
-    set pipe |[concat $args]
-    if { [getopt opts -stderr] } {
-        append pipe " 2>@1"
-    }
+    # Create an array global to the namespace that we'll use for
+    # synchronisation and context storage.
+    set c [namespace current]::command[incr ${vars::generator}]
+    upvar \#0 $c CMD
+    set CMD(id) $c
+    set CMD(command) $args
+    log DEBUG "Executing $CMD(command) and capturing its output"
 
-    log DEBUG "Running $pipe"
-    set fd [open $pipe]
-    while {![eof $fd]} {
-        set line [gets $fd]
-        set outlvl INFO
-        # Parse and analyse output of docker-machine. Do some
-        # translation of the loglevels between logrus and our internal
-        # levels.
-        if { [lindex $args 0] eq ${vars::-machine} } {
-            foreach {k v} [string map {"=" " "} $line] {
-                if { $k eq "msg" } {
-                    set line $v
-                    break
-                }
-                # Translate between loglevels from logrus to internal
-                # levels.
-                if { $k eq "level" } {
-                    foreach { gl lvl } [list info INFO \
-                                            warn NOTICE \
-                                            error WARN \
-                                            fatal ERROR \
-                                            panic FATAL] {
-                        if { [string equal -nocase $v $gl] } {
-                            set outlvl $lvl
-                        }
-                    }
-                }
-            }
-        }
-        # Respect -keepblanks and output or accumulate in result
-        if { ( !$keep && [string trim $line] ne "") || $keep } {
-            if { $back } {
-                log DEBUG "Appending $line to result"
-                lappend ret $line
-            } else {
-                log $outlvl "  $line"
-            }
-        }
-    }
-    catch {close $fd}
-    return $ret
-}
+    # Extract some options and start building the
+    # pipe.  As we want to capture output of the command, we will be
+    # using the Tcl command "open" with a file path that starts with a
+    # "|" sign.
+    set CMD(keep) [getopt opts -keepblanks]
+    set CMD(back) [getopt opts -return]
+    set CMD(outerr) [getopt opts -stderr]
+    set CMD(relay) [getopt opts -raw]
+    set CMD(done) 0
+    set CMD(result) {}
 
-proc ::cluster::Run {args} {
+    # Kick-off the command and wait for its end
+    # Kick-off the command and wait for its end
     if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
-        return [RunPipe {*}$args]
+        set pipe |[concat $args]
+        if { $CMD(outerr) } {
+            append pipe " 2>@1"
+        }
+        set CMD(stdin) ""
+        set CMD(stderr) ""
+        set CMD(stdout) [open $pipe]
+        set CMD(pid) [pid $CMD(stdout)]
+        fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
     } else {
-        return [RunChan {*}$args]
+        lassign [POpen4 {*}$args] CMD(pid) CMD(stdin) CMD(stdout) CMD(stderr)
+        fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
+        fileevent $CMD(stderr) readable [namespace code [list LineRead $c stderr]]
     }
+    vwait ${c}(done);   # Wait for command to end
+
+    catch {close $CMD(stdin)}
+    catch {close $CMD(stdout)}
+    catch {close $CMD(stderr)}
+
+    set res $CMD(result)
+    unset $c
+    return $res
 }
 
 
