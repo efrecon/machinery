@@ -3040,6 +3040,11 @@ proc ::cluster::Exec { vm args } {
             set copy [string is true [dict get $exe copy]]
         }
 
+        set keep 0
+        if { [dict exists $exe keep] } {
+            set keep [string is true [dict get $exe keep]]
+        }
+
         # Resolve using initial location of YAML description file
         set cmd ""
         set tmp_fpath ""
@@ -3078,14 +3083,16 @@ proc ::cluster::Exec { vm args } {
                 log NOTICE "Executing $fpath remotely (args: $args)"
                 ssh $vm chmod a+x $dst
                 ssh $vm $dst {*}$args
-                ssh $vm /bin/rm -f $dst
+                if { !$keep } {
+                    ssh $vm /bin/rm -f $dst
+                }
             } else {
                 log NOTICE "Executing $fpath locally (args: $args)"
                 Run -keepblanks -stderr -raw -- $cmd {*}$args                
             }
 
             # Remove temporary (subsituted) file, if any.
-            if { $tmp_fpath ne "" } {
+            if { $tmp_fpath ne "" && !$keep } {
                 file delete -force -- $tmp_fpath
             }
         }
