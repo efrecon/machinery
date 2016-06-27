@@ -124,7 +124,8 @@ namespace eval ::cluster {
         variable defaultMachine ""
         # Characters to keep in temporary filepath
         variable fpathCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.,=_"
-
+        # Local volume mounts on windows
+        variable volMounts {}
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -1871,7 +1872,7 @@ proc ::cluster::StorageDir { yaml } {
         file mkdir $dir;   # Let it fail since we can't continue otherwise
     }        
     
-    return $dir
+    return [file normalize $dir]
 }
 
 
@@ -2149,7 +2150,6 @@ proc ::cluster::POpen4 { args } {
     } 
 
     if { [catch {exec {*}$args <@$readIn >@$writeOut 2>@$writeErr &} pid] } {
-        puts "OISDFJOIJF"
         foreach chan {In Out Err} {
             chan close write$chan
             chan close read$chan
@@ -3869,12 +3869,32 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
 
     if { [vcompare ge [Version machine] 0.3] } {
         set storage [storage $vm]
+        # On windows we need to trick the underlying scp of docker-machine,
+        # which really is a relay to the scp command. We force in localhost:
+        # at the beginning of the source path and find out the local mount
+        # point for absolute source paths.
         if { $::tcl_platform(platform) eq "windows" } {
-            set src [file normalize $s_fname]
-            set dirname [file dirname $src]
-            set src [string map [list $dirname .] $s_fname]
-            set olddir [pwd]
-            cd $dirname
+            # Find windows volume and put it in the volume variable
+            set volume ""
+            foreach vol [file volumes] {
+                if { [string first $vol [string toupper $s_fname]] == 0 } {
+                    set volume $vol
+                    break
+                }
+            }
+            
+            # If we had a volume, the source path is absolute. Replace this by the local mount (this will both recognise cygwin- and mingw- based environments)
+            if { $volume ne "" } {
+                set volume [string trimright $volume /]
+                set lmount [VolumeLocation $volume]
+                if { $lmount ne "" } {
+                    set src "localhost:"
+                    append src $lmount
+                    append src [string range $s_fname 2 end]
+                }
+            } else {
+                set src $s_fname
+            }
         } else {
             set src $s_fname
         }
@@ -3882,9 +3902,6 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
             Machine -stderr -- -s $storage scp -r $src ${nm}:${d_fname}            
         } else {
             Machine -stderr -- -s $storage scp $src ${nm}:${d_fname}            
-        }
-        if { $::tcl_platform(platform) eq "windows" } {
-            cd $olddir
         }
     } else {
 	unix defaults -ssh [SCommand $vm]
@@ -3944,6 +3961,7 @@ proc ::cluster::SCommand { vm } {
     return $ssh
 }
 
+
 proc ::cluster::InstallRSync { vm } {
     set nm [dict get $vm -name]
     
@@ -3970,6 +3988,7 @@ proc ::cluster::InstallRSync { vm } {
     }
 }
 
+
 proc ::cluster::OSInfo { vm } {
     set nfo {}
     set nm [dict get $vm -name]
@@ -3980,6 +3999,7 @@ proc ::cluster::OSInfo { vm } {
     return $nfo
 }
 
+
 proc ::cluster::OSIdentifier { vm } {
     set nfo [OSInfo $vm]
     if { [dict exists $nfo ID] } {
@@ -3988,6 +4008,7 @@ proc ::cluster::OSIdentifier { vm } {
 	return ""
     }
 }
+
 
 proc ::cluster::AbsolutePath { vm fpath { native 0 } } {
     if { [dict exists $vm origin] } {
@@ -4034,6 +4055,33 @@ proc ::cluster::TempDir {} {
     
     return [cwd]
 }
+
+
+proc ::cluster::VolumeLocation { vol } {
+    set vol [string toupper [string trimright $vol /]]
+    if { [dict exists $vars::volMounts $vol] } {
+        return [dict get $vars::volMounts $vol]
+    } else {
+        foreach l [Run -return -- mount] {
+            set on [string first " on " $l]
+            if { $on >= 0 } {
+                set type [string first " type " $l $on]
+                if { $type >= 0 } {
+                    set v [string trim [string range $l 0 [expr {$on-1}]]]
+                    if { [string equal -nocase $vol $v] } {
+                        set l [string trim [string range $l [expr {$on+3}] [expr {$type-1}]]]
+                        log INFO "Discovered local mount for $vol at $l"
+                        dict set $vars::volMounts $vol $l
+                        return $l
+                    }
+                }
+            }
+        }
+    }
+    
+    return "";  # Not found!
+}
+
 
 proc ::cluster::DefaultMachine {} {
     set possible ""; # Will hold the name of a possible machine to use as default
