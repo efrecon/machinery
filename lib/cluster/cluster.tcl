@@ -3024,10 +3024,9 @@ proc ::cluster::Exec { vm args } {
                 [string is true [dict get $exe substitution]]
         }
 
-        # NOTE: This replaces the args that had come in as an argument to the
-        # procedure!!
+        set cargs [list]
         if { [dict exists $exe args] } {
-            set args [dict get $exe args]
+            set cargs [dict get $exe args]
         }
 
         set remotely 0
@@ -3080,15 +3079,15 @@ proc ::cluster::Exec { vm args } {
             if { $remotely } {
                 set dst [Temporary [file join /tmp [file tail $fpath]]]
                 SCopy $vm $cmd $dst 0
-                log NOTICE "Executing $fpath remotely (args: $args)"
+                log NOTICE "Executing $fpath remotely (args: $cargs)"
                 ssh $vm chmod a+x $dst
-                ssh $vm $dst {*}$args
+                ssh $vm $dst {*}$cargs
                 if { !$keep } {
                     ssh $vm /bin/rm -f $dst
                 }
             } else {
-                log NOTICE "Executing $fpath locally (args: $args)"
-                Run -keepblanks -stderr -raw -- $cmd {*}$args                
+                log NOTICE "Executing $fpath locally (args: $cargs)"
+                Run -keepblanks -stderr -raw -- $cmd {*}$cargs                
             }
 
             # Remove temporary (subsituted) file, if any.
