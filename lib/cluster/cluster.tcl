@@ -3883,7 +3883,9 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
                 }
             }
             
-            # If we had a volume, the source path is absolute. Replace this by the local mount (this will both recognise cygwin- and mingw- based environments)
+            # If we had a volume, the source path is absolute. Replace this by
+            # the local mount (this will both recognise cygwin- and mingw- based
+            # environments)
             if { $volume ne "" } {
                 set volume [string trimright $volume /]
                 set lmount [VolumeLocation $volume]
@@ -4071,7 +4073,7 @@ proc ::cluster::VolumeLocation { vol } {
                     if { [string equal -nocase $vol $v] } {
                         set l [string trim [string range $l [expr {$on+3}] [expr {$type-1}]]]
                         log INFO "Discovered local mount for $vol at $l"
-                        dict set $vars::volMounts $vol $l
+                        dict set vars::volMounts $vol $l
                         return $l
                     }
                 }
