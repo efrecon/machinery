@@ -1366,7 +1366,7 @@ proc ::cluster::ssh { vm args } {
     set nm [dict get $vm -name]
     log NOTICE "Entering machine $nm..."
     if { [llength $args] > 0 } {
-        set res [eval [linsert $args 0 Machine -raw -- -s [storage $vm] ssh $nm]]
+        set res [eval [linsert $args 0 Machine -raw -stderr -- -s [storage $vm] ssh $nm]]
     } else {
 	foreach fd {stdout stderr stdin} {
 	    fconfigure $fd -buffering none -translation binary
