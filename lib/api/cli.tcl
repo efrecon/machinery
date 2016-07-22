@@ -32,6 +32,7 @@ namespace eval ::api::cli {
 	    -ssh       ""               "SSH command to use into host, dynamic replacement of %-surrounded keys will happen, e.g. ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectionAttempts=30 -o LogLevel=quiet -p %port% -i %identity% %user%@%host%.  Empty to guess."
 	    -config    ""               "Path to config file, command-line arguments will override configure content"
 	    -storage   ""               "Location of machine storage cache, empty for co-located with YAML description"
+	    -dns       ""               "IP of nameserver to use for name resolution"
 	}
         # This is the list of recognised commands that will be print
         # when help is requested.
@@ -248,6 +249,11 @@ proc ::api::cli::globals { appname argv_ } {
     # module.
     foreach k [list -machine -docker -compose -verbose -cache -ssh -storage] {
 	cluster defaults $k [set vars::$k]
+    }
+    
+    if { ${vars::-dns} ne "" } {
+	package require dns
+	::dns::configure -nameserver ${vars::-dns}
     }
 }
 
