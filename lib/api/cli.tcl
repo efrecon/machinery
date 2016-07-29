@@ -20,19 +20,20 @@ namespace eval ::api::cli {
 	# variables will have the same name as the options, including
 	# the leading dash.
 	variable gopts {
-	    -help      ""               "Print this help and exit"
-	    -verbose   5                "Verbosity level \[0-6\]"
-	    -machine   "docker-machine" "Path to docker-machine"
-	    -docker    "docker"         "Path to docker"
-	    -compose   "docker-compose" "Path to docker-compose"
-	    -token     ""               "Override token for cluster"
-	    -cluster   ""               "YAML description, empty for cluster.yml"
-	    -driver    "virtualbox"     "Default driver for VM creation"
-	    -cache     ""               "Name of machine to locally cached docker images, - to turn off, empty for local machine"
-	    -ssh       ""               "SSH command to use into host, dynamic replacement of %-surrounded keys will happen, e.g. ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectionAttempts=30 -o LogLevel=quiet -p %port% -i %identity% %user%@%host%.  Empty to guess."
-	    -config    ""               "Path to config file, command-line arguments will override configure content"
-	    -storage   ""               "Location of machine storage cache, empty for co-located with YAML description"
-	    -dns       ""               "IP of nameserver to use for name resolution"
+	    -help      ""                 "Print this help and exit"
+	    -verbose   5                  "Verbosity level \[0-6\]"
+	    -machine   "docker-machine"   "Path to docker-machine"
+	    -docker    "docker"           "Path to docker"
+	    -compose   "docker-compose"   "Path to docker-compose"
+	    -token     ""                 "Override token for cluster"
+	    -cluster   ""                 "YAML description, empty for cluster.yml"
+	    -driver    "virtualbox"       "Default driver for VM creation"
+	    -caching   "*/*/* on * off"   "Image caching hints"
+	    -cache     ""                 "Name of machine to locally cached docker images, - to turn off, empty for local machine"
+	    -ssh       ""                 "SSH command to use into host, dynamic replacement of %-surrounded keys will happen, e.g. ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectionAttempts=30 -o LogLevel=quiet -p %port% -i %identity% %user%@%host%.  Empty to guess."
+	    -config    ""                 "Path to config file, command-line arguments will override configure content"
+	    -storage   ""                 "Location of machine storage cache, empty for co-located with YAML description"
+	    -dns       ""                 "IP of nameserver to use for name resolution"
 	}
         # This is the list of recognised commands that will be print
         # when help is requested.
@@ -247,7 +248,7 @@ proc ::api::cli::globals { appname argv_ } {
 
     # Pass arguments from the command-line as the defaults for the cluster
     # module.
-    foreach k [list -machine -docker -compose -verbose -cache -ssh -storage] {
+    foreach k [list -machine -docker -compose -verbose -cache -caching -ssh -storage] {
 	cluster defaults $k [set vars::$k]
     }
     

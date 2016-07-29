@@ -50,6 +50,9 @@ namespace eval ::cluster {
         variable -verbose   NOTICE
 	# Locally cache images?
 	variable -cache     on
+        # Caching rules. First match (glob-style) will prevail. These are only
+        # hints for how -cache will perform.
+        variable -caching   "*/*/* on * off"
         # Path to storage directory for docker machine cache, empty string will
         # default to a directory co-located with the cluster YAML file.
         variable -storage   ""
@@ -549,7 +552,7 @@ proc ::cluster::init { vm {steps {shares registries files images prelude compose
 	    login $vm
 	}
 	if { [lsearch -nocase $steps images] >= 0 } {
-	    pull $vm 1
+	    pull $vm
 	}
         
         if { [lsearch -nocase $steps files] >= 0 } {
@@ -1444,7 +1447,7 @@ proc ::cluster::login { vm {regs {}} } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::pull { vm {cache 0} {images {}} } {
+proc ::cluster::pull { vm {images {}} } {
     # Get images, either from parameters (overriding the VM object) or
     # from vm object.
     if { [string length $images] == 0 } {
@@ -1455,75 +1458,87 @@ proc ::cluster::pull { vm {cache 0} {images {}} } {
     }
 
     set nm [dict get $vm -name]
-    if { ${vars::-cache} eq "-" } {
-	log NOTICE "Pulling images in $nm: $images..."
-	if { [llength $images] > 0 } {
-	    foreach img $images {
-		log INFO "Pulling $img in $nm..."
-		Machine -- -s [storage $vm] ssh $nm "docker pull $img"
-	    }
-	}
-    } else {
-        if { ${vars::-cache} eq "" } {
-            set cache $vars::defaultMachine
-        } else {
-            set cache ${vars::-cache}
+    log NOTICE "Pulling images for $nm: $images..."
+    foreach img $images {
+        # Start by computing caching hint.
+        set caching on
+        foreach {ptn hint} ${vars::-caching} {
+            if { [string match $ptn $img] } {
+                set caching $hint
+                break
+            }
         }
-        set origin [expr {$cache eq "" ? "locally" : "via $cache"}]
-	log NOTICE "Pulling images $origin and transfering to $nm:\
-                    [join $images {, }]..."
-	if { [llength $images] > 0 } {
+     
+        # Check if we have explicitely turned off all caching   
+        if { ${vars::-cache} eq "-" } {
+            set caching off
+        }
+        
+        if { $caching } {
 	    # When using the cache, we download the image on the
 	    # localhost (meaning that we should be able to login to
 	    # remote repositories outside of machinery and use this
 	    # credentials here!), create a snapshot of the image using
 	    # docker save, transfer it to the virtual machine with scp
 	    # and then load it there.
-	    foreach img $images {
-		# Detach so we can pull locally!
+
+            # Decide where to cache (this is for being able to support
+            # virtualbox settings)
+            if { ${vars::-cache} eq "" } {
+                set cache $vars::defaultMachine
+            } else {
+                set cache ${vars::-cache}
+            }
+            set origin [expr {$cache eq "" ? "locally" : "via $cache"}]
+            log INFO "Pulling $img $origin and transfering to $nm"
+
+            # Detach so we can pull locally!
+            if { $cache eq "" } {
+                Detach    
+            } else {
+                Attach $cache -external
+            }
+            # Pull image locally
+            Docker -stderr -- pull $img
+            # Get unique identifier for image locally and remotely
+            set local_id [Docker -return -- images -q --no-trunc $img]
+            log TRACE "Identifier for local image is $local_id"
+            Attach $vm
+            set remote_id [Docker -return -- images -q --no-trunc $img]
+            log TRACE "Identifier for remote image is $remote_id"
+            if { $local_id eq $remote_id } {
+                log INFO "Image $img already present on $nm at version $local_id"
+            } else {
+                # Detach again, we are going to get it locally first!
                 if { $cache eq "" } {
                     Detach    
                 } else {
                     Attach $cache -external
                 }
-		# Pull image locally
-		Docker -stderr -- pull $img
-                # Get unique identifier for image locally and remotely
-                set local_id [Docker -return -- images -q --no-trunc $img]
-                log TRACE "Identifier for local image is $local_id"
+                
+                # Save it to the local disk
+                set rootname [file rootname [file tail $img]]; # Cheat!...
+                set tmp_fpath [Temporary \
+                                   [file join [TempDir] $rootname]].tar
+                log INFO "Using a local snapshot at $tmp_fpath to copy $img\
+                          to $nm..."
+                Docker -stderr -- save -o $tmp_fpath $img
+                log DEBUG "Created local snapshot of $img at $tmp_fpath"
+                
+                # Give the tar to docker on the remote machine
+                log DEBUG "Loading $tmp_fpath into $img at $nm..."
                 Attach $vm
-                set remote_id [Docker -return -- images -q --no-trunc $img]
-                log TRACE "Identifier for remote image is $remote_id"
-                if { $local_id eq $remote_id } {
-                    log INFO "Image $img already present on $nm at version $local_id"
-                } else {
-                    # Detach again, we are going to get it locally first!
-                    if { $cache eq "" } {
-                        Detach    
-                    } else {
-                        Attach $cache -external
-                    }
-                    
-                    # Save it to the local disk
-                    set rootname [file rootname [file tail $img]]; # Cheat!...
-                    set tmp_fpath [Temporary \
-                                       [file join [TempDir] $rootname]].tar
-                    log INFO "Using a local snapshot at $tmp_fpath to copy $img\
-                              to $nm..."
-                    Docker -stderr -- save -o $tmp_fpath $img
-                    log DEBUG "Created local snapshot of $img at $tmp_fpath"
-                    
-                    # Give the tar to docker on the remote machine
-                    log DEBUG "Loading $tmp_fpath into $img at $nm..."
-                    Attach $vm
-                    Docker load -i $tmp_fpath
-                    
-                    # Cleanup
-                    log DEBUG "Cleaning up $tmp_fpath"
-                    file delete -force -- $tmp_fpath
-                }
-	    }
-	}
+                Docker load -i $tmp_fpath
+                
+                # Cleanup
+                log DEBUG "Cleaning up $tmp_fpath"
+                file delete -force -- $tmp_fpath
+            }
+        } else {
+            log INFO "Pulling $img directly in $nm"
+            Machine -- -s [storage $vm] ssh $nm "docker pull $img"
+            # Should we Attach - Docker pull $img - Detach instead?
+        }
     }
 }
 
