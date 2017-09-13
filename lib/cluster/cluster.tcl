@@ -23,6 +23,7 @@ package require yaml;     # This is found in tcllib
 package require cluster::virtualbox
 package require cluster::vcompare
 package require cluster::unix
+package require cluster::swarmmode
 
 # Hard sourcing of the local json package to avoid using the one from
 # tcllib.
@@ -39,8 +40,8 @@ namespace eval ::cluster {
         variable -separator "-"
         # Allowed VM keys
         variable -keys      {cpu size memory master labels driver options \
-                                 ports shares images compose registries aliases \
-				 addendum files swarm prelude}
+                             ports shares images compose registries aliases \
+                             addendum files swarm prelude}
         # Path to common executables
         variable -machine   docker-machine
         variable -docker    docker
@@ -48,8 +49,8 @@ namespace eval ::cluster {
         variable -rsync     rsync
         # Current verbosity level
         variable -verbose   NOTICE
-	# Locally cache images?
-	variable -cache     on
+        # Locally cache images?
+        variable -cache     on
         # Caching rules. First match (glob-style) will prevail. These are only
         # hints for how -cache will perform.
         variable -caching   "*/*/* on * off"
@@ -58,10 +59,10 @@ namespace eval ::cluster {
         variable -storage   ""
         # Location of boot2docker profile
         variable -profile   /var/lib/boot2docker/profile
-	# Location of boot2docker bootlocal
-	variable -bootlocal /var/lib/boot2docker/bootlocal.sh
-	# Marker in bootlocal
-	variable -marker    "#### A U T O M A T E D  ## S/E/C/T/I/O/N ####"
+        # Location of boot2docker bootlocal
+        variable -bootlocal /var/lib/boot2docker/bootlocal.sh
+        # Marker in bootlocal
+        variable -marker    "#### A U T O M A T E D  ## S/E/C/T/I/O/N ####"
         # Mapping from integer to string representation of verbosity levels
         variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG 7 TRACE}
         # Extension for env storage cache files
@@ -74,55 +75,55 @@ namespace eval ::cluster {
         variable -date      "%Y%m%d %H%M%S"
         # Temporary directory, empty for good platform guess
         variable -tmp       ""
-	# Default number of retries when polling
-	variable -retries   3
-	# Environement variable prefix
-	variable -prefix    "MACHINERY_"
-	# Sharing mapping between drivers (pattern matching) and types
-	variable -sharing   "virtualbox vboxsf * rsync"
-	# ssh command to use towards host
-	variable -ssh       ""
+        # Default number of retries when polling
+        variable -retries   3
+        # Environement variable prefix
+        variable -prefix    "MACHINERY_"
+        # Sharing mapping between drivers (pattern matching) and types
+        variable -sharing   "virtualbox vboxsf * rsync"
+        # ssh command to use towards host
+        variable -ssh       ""
         # List of "on" state
         variable -running   {running timeout}
         # Force attachment via command line options
         variable -sticky    off
-	# Supported sharing types.
-	variable sharing    {vboxsf rsync}
+        # Supported sharing types.
+        variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
         variable attached   ""
         # CLI commands supported by tools (on demand)
         variable commands   {docker "" compose "" machine ""}
         # version numbers for our tools (on demand)
         variable versions   {docker "" compose "" machine ""}
-	# Object generation identifiers
-	variable generator  0
-	# Size converters
-	variable converters [list \
-				 {^b$} 1 \
-				 {^k(?!i)(b|)$} 1000.0 \
-				 {^ki(b|)$}     1024.0 \
-				 {^m(?!i)(b|)$} [expr {pow(1000,2)}] \
-				 {^mi(b|)$}     [expr {pow(1024,2)}] \
-				 {^g(?!i)(b|)$} [expr {pow(1000,3)}] \
-				 {^gi(b|)$}     [expr {pow(1024,3)}] \
-				 {^t(?!i)(b|)$} [expr {pow(1000,4)}] \
-				 {^ti(b|)$}     [expr {pow(1024,4)}] \
-				 {^p(?!i)(b|)$} [expr {pow(1000,5)}] \
-				 {^pi(b|)$}     [expr {pow(1024,5)}] \
-				 {^e(?!i)(b|)$} [expr {pow(1000,6)}] \
-				 {^ei(b|)$}     [expr {pow(1024,6)}] \
-				 {^z(?!i)(b|)$} [expr {pow(1000,7)}] \
-				 {^zi(b|)$}     [expr {pow(1024,7)}] \
-				 {^y(?!i)(b|)$} [expr {pow(1000,8)}] \
-				 {^yi(b|)$}     [expr {pow(1024,8)}]]
-	# Dynamically discovered list of machine create options
-	variable machopts {}
+        # Object generation identifiers
+        variable generator  0
+        # Size converters
+        variable converters [list \
+                {^b$} 1 \
+                {^k(?!i)(b|)$} 1000.0 \
+                {^ki(b|)$}     1024.0 \
+                {^m(?!i)(b|)$} [expr {pow(1000,2)}] \
+                {^mi(b|)$}     [expr {pow(1024,2)}] \
+                {^g(?!i)(b|)$} [expr {pow(1000,3)}] \
+                {^gi(b|)$}     [expr {pow(1024,3)}] \
+                {^t(?!i)(b|)$} [expr {pow(1000,4)}] \
+                {^ti(b|)$}     [expr {pow(1024,4)}] \
+                {^p(?!i)(b|)$} [expr {pow(1000,5)}] \
+                {^pi(b|)$}     [expr {pow(1024,5)}] \
+                {^e(?!i)(b|)$} [expr {pow(1000,6)}] \
+                {^ei(b|)$}     [expr {pow(1024,6)}] \
+                {^z(?!i)(b|)$} [expr {pow(1000,7)}] \
+                {^zi(b|)$}     [expr {pow(1024,7)}] \
+                {^y(?!i)(b|)$} [expr {pow(1000,8)}] \
+                {^yi(b|)$}     [expr {pow(1024,8)}]]
+        # Dynamically discovered list of machine create options
+        variable machopts {}
         # List of additional driver specific options that should be
         # resolved into absolute path.
         variable absPaths {azure-publish-settings-file azure-subscription-cert hyper-v-boot2docker-location generic-ssh-key}
-	# Finding good file candidates
-	variable lookup "*.yml";    # Which files to consider for YAML parsing
-	variable marker {^#\s*docker\-machinery}
+        # Finding good file candidates
+        variable lookup "*.yml";    # Which files to consider for YAML parsing
+        variable marker {^#\s*docker\-machinery}
         # Good default machine for local storage of images (for -cache)
         variable defaultMachine ""
         # Characters to keep in temporary filepath
@@ -174,14 +175,14 @@ proc ::cluster::defaults { {args {}}} {
     }
     
     if { "win32" in [split [::platform::generic] -] \
-            && $vars::defaultMachine eq "" } {
+                && $vars::defaultMachine eq "" } {
         set vars::defaultMachine [DefaultMachine]
         log NOTICE "Will use '$vars::defaultMachine' as the default machine"
     }
     
     set state {}
     foreach v [info vars vars::-*] {
-	lappend state [lindex [split $v ":"] end] [set $v]
+        lappend state [lindex [split $v ":"] end] [set $v]
     }
     return $state
 }
@@ -282,7 +283,7 @@ proc ::cluster::log { lvl msg } {
 #       None.
 proc ::cluster::ls { yaml {machines *} } {
     set cluster {};   # The list of dictionaries we will return
-
+    
     # Get current state of cluster and arrange for cols to be the list
     # of keys (this is the first line of docker-machine ls output,
     # meaning the header).
@@ -291,7 +292,7 @@ proc ::cluster::ls { yaml {machines *} } {
     foreach nfo [ListParser $state] {
         # Add only machines which name matches the incoming pattern.
         if { [dict exists $nfo name] \
-                 && [string match $machines [dict get $nfo name]] } {
+                    && [string match $machines [dict get $nfo name]] } {
             lappend cluster $nfo
         }
     }
@@ -314,7 +315,7 @@ proc ::cluster::ls { yaml {machines *} } {
 #       None.
 proc ::cluster::names { cluster } {
     set names {}
-    foreach vm $cluster {
+    foreach vm [Machines $cluster] {
         lappend names [dict get $vm -name]
     }
     return $names
@@ -340,12 +341,12 @@ proc ::cluster::names { cluster } {
 # Side Effects:
 #       None.
 proc ::cluster::find { cluster name { truename 0 } } {
-    foreach vm $cluster {
-	if { [NameCmp [dict get $vm -name] $name] } {
-	    return $vm
-	}
-
-	# Lookup by the aliases for a VM
+    foreach vm [Machines $cluster] {
+        if { [NameCmp [dict get $vm -name] $name] } {
+            return $vm
+        }
+        
+        # Lookup by the aliases for a VM
         if { [string is false $truename] } {
             if { [dict exists $vm -aliases] } {
                 foreach nm [dict get $vm -aliases] {
@@ -354,9 +355,9 @@ proc ::cluster::find { cluster name { truename 0 } } {
                     }
                 }
             }
-	}
+        }
     }
-
+    
     return {}
 }
 
@@ -365,28 +366,28 @@ proc ::cluster::findAll { cluster {ptn *}} {
     # Fill selection with all the true names of the machines that
     # match the pattern.
     set selection {}
-    foreach vm $cluster {
-	if { [NameCmp [dict get $vm -name] $ptn match] } {
-	    lappend selection [dict get $vm -name]
-	}
-
-	# Lookup by the aliases for a VM
-	if { [dict exists $vm -aliases] } {
-	    foreach nm [dict get $vm -aliases] {
-		if { [NameCmp $nm $ptn match] } {
+    foreach vm [Machines $cluster] {
+        if { [NameCmp [dict get $vm -name] $ptn match] } {
+            lappend selection [dict get $vm -name]
+        }
+        
+        # Lookup by the aliases for a VM
+        if { [dict exists $vm -aliases] } {
+            foreach nm [dict get $vm -aliases] {
+                if { [NameCmp $nm $ptn match] } {
                     lappend selection [dict get $vm -name]
-		}
-	    }
-	}
+                }
+            }
+        }
     }
-
+    
     # Now sort away duplicates and return the unique list of cluster
     # machines representations
     set vms {}
     foreach nm [lsort -unique $selection] {
         lappend vms [find $cluster $nm 1]
     }
-
+    
     return $vms
 }
 
@@ -409,12 +410,12 @@ proc ::cluster::findAll { cluster {ptn *}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::bind { vm {ls -}} {
+proc ::cluster::bind { vm {ls -} {options {}} } {
     # Get current status of cluster.
     if { $ls eq "-" } {
         set ls [ls [storage $vm]]
     }
-
+    
     # Traverse current cluster state and stop as soon as we have found
     # a machine which name is the same as the one given as an input
     # parameter.
@@ -425,7 +426,7 @@ proc ::cluster::bind { vm {ls -}} {
                 # *-sign) to a boolean.
                 if { [dict exists $m active] } {
                     if { [dict get $m active] eq "" \
-			     || [dict get $m active] eq "-" } {
+                                || [dict get $m active] eq "-" } {
                         dict set vm active off
                     } else {
                         dict set vm active on
@@ -445,6 +446,9 @@ proc ::cluster::bind { vm {ls -}} {
             }
         }
     }
+    
+    # Copy options
+    dict set vm cluster $options
 
     # Return the new modified dictionary.
     return $vm
@@ -466,51 +470,61 @@ proc ::cluster::bind { vm {ls -}} {
 #       None.
 proc ::cluster::create { vm token } {
     # Create machine
-    set nm [Create $vm $token]
-
+    set swarmmode ""
+    if { [string match -nocase "swarm*mode" \
+                [dict get $vm cluster -clustering]] } {
+        if { [dict exists $vm -master] \
+                && [string is true [dict get $vm -master]] } {
+            set swarmmode "master"
+        } else {
+            set swarmmode "worker"
+        }
+    }
+    set nm [Create $vm $token $swarmmode]
+    
     if { $nm ne "" } {
-	set vm [Running $vm]
-	if { $vm ne {} } {
+        set vm [Running $vm]
+        if { $vm ne {} } {
             # Tag virtual machine with labels the hard-way, on older
             # versions.
             if { [vcompare lt [Version machine] 0.4] } {
                 set vm [tag $vm]
             }
-
-	    if { $vm ne {} } {
-		# Open the ports and creates the shares
-		ports $vm
-
-		# Test that machine is properly working by echoing its
-		# name using a busybox component and checking we get that
-		# name back.
-		if { [unix daemon $vm docker up] } {
-		    log DEBUG "Testing that machine $nm has a working docker\
+            
+            if { $vm ne {} } {
+                # Open the ports and creates the shares
+                ports $vm
+                
+                # Test that machine is properly working by echoing its
+                # name using a busybox component and checking we get that
+                # name back.
+                if { [unix daemon $vm docker up] } {
+                    log DEBUG "Testing that machine $nm has a working docker\
                                via busybox"
-		    Attach $vm
-		    if { [Docker -return -- run --rm busybox echo $nm] eq "$nm" } {
-			log INFO "Docker setup properly on $nm"
-		    } else {
-			log ERROR "Cannot test docker for $nm, check manually!"
-		    }
-
-		    init $vm
-		} else {
-		    log WARN "No docker daemon running on $nm!"
-		}
-	    } else {
-		log ERROR "Could not create VM $nm properly"
-	    }
-	} else {
-	    log ERROR "Could not create VM $nm properly"
-	}
+                    Attach $vm
+                    if { [Docker -return -- run --rm busybox echo $nm] eq "$nm" } {
+                        log INFO "Docker setup properly on $nm"
+                    } else {
+                        log ERROR "Cannot test docker for $nm, check manually!"
+                    }
+                    
+                    init $vm
+                } else {
+                    log WARN "No docker daemon running on $nm!"
+                }
+            } else {
+                log ERROR "Could not create VM $nm properly"
+            }
+        } else {
+            log ERROR "Could not create VM $nm properly"
+        }
     }
-
+    
     return $nm
 }
 
 
-# ::cluster::storage -- Path to machine storage cache 
+# ::cluster::storage -- Path to machine storage cache
 #
 #       Return the path to the machine storage cache directory.
 #
@@ -541,19 +555,19 @@ proc ::cluster::init { vm {steps {shares registries files images prelude compose
     # file.
     set vm [bind $vm]
     Discovery $vm
-
+    
     set nm [dict get $vm -name]
     if { [lsearch -nocase $steps shares] >= 0 } {
-	shares $vm
+        shares $vm
     }
     if { [unix daemon $vm docker up] } {
-	# Now pull images if any
-	if { [lsearch -nocase $steps registries] >= 0 } {
-	    login $vm
-	}
-	if { [lsearch -nocase $steps images] >= 0 } {
-	    pull $vm
-	}
+        # Now pull images if any
+        if { [lsearch -nocase $steps registries] >= 0 } {
+            login $vm
+        }
+        if { [lsearch -nocase $steps images] >= 0 } {
+            pull $vm
+        }
         
         if { [lsearch -nocase $steps files] >= 0 } {
             mcopy $vm
@@ -562,19 +576,19 @@ proc ::cluster::init { vm {steps {shares registries files images prelude compose
         if { [lsearch -nocase $steps prelude] >= 0 } {
             prelude $vm
         }
-
-	# And iteratively run compose.  Compose will get the complete
-	# description of the discovery status in the form of
-	# environment variables.
-	if { [lsearch -nocase $steps compose] >= 0 } {
-	    compose $vm UP
-	}
-
-	if { [lsearch -nocase $steps addendum] >= 0 } {
-	    addendum $vm
-	}
+        
+        # And iteratively run compose.  Compose will get the complete
+        # description of the discovery status in the form of
+        # environment variables.
+        if { [lsearch -nocase $steps compose] >= 0 } {
+            compose $vm UP
+        }
+        
+        if { [lsearch -nocase $steps addendum] >= 0 } {
+            addendum $vm
+        }
     } else {
-	log WARN "No docker daemon running on $nm!"
+        log WARN "No docker daemon running on $nm!"
     }
 }
 
@@ -587,39 +601,39 @@ proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
     set vm [bind $vm]
     set nm [dict get $vm -name]
     if { $swarm } {
-	log NOTICE "Getting components of cluster"
+        log NOTICE "Getting components of cluster"
         Attach $vm -swarm
     } else {
-	log NOTICE "Getting components of $nm"
+        log NOTICE "Getting components of $nm"
         Attach $vm
     }
     if { $direct } {
-	Docker -raw -- ps
+        Docker -raw -- ps
     } else {
-	set state [Docker -return -- ps -a]
-	return [ListParser $state [list "CONTAINER ID" "CONTAINER_ID"]]
+        set state [Docker -return -- ps -a]
+        return [ListParser $state [list "CONTAINER ID" "CONTAINER_ID"]]
     }
 }
 
 proc ::cluster::search { cluster ptn } {
     set locations {}
     foreach vm $cluster {
-	log NOTICE "Searching for $ptn in [dict get $vm -name]"
-	foreach c [ps $vm 0 0] {
-	    if { [dict exists $c names] && [dict exists $c container_id] } {
-		foreach nm [split [dict get $c names] ","] {
-		    if { [string match $ptn $nm] } {
-			# Append the name of the VM, the name we found
-			# and the container ID (to make sure callers
-			# can pinpoint containers uniquely).
-			lappend locations [dict get $vm -name] \
-			    $nm [dict get $c container_id]
-		    }
-		}
-	    }
-	}
+        log NOTICE "Searching for $ptn in [dict get $vm -name]"
+        foreach c [ps $vm 0 0] {
+            if { [dict exists $c names] && [dict exists $c container_id] } {
+                foreach nm [split [dict get $c names] ","] {
+                    if { [string match $ptn $nm] } {
+                        # Append the name of the VM, the name we found
+                        # and the container ID (to make sure callers
+                        # can pinpoint containers uniquely).
+                        lappend locations [dict get $vm -name] \
+                                $nm [dict get $c container_id]
+                    }
+                }
+            }
+        }
     }
-
+    
     return $locations
 }
 
@@ -627,37 +641,37 @@ proc ::cluster::search { cluster ptn } {
 proc ::cluster::forall { cluster ptn cmd args } {
     set locations {}
     foreach vm $cluster {
-	if { $ptn eq "" } {
-	    log NOTICE "Executing on [dict get $vm -name]: $cmd $args"
-	    Attach $vm
-	    Docker -- $cmd {*}$args
-	} else {
-	    foreach c [ps $vm 0 0] {
-		if { [dict exists $c names] && [dict exists $c container_id] } {
-		    foreach nm [split [dict get $c names] ","] {
-			if { [string match $ptn $nm] } {
-			    set id [dict get $c container_id]
-			    log NOTICE "Executing on $nm: $cmd $args $id"
-			    Attach $vm;   # We should really already be attached!
-			    Docker -- $cmd {*}$args $id
-			}
-		    }
-		}
-	    }
-	}
-    }    
+        if { $ptn eq "" } {
+            log NOTICE "Executing on [dict get $vm -name]: $cmd $args"
+            Attach $vm
+            Docker -- $cmd {*}$args
+        } else {
+            foreach c [ps $vm 0 0] {
+                if { [dict exists $c names] && [dict exists $c container_id] } {
+                    foreach nm [split [dict get $c names] ","] {
+                        if { [string match $ptn $nm] } {
+                            set id [dict get $c container_id]
+                            log NOTICE "Executing on $nm: $cmd $args $id"
+                            Attach $vm;   # We should really already be attached!
+                            Docker -- $cmd {*}$args $id
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 
 proc ::cluster::swarm { master op fpath {opts {}}} {
     # Make sure we resolve in proper directory.
     set fpath [AbsolutePath $master $fpath]
-
+    
     EnvSet $master;    # Pass environment to composition.
     if { [file exists $fpath] } {
         log NOTICE "Reading projects from $fpath"
         set pinfo [::yaml::yaml2dict -file $fpath]
-
+        
         # Detect type of YAML project file and schedule
         set first [lindex $pinfo 0]
         if { [dict exists $first file] } {
@@ -725,11 +739,11 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
         }
         set projects [dict get $vm -compose]
     }
-
+    
     # Pass the discovery variables to compose in case they were needed
     # there...
     EnvSet $vm
-
+    
     set nm [dict get $vm -name]
     if { $swarm } {
         Attach $vm -swarm
@@ -746,16 +760,16 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
             set fpath [AbsolutePath $vm $fpath]
             if { [file exists $fpath] } {
                 set descr [string map \
-                               [list "UP" "Creating and starting up" \
-                                    "KILL" "Killing" \
-                                    "STOP" "Stopping" \
-                                    "START" "Starting" \
-                                    "RM" "Removing"] [string toupper $op]]
+                        [list "UP" "Creating and starting up" \
+                        "KILL" "Killing" \
+                        "STOP" "Stopping" \
+                        "START" "Starting" \
+                        "RM" "Removing"] [string toupper $op]]
                 log NOTICE "$descr components from $fpath in $nm"
                 set substitution 0
                 if { [dict exists $project substitution] } {
                     set substitution \
-                        [string is true [dict get $project substitution]]
+                            [string is true [dict get $project substitution]]
                 }
                 set options {}
                 if { [dict exists $project options] } {
@@ -774,18 +788,18 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
             }
         }
     }
-
+    
     # Clean up environment to avoid pollution.
     log DEBUG "Cleaning environment from ${vars::-prefix} prefixed variables"
     foreach k [array names ::env [string trimright ${vars::-prefix} "_"]_*] {
         unset ::env($k)
     }
-
+    
     if { [llength $composed] > 0 } {
         log INFO "Machine $nm now running the following components"
         Docker ps
     }
-
+    
     return $composed
 }
 
@@ -793,10 +807,10 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
 proc ::cluster::mcopy { vm { fspecs {}} } {
     # Get list of files to copy from parameters of from VM object
     if { [llength $fspecs] == 0 } {
-	if { ![dict exists $vm -files] } {
-	    return {}
-	}
-	set fspecs [dict get $vm -files]
+        if { ![dict exists $vm -files] } {
+            return {}
+        }
+        set fspecs [dict get $vm -files]
     }
     
     set nm [dict get $vm -name]
@@ -827,15 +841,15 @@ proc ::cluster::mcopy { vm { fspecs {}} } {
 proc ::cluster::prelude { vm { execs {} }} {
     # Get scripts/programs to execute from parameters of from VM object
     if { [string length $execs] == 0 } {
-	if { ![dict exists $vm -prelude] } {
-	    return {}
-	}
-	set execs [dict get $vm -prelude]
+        if { ![dict exists $vm -prelude] } {
+            return {}
+        }
+        set execs [dict get $vm -prelude]
     }
-
+    
     # Pass the environment variables in case they were needed
     EnvSet $vm
-
+    
     set nm [dict get $vm -name]
     foreach exe $execs {
         Exec $vm {*}$exe
@@ -846,15 +860,15 @@ proc ::cluster::prelude { vm { execs {} }} {
 proc ::cluster::addendum { vm { execs {} } } {
     # Get scripts/programs to execute from parameters of from VM object
     if { [string length $execs] == 0 } {
-	if { ![dict exists $vm -addendum] } {
-	    return {}
-	}
-	set execs [dict get $vm -addendum]
+        if { ![dict exists $vm -addendum] } {
+            return {}
+        }
+        set execs [dict get $vm -addendum]
     }
-
+    
     # Pass the environment variables in case they were needed
     EnvSet $vm
-
+    
     set nm [dict get $vm -name]
     foreach exe $execs {
         Exec $vm {*}$exe
@@ -890,14 +904,14 @@ proc ::cluster::tag { vm { lbls {}}} {
         }
         set lbls [dict get $vm -labels]
     }
-
+    
     # Some nic'ish ouput of the tags and what we do.
     set nm [dict get $vm -name]
     foreach {k v} $lbls {
         append tags "${k}=${v} "
     }
     log NOTICE "Tagging $nm with [string trim $tags]"
-
+    
     # Get current set of arguments, this assumes a boot2docker image!
     # We do some quick and dirty parsing of this UNIX defaults file,
     # trimming away leading and ending quotes, skipping comments and
@@ -917,7 +931,7 @@ proc ::cluster::tag { vm { lbls {}}} {
                 set nq [expr {[string length $v]-[string length $unquoted]}]
                 if { $nq%2==0 } {
                     set DARGS($k) \
-                        [string trim [string trim [string trim $v] "\"'"]]
+                            [string trim [string trim [string trim $v] "\"'"]]
                     set k ""
                 }
             }
@@ -932,28 +946,28 @@ proc ::cluster::tag { vm { lbls {}}} {
             }
         }
     }
-
+    
     # Append labels to EXTRA_ARGS index in the array.  Maybe should we
     # parse for their existence before?
     foreach {k v} $lbls {
         append DARGS(EXTRA_ARGS) " --label ${k}=${v}"
     }
-
+    
     # Create a local temporary file with the new content.  This is far
     # from perfect, but should do as we are only creating one file and
     # will be removing it soon.
     set fname [Temporary [file join [TempDir] profile]]
     EnvWrite $fname [array get DARGS] "'"
-
+    
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
     SCopy $vm $fname
     Run ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
-
+    
     # Cleanup and restart machine to make sure the labels get live.
     file delete -force -- $fname;        # Remove local file, not needed anymore
     Machine -- -s [storage $vm] restart $nm;# Restart machine to activate tags
-
+    
     return [Running $vm]
 }
 
@@ -996,7 +1010,7 @@ proc ::cluster::ports { vm { ports {}} } {
         }
         set ports [dict get $vm -ports]
     }
-
+    
     # Convert xx:yy/proto constructs to pairs of ports, convert single
     # ports to two ports (the same, on tcp) and append all these pairs
     # to the list called opening.  Arrange for the list to only
@@ -1009,11 +1023,11 @@ proc ::cluster::ports { vm { ports {}} } {
             lappend opening $host $mchn $proto
         }
     }
-
+    
     # Some nic'ish ouput of the ports and what we do.
     set nm [dict get $vm -name]
     log NOTICE "Forwarding [expr {[llength $opening]/3}] port(s) for $nm..."
-
+    
     switch [dict get $vm -driver] {
         "virtualbox" {
             eval [linsert $opening 0 virtualbox::forward $nm]
@@ -1064,52 +1078,52 @@ proc ::cluster::ports { vm { ports {}} } {
 proc ::cluster::shares { vm { shares {}} } {
     set mounted {}
     set opening [Mounting $vm $shares]
-
+    
     # Some nic'ish ouput of the shares and what we do.
     set nm [dict get $vm -name]
     log NOTICE "Sharing [expr {[llength $opening]/3}] volume(s) for $nm..."
-
+    
     # Add shares as necessary.  This might halt the virtual machine if
     # they do not exist yet, so we collect their names together with
     # host and guest path information in a new list called sharing.
     # This allows us to halt the machine as little as possible.
     array set SHARINFO {}
     foreach {host mchn type} $opening {
-	switch -glob -- $type {
-	    "v*box*" {
-		if { [dict get $vm -driver] ne "virtualbox" } {
-		    log WARN "Cannot use $type sharing on other drivers than\
-                              virtualbox!"
-		} else {
-		    set share [virtualbox::addshare $nm $host]
-		    if { $share ne "" } {
-			lappend SHARINFO(vboxsf) $host $mchn $share
-		    }
-		}
-	    }
-	    "rsync" {
-		lappend SHARINFO(rsync) $host $mchn
-	    }
-	}
+        switch -glob -- $type {
+            "v*box*" {
+                if { [dict get $vm -driver] ne "virtualbox" } {
+                    log WARN "Cannot use $type sharing on other drivers than\
+                            virtualbox!"
+                } else {
+                    set share [virtualbox::addshare $nm $host]
+                    if { $share ne "" } {
+                        lappend SHARINFO(vboxsf) $host $mchn $share
+                    }
+                }
+            }
+            "rsync" {
+                lappend SHARINFO(rsync) $host $mchn
+            }
+        }
     }
-
+    
     # Now start virtual machine as we will be manipulating the runtime
     # state of the machine.  This should only starts the machines if
     # it is not running already.
     if { [llength [array names SHARINFO]] > 0 } {
-	if { ![start $vm 0] } {
-	    log WARN "Could not start machine to perform mounts!"
-	    return $mounted
-	}
+        if { ![start $vm 0] } {
+            log WARN "Could not start machine to perform mounts!"
+            return $mounted
+        }
     }
-
+    
     # If we have some rsync-based shares, then we need to make sure
     # we'll have rsync on the machine!  The following code only works
     # on the Tinycore linux-based boot2docker.
     if { [info exists SHARINFO(rsync)] } {
-	InstallRSync $vm
+        InstallRSync $vm
     }
-
+    
     # Find out id of main user on virtual machine to be able to mount
     # shares and/or create directories under that UID.
     set idinfo [unix id $vm id]
@@ -1119,120 +1133,120 @@ proc ::cluster::shares { vm { shares {}} } {
     } else {
         set uid ""
     }
-
+    
     foreach type [array names SHARINFO] {
-	switch $type {
-	    "vboxsf" {
-		# And arrange for the destination directories to exist
-		# within the guest and perform the mount.
-		foreach {host mchn share} $SHARINFO(vboxsf) {
-		    if { [unix mount $vm $share $mchn $uid] } {
-			lappend mounted $mchn
-		    }
-		}
-
-		# Finally arrange for the mounts to persist over time.
-		# This is overly complex, but the code below is both able
-		# to create the file and/or to amend it with our mounting
-		# information.  We also add machine-parseable comments so
-		# recreation of data would be possible.
-		set b2d_dir [file dirname ${vars::-bootlocal}]
-		set bootlocal {}
-		foreach f [Machine -return -- \
-                                -s [storage $vm] ssh $nm "ls -1 $b2d_dir"] {
-		    if { $f eq [file tail ${vars::-bootlocal}] } {
-			set bootlocal [Machine -return -- \
-                                            -s [storage $vm] \
-                                            ssh $nm "cat ${vars::bootlocal}"]
-		    }
-		}
-
-		# Generate a new section, i.e. a series of bash commands
-		# that will (re)creates the mounts.  Make sure each series
-		# of commands is led by a machine parseable comment.
-		set section {}
-		foreach {host mchn share} $SHARINFO(vboxsf) {
-		    lappend section "## $share : \"$mchn\" : $uid"
-		    foreach cmd [unix mnt.sh $share $mchn $uid] {
-			lappend section "sudo $cmd"
-		    }
-		}
-		
-		# We had no content for bootlocal at all, make sure we
-		# have a shebang for a shell...
-		if { [llength $bootlocal] == 0 } {
-		    lappend bootlocal "#!/bin/sh"
-		    lappend bootlocal ""
-		}
-
-		# Look for section start and end markers and either add at
-		# end of file or replace the section.
-		set start [lsearch $bootlocal ${vars::-marker}]
-		if { $start >= 0 } {
-		    incr start
-		    set end [lsearch $bootlocal ${vars::-marker} $start]
-		    incr end -1
-		    log DEBUG "Replacing existing persistent mounting section"
-		    set bootlocal [lreplace $bootlocal $start $end {*}$section]
-		} else {
-		    log DEBUG "Adding new persistent mounting section"
-		    lappend bootlocal ${vars::-marker}
-		    foreach l $section {
-			lappend bootlocal $l
-		    }
-		    lappend bootlocal ${vars::-marker}
-		}
-
-		# Now create a temporary file with the new content
-		set fname [Temporary [file join [TempDir] bootlocal]]
-		set fd [open $fname w]
-		foreach l $bootlocal {
-		    puts $fd $l
-		}
-		close $fd
+        switch $type {
+            "vboxsf" {
+                # And arrange for the destination directories to exist
+                # within the guest and perform the mount.
+                foreach {host mchn share} $SHARINFO(vboxsf) {
+                    if { [unix mount $vm $share $mchn $uid] } {
+                        lappend mounted $mchn
+                    }
+                }
+                
+                # Finally arrange for the mounts to persist over time.
+                # This is overly complex, but the code below is both able
+                # to create the file and/or to amend it with our mounting
+                # information.  We also add machine-parseable comments so
+                # recreation of data would be possible.
+                set b2d_dir [file dirname ${vars::-bootlocal}]
+                set bootlocal {}
+                foreach f [Machine -return -- \
+                        -s [storage $vm] ssh $nm "ls -1 $b2d_dir"] {
+                    if { $f eq [file tail ${vars::-bootlocal}] } {
+                        set bootlocal [Machine -return -- \
+                                -s [storage $vm] \
+                                ssh $nm "cat ${vars::bootlocal}"]
+                    }
+                }
+                
+                # Generate a new section, i.e. a series of bash commands
+                # that will (re)creates the mounts.  Make sure each series
+                # of commands is led by a machine parseable comment.
+                set section {}
+                foreach {host mchn share} $SHARINFO(vboxsf) {
+                    lappend section "## $share : \"$mchn\" : $uid"
+                    foreach cmd [unix mnt.sh $share $mchn $uid] {
+                        lappend section "sudo $cmd"
+                    }
+                }
+                
+                # We had no content for bootlocal at all, make sure we
+                # have a shebang for a shell...
+                if { [llength $bootlocal] == 0 } {
+                    lappend bootlocal "#!/bin/sh"
+                    lappend bootlocal ""
+                }
+                
+                # Look for section start and end markers and either add at
+                # end of file or replace the section.
+                set start [lsearch $bootlocal ${vars::-marker}]
+                if { $start >= 0 } {
+                    incr start
+                    set end [lsearch $bootlocal ${vars::-marker} $start]
+                    incr end -1
+                    log DEBUG "Replacing existing persistent mounting section"
+                    set bootlocal [lreplace $bootlocal $start $end {*}$section]
+                } else {
+                    log DEBUG "Adding new persistent mounting section"
+                    lappend bootlocal ${vars::-marker}
+                    foreach l $section {
+                        lappend bootlocal $l
+                    }
+                    lappend bootlocal ${vars::-marker}
+                }
+                
+                # Now create a temporary file with the new content
+                set fname [Temporary [file join [TempDir] bootlocal]]
+                set fd [open $fname w]
+                foreach l $bootlocal {
+                    puts $fd $l
+                }
+                close $fd
 		log DEBUG "Created temporary file with new bootlocal content at\
-                           $fname"
-		
-		# Copy new file to same temp location, make sure it is
-		# executable and install it.
+                        $fname"
+                
+                # Copy new file to same temp location, make sure it is
+                # executable and install it.
 		log INFO "Persisting shares at reboot through\
-                          ${vars::-bootlocal}"
-		SCopy $vm $fname
-		Machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
-		Machine -- -s [storage $vm] ssh $nm "sudo mv $fname ${vars::-bootlocal}"
-	    }
-	    "rsync" {
-		# Detect SSH command
-		set ssh [SCommand $vm]
-		set hname [lindex $ssh end]
-		set ssh [lrange $ssh 0 end-1]
-
-		# rsync for each
-		foreach {host mchn} $SHARINFO(rsync) {
-		    # Create directory on remote VM and arrange for
-		    # the UID to match (should we?)
-		    Machine -- -s [storage $vm] ssh $nm "sudo mkdir -p $mchn"
-		    if { $uid ne "" } {
-			Machine -- -s [storage $vm] ssh $nm "sudo chown $uid $mchn"
-		    }
-		    # Synchronise the content of the local host
-		    # directory onto the remote VM directory.  Arrange
-		    # for rsync to understand those properly as
-		    # directories and not only files.
-		    Run -- [auto_execok ${vars::-rsync}] -az -e $ssh \
-			[string trimright $host "/"]/ \
-			$hname:[string trimright $mchn "/"]/
-		    lappend mounted $mchn
-		}
-	    }
-	}
+                        ${vars::-bootlocal}"
+                SCopy $vm $fname
+                Machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
+                Machine -- -s [storage $vm] ssh $nm "sudo mv $fname ${vars::-bootlocal}"
+            }
+            "rsync" {
+                # Detect SSH command
+                set ssh [SCommand $vm]
+                set hname [lindex $ssh end]
+                set ssh [lrange $ssh 0 end-1]
+                
+                # rsync for each
+                foreach {host mchn} $SHARINFO(rsync) {
+                    # Create directory on remote VM and arrange for
+                    # the UID to match (should we?)
+                    Machine -- -s [storage $vm] ssh $nm "sudo mkdir -p $mchn"
+                    if { $uid ne "" } {
+                        Machine -- -s [storage $vm] ssh $nm "sudo chown $uid $mchn"
+                    }
+                    # Synchronise the content of the local host
+                    # directory onto the remote VM directory.  Arrange
+                    # for rsync to understand those properly as
+                    # directories and not only files.
+                    Run -- [auto_execok ${vars::-rsync}] -az -e $ssh \
+                            [string trimright $host "/"]/ \
+                            $hname:[string trimright $mchn "/"]/
+                    lappend mounted $mchn
+                }
+            }
+        }
     }
-
+    
     if { [info exists SHARINFO(rsync)] } {
         log INFO "Consider running a cron job to synchronise back changes\
-                  that would occur in $nm onto the host!"
+                that would occur in $nm onto the host!"
     }
-
+    
     return $mounted
 }
 
@@ -1274,38 +1288,38 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
         log WARN "Machine $nm not running, cannot sync"
         return $synchronised
     }
-
+    
     # Consider rsync shares and forget about all the other ones...
     set sharing [Mounting $vm $shares rsync]
     log NOTICE "Synchronising [expr {[llength $sharing]/3}] share(s) for $nm..."
-
+    
     # Detect SSH command
     set ssh [SCommand $vm]
     set hname [lindex $ssh end]
     set ssh [lrange $ssh 0 end-1]
-
+    
     # rsync back from the guest machine onto the host machine.  This
     # forces rsync to properly understand those locations as
     # directories.
     switch -nocase -glob -- $op {
-	"g*" {
-	    foreach {host mchn type} $sharing {
-		Run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
-		    $hname:[string trimright $mchn "/"]/ \
-		    [string trimright $host "/"]/
-		lappend synchronised $mchn
-	    }
-	}
-	"p*" {
-	    foreach {host mchn type} $sharing {
-		Run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
-		    [string trimright $host "/"]/ \
-		    $hname:[string trimright $mchn "/"]/
-		lappend synchronised $mchn
-	    }
-	}
+        "g*" {
+            foreach {host mchn type} $sharing {
+                Run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
+                        $hname:[string trimright $mchn "/"]/ \
+                        [string trimright $host "/"]/
+                lappend synchronised $mchn
+            }
+        }
+        "p*" {
+            foreach {host mchn type} $sharing {
+                Run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
+                        [string trimright $host "/"]/ \
+                        $hname:[string trimright $mchn "/"]/
+                lappend synchronised $mchn
+            }
+        }
     }
-
+    
     return $synchronised
 }
 
@@ -1325,10 +1339,15 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
 # Side Effects:
 #       None.
 proc ::cluster::halt { vm } {
+    # Gracefully leave cluster
+    if { [swarmmode mode $vm] ne "" } {
+        swarmmode leave $vm
+    }
+    
     # Start by getting back all changes that might have occured on the
     # the VM, if relevant...
     sync $vm get
-
+    
     set nm [dict get $vm -name]
     log NOTICE "Bringing down machine $nm..."
     # First attempt to be gentle against the machine, i.e. using the
@@ -1341,11 +1360,11 @@ proc ::cluster::halt { vm } {
     # stopped, force a kill.
     set state [ls [storage $vm] $nm]
     if { [dict exists $state state] \
-             && ![string equal -nocase [dict get $vm state] "stopped"] } {
+                && ![string equal -nocase [dict get $vm state] "stopped"] } {
         log NOTICE "Forcing stop of $nm"
         Machine -- -s [storage $vm] kill $nm
     }
-
+    
     Discovery [bind $vm]
 }
 
@@ -1371,24 +1390,24 @@ proc ::cluster::ssh { vm args } {
     if { [llength $args] > 0 } {
         set res [eval [linsert $args 0 Machine -raw -stderr -- -s [storage $vm] ssh $nm]]
     } else {
-	foreach fd {stdout stderr stdin} {
-	    fconfigure $fd -buffering none -translation binary
-	}
-	set mchn [auto_execok ${vars::-machine}]
+        foreach fd {stdout stderr stdin} {
+            fconfigure $fd -buffering none -translation binary
+        }
+        set mchn [auto_execok ${vars::-machine}]
         if { ![file exists $mchn] } {
             set mchn ${vars::-machine}
         }
-	if { $mchn eq "" } {
-	    log ERROR "Cannot find machine at ${vars::-machine}!"
-	    return
-	}
-
+        if { $mchn eq "" } {
+            log ERROR "Cannot find machine at ${vars::-machine}!"
+            return
+        }
+        
         set cmd [list $mchn -s [storage $vm]]
         if { [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
             lappend cmd --native-ssh
         }
         lappend cmd ssh $nm
-
+        
         if { [catch {exec {*}$cmd >@ stdout 2>@ stderr <@ stdin} err] } {
             log WARN "Child returned: $err"
         }
@@ -1404,13 +1423,13 @@ proc ::cluster::login { vm {regs {}} } {
         }
         set regs [dict get $vm -registries]
     }
-
+    
     set nm [dict get $vm -name]
     log NOTICE "Logging in within $nm"
     foreach reg $regs {
         if { [dict exists $reg server] && [dict exists $reg username] } {
             log INFO "Logging in as [dict get $reg username]\
-                      at [dict get $reg server]"
+                    at [dict get $reg server]"
             set cmd "docker login "
             foreach {o k} [list -u username -p password -e email] {
                 if { [dict exists $reg $k] } {
@@ -1456,7 +1475,7 @@ proc ::cluster::pull { vm {images {}} } {
         }
         set images [dict get $vm -images]
     }
-
+    
     set nm [dict get $vm -name]
     log NOTICE "Pulling images for $nm: $images..."
     foreach img $images {
@@ -1468,20 +1487,20 @@ proc ::cluster::pull { vm {images {}} } {
                 break
             }
         }
-     
-        # Check if we have explicitely turned off all caching   
+        
+        # Check if we have explicitely turned off all caching
         if { ${vars::-cache} eq "-" } {
             set caching off
         }
         
         if { $caching } {
-	    # When using the cache, we download the image on the
-	    # localhost (meaning that we should be able to login to
-	    # remote repositories outside of machinery and use this
-	    # credentials here!), create a snapshot of the image using
-	    # docker save, transfer it to the virtual machine with scp
-	    # and then load it there.
-
+            # When using the cache, we download the image on the
+            # localhost (meaning that we should be able to login to
+            # remote repositories outside of machinery and use this
+            # credentials here!), create a snapshot of the image using
+            # docker save, transfer it to the virtual machine with scp
+            # and then load it there.
+            
             # Decide where to cache (this is for being able to support
             # virtualbox settings)
             if { ${vars::-cache} eq "" } {
@@ -1491,10 +1510,10 @@ proc ::cluster::pull { vm {images {}} } {
             }
             set origin [expr {$cache eq "" ? "locally" : "via $cache"}]
             log INFO "Pulling $img $origin and transfering to $nm"
-
+            
             # Detach so we can pull locally!
             if { $cache eq "" } {
-                Detach    
+                Detach
             } else {
                 Attach $cache -external
             }
@@ -1511,7 +1530,7 @@ proc ::cluster::pull { vm {images {}} } {
             } else {
                 # Detach again, we are going to get it locally first!
                 if { $cache eq "" } {
-                    Detach    
+                    Detach
                 } else {
                     Attach $cache -external
                 }
@@ -1519,9 +1538,9 @@ proc ::cluster::pull { vm {images {}} } {
                 # Save it to the local disk
                 set rootname [file rootname [file tail $img]]; # Cheat!...
                 set tmp_fpath [Temporary \
-                                   [file join [TempDir] $rootname]].tar
+                        [file join [TempDir] $rootname]].tar
                 log INFO "Using a local snapshot at $tmp_fpath to copy $img\
-                          to $nm..."
+                        to $nm..."
                 Docker -stderr -- save -o $tmp_fpath $img
                 log DEBUG "Created local snapshot of $img at $tmp_fpath"
                 
@@ -1589,8 +1608,8 @@ proc ::cluster::inspect { vm } {
     set nm [dict get $vm -name]
     set json ""
     foreach l [Machine -return -- -s [storage $vm] inspect $nm] {
-	append json $l
-	append json " "
+        append json $l
+        append json " "
     }
     return [::json::parse [string trim $json]]
 }
@@ -1614,8 +1633,8 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
         set retries ${vars::-retries}
     }
     while { $retries > 0 } {
-	# Check if the machine is already running at once, to avoid
-	# unecessary attempts to (re)start.
+        # Check if the machine is already running at once, to avoid
+        # unecessary attempts to (re)start.
         set state [Wait $vm [list "running" "timeout" "stopped" "error"]]
         if { $state eq "running" } {
             # Start by putting back all changes that might have
@@ -1624,7 +1643,7 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
             if { [string is true $sync] } {
                 sync $vm put
             }
-
+            
             Discovery $vm
             return 1
         }
@@ -1669,11 +1688,61 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
 proc ::cluster::parse { fname args } {
     getopt args -prefix pfx [file rootname [file tail $fname]]
     getopt args -driver drv "none"
-
-    set vms {}
-    set master ""
+    
     set d [::yaml::yaml2dict -file $fname]
-    foreach m [dict keys $d] {
+    
+    # Get version, default to 1
+    set version 1
+    if { [dict exists $d version] } {
+        set version [dict get $d version]
+        if { ![string is double -strict $version] } {
+            log ERROR "Version $version is not a proper version number!"
+            return {}
+        }
+    }
+    
+    # Arrange to access to the list of machines, directly under the top of the
+    # YAML root in the old version 1.0 format (the default) or under the key
+    # called machines in the newer format
+    set machines [list]; set networks [list]
+    set options {
+        -clustering "docker swarm"
+    }
+    if { $version >= 1.0 && $version < 2.0 } {
+        # Isolate machines that are not named "version", this introduces a
+        # backward compatibility!
+        set machines [dict filter $d script {k v} \
+                        { expr {![string equal $k "version"]}}]
+    } elseif { $version >= 2.0 } {
+        if { [dict exists $d machines] } {
+            set machines [dict get $d machines]
+        } else {
+            log WARN "No key machines found in YAML description!"
+        }
+        
+        # Get options and initialise to good defaults
+        if { [dict exists $d options] } {
+            # Initialise options with good defaults
+            set opts [dict get $d options]
+            foreach {o d} {clustering "docker swarm"} {
+                if { [dict exists $opts [string trimleft $o -]] } {
+                    dict set options -[string trimleft $o -] \
+                        [dict get $opts [string trimleft $o -]]
+                } else {
+                    dict set options -[string trimleft $o -] $d
+                }
+            }
+        }
+        
+        # Get list of external networks to create
+        if { [dict exists $d networks] } {
+            set networks [dict get $d networks]
+        }
+    }
+
+    set master ""    
+    set vms {}
+    dict for {m keys} $machines {
         # Create vm "object" with proper name, i.e. using the prefix.
         # We also make sure that we keep a reference to the name of
         # the file that the machine was originally read from.
@@ -1682,16 +1751,19 @@ proc ::cluster::parse { fname args } {
         } else {
             set vm [dict create -name ${pfx}${vars::-separator}$m origin $fname]
         }
-
+        
         # Check validity of keys and insert them as dash-led.  Arrange
         # for one master only and store fully-qualified aliases for
         # the machine.
-        foreach k [dict keys [dict get $d $m]] {
+        dict for {k v} $keys {
             if { [lsearch ${vars::-keys} $k] < 0 } {
                 log WARN "In $m, key $k is not recognised!"
             } else {
-                dict set vm -$k [dict get $d $m $k]
-                if { $k eq "master" } {
+                dict set vm -$k $v
+                # Prevent several masters when using old "Docker Swarm", in
+                # swarm mode there might be several master (managers).
+                if { [string match -nocase "docker*swarm" \
+                      [dict get $options -clustering]] && $k eq "master" } {
                     if { $master eq "" } {
                         set master [dict get $vm -name]
                     } else {
@@ -1702,29 +1774,30 @@ proc ::cluster::parse { fname args } {
                         }
                     }
                 }
-		# Automatically prefix the aliases, maybe should we
-		# save the prefix in each VM instead?
-		if { $k eq "aliases" && $pfx ne "" } {
-		    set aliases {}
-		    foreach a [dict get $d $m $k] {
-			lappend aliases ${pfx}${vars::-separator}$a
-		    }
-		    dict set vm -$k $aliases
-		}
+                
+                # Automatically prefix the aliases, maybe should we
+                # save the prefix in each VM instead?
+                if { $k eq "aliases" && $pfx ne "" } {
+                    set aliases {}
+                    foreach a [dict get $d $m $k] {
+                        lappend aliases ${pfx}${vars::-separator}$a
+                    }
+                    dict set vm -$k $aliases
+                }
             }
         }
-
+        
         # Automatically give a driver to the VM if possible and
         # necessary.
         if { ![dict exists $vm -driver] } {
             log NOTICE "Adding default driver '$drv' to [dict get $vm -name]"
             dict set vm -driver $drv
         }
-
+        
         lappend vms $vm
     }
-
-    return $vms
+    
+    return [dict create -machines $vms -options $options -networks $networks]
 }
 
 
@@ -1753,7 +1826,7 @@ proc ::cluster::env { cluster {force 0} {fd ""} } {
     if { [llength $cluster] == 0 } {
         return
     }
-
+    
     set vm [lindex $cluster 0]
     if { [dict exists $vm origin] } {
         set env_path [CacheFile [dict get $vm origin] ${vars::-ext}]
@@ -1762,7 +1835,7 @@ proc ::cluster::env { cluster {force 0} {fd ""} } {
         log WARN "Cannot discover where cluster originates from!"
         return
     }
-
+    
     # Remove the cache file and recreate
     if { [string is true $force] } {
         file delete -force -- $env_path
@@ -1770,7 +1843,7 @@ proc ::cluster::env { cluster {force 0} {fd ""} } {
             Discovery $vm
         }
     }
-
+    
     # Either return content of environment file as a dictionary, or
     # return so it contains exporting variables commands.
     if { $fd ne "" } {
@@ -1791,39 +1864,39 @@ proc ::cluster::env { cluster {force 0} {fd ""} } {
 proc ::cluster::candidates { {dir .} } {
     set candidates {}
     foreach fpath [glob -nocomplain -directory $dir -- $vars::lookup] {
-	if { [catch {open $fpath} fd] == 0 } {
-	    log DEBUG "Polling $fpath for leading YAML marker"
-	    while { ![eof $fd] } {
-		set line [string trim [gets $fd]]
-		if { $line ne "" } {
-		    if { [regexp $vars::marker $line] } {
-			lappend candidates $fpath
-		    }
-		    break;   # Jump out on first non empty line
-		}
-	    }
-	    close $fd
-	} else {
-	    log WARN "Cannot consider $fpath as a cluster description file: $fd"
-	}
+        if { [catch {open $fpath} fd] == 0 } {
+            log DEBUG "Polling $fpath for leading YAML marker"
+            while { ![eof $fd] } {
+                set line [string trim [gets $fd]]
+                if { $line ne "" } {
+                    if { [regexp $vars::marker $line] } {
+                        lappend candidates $fpath
+                    }
+                    break;   # Jump out on first non empty line
+                }
+            }
+            close $fd
+        } else {
+            log WARN "Cannot consider $fpath as a cluster description file: $fd"
+        }
     }
-
+    
     return $candidates
 }
 
 
 proc ::cluster::commands { tool } {
     switch -nocase -- $tool {
-	compose -
-	machine -
-	docker {
-	    if { [dict get $vars::commands $tool] eq "" } {
-		dict set vars::commands $tool [CommandsQuery $tool]
+        compose -
+        machine -
+        docker {
+            if { [dict get $vars::commands $tool] eq "" } {
+                dict set vars::commands $tool [CommandsQuery $tool]
 		log DEBUG "Current set of commands for $tool is\
-                           [join [dict get $vars::commands $tool] ,\ ]"
-	    }
-	    return [dict get $vars::commands $tool]
-	}
+                        [join [dict get $vars::commands $tool] ,\ ]"
+            }
+            return [dict get $vars::commands $tool]
+        }
     }
     return {}
 }
@@ -1863,7 +1936,7 @@ proc ::cluster::LogLevel { lvl } {
 }
 
 
-# ::cluster::StorageDir -- Path to machine storage cache 
+# ::cluster::StorageDir -- Path to machine storage cache
 #
 #       Return the path to the machine storage cache directory.
 #
@@ -1885,7 +1958,7 @@ proc ::cluster::StorageDir { yaml } {
     if { ![file isdirectory $dir] } {
         log NOTICE "Creating machine storage directory at $dir"
         file mkdir $dir;   # Let it fail since we can't continue otherwise
-    }        
+    }
     
     return [file normalize $dir]
 }
@@ -1932,29 +2005,30 @@ proc ::cluster::+ { args } {
 #
 # Arguments:
 #        vm        Virtual machine description
-#        token        Swarm token for machine, empty for no swarm in machine.
+#        token     Swarm token for machine, empty for no swarm in machine.
+#        swarmmode Swarm Mode (manager, worker or empty for old swarm).
 #
 # Results:
 #       Return the name of the machine, empty string on errors.
 #
 # Side Effects:
 #       None.
-proc ::cluster::Create { vm { token "" } } {
+proc ::cluster::Create { vm { token "" } {swarmmode ""} } {
     set nm [dict get $vm -name]
     log NOTICE "Creating machine $nm"
     Detach
     set docker_version [Version docker]
-
+    
     # Start creating a command that we will be able to call for
     # machine creation: first insert creation command with proper
     # driver.
     set driver [dict get $vm -driver]
     set cmd [list Machine -- -s [storage $vm] create -d $driver]
-
+    
     # Now translate the standard memory (in MB), size (in MB) and cpu
     # (in numbers) options into options that are specific to the
     # drivers.
-
+    
     # Memory size is in MB
     if { [dict exists $vm -memory] } {
         array set MOPT {
@@ -2004,7 +2078,7 @@ proc ::cluster::Create { vm { token "" } } {
         foreach { p opt mult } $SOPT {
             if { $driver eq $p } {
                 lappend cmd $opt \
-		    [expr {[Convert [dict get $vm -size] MB MB]*$mult}]
+                        [expr {[Convert [dict get $vm -size] MB MB]*$mult}]
                 set found 1
                 break
             }
@@ -2013,46 +2087,50 @@ proc ::cluster::Create { vm { token "" } } {
             log WARN "Cannot set disk size for driver $driver!"
         }
     }
-
+    
     # Blindly append driver specific options, if any.  Make sure these
     # are available options, at least!  Also convert these to absolute
     # files so locally stored cached arguments will keep working.
     if { [dict exists $vm -options] } {
-	if { [llength $vars::machopts] <= 0 } {
-	    set vars::machopts [MachineOptions $driver]
-	}
+        if { [llength $vars::machopts] <= 0 } {
+            set vars::machopts [MachineOptions $driver]
+        }
         dict for {k v} [dict get $vm -options] {
-	    set k [string trimleft $k "-"]
-	    if { [dict exists $vars::machopts $k] } {
+            set k [string trimleft $k "-"]
+            if { [dict exists $vars::machopts $k] } {
                 if { [lsearch $vars::absPaths $k] >= 0 } {
                     lappend cmd --$k [AbsolutePath $vm $v on]
                 } else {
                     lappend cmd --$k $v
                 }
-	    } else {
-		log WARM "--$k is not an option supported by 'create'"
-	    }
+            } else {
+                log WARM "--$k is not an option supported by 'create'"
+            }
         }
     }
-
-    # Take care of swarm.  Turn it on in the first place, and recognise
-    # the key master (and request for a swarm master when it is on).
-    if { $token ne "" } {
-        if { ([dict exists $vm -swarm] \
-                        && [string is true [dict get $vm -swarm]]) \
-                || ![dict exists $vm -swarm] } {
-            lappend cmd --swarm --swarm-discovery token://$token
-            if { [dict exists $vm -master] \
-                    && [string is true [dict get $vm -master]] } {
-                lappend cmd --swarm-master
+    
+    # Take care of old Docker Swarm. Turn it on in the first place, and
+    # recognise the key master (and request for a swarm master when it is on).
+    if { $swarmmode eq "" } {
+        if { $token ne "" } {
+            if { ([dict exists $vm -swarm] \
+                        && (([string is boolean -strict [dict get $vm -swarm]] \
+                                && ![string is false [dict get $vm -swarm]])
+                            || ![string is boolean -strict [dict get $vm -swarm]])) \
+                    || ![dict exists $vm -swarm] } {
+                lappend cmd --swarm --swarm-discovery token://$token
+                if { [dict exists $vm -master] \
+                            && [string is true [dict get $vm -master]] } {
+                    lappend cmd --swarm-master
+                }
+            } else {
+                log NOTICE "Swarm is turned off for this machine"
             }
         } else {
             log NOTICE "Swarm is turned off for this machine"
         }
-    } else {
-        log NOTICE "Swarm is turned off for this machine"
     }
-
+    
     # Add the tags, if version permits.
     if { [vcompare ge [Version machine] 0.4] } {
         if { [dict exists $vm -labels] } {
@@ -2061,12 +2139,12 @@ proc ::cluster::Create { vm { token "" } } {
             }
         }
     }
-
+    
     # Finalise command by adding to it the name of the machine that we
     # want to create and run it.
     lappend cmd $nm
     eval $cmd
-
+    
     # Test SSH connection by getting the version of docker using ssh.
     # This seems to be necessary to make docker-machine happy and
     # we'll compare to our local version below for upgrades.
@@ -2078,14 +2156,25 @@ proc ::cluster::Create { vm { token "" } } {
         return ""
     } else {
         log INFO "Machine $nm running docker v. $remote_version,\
-                  running v. [Version docker] locally"
+                running v. [Version docker] locally"
         if { [vcompare gt $docker_version $remote_version] } {
             log NOTICE "Local docker version greater than machine,\
-                        trying an upgrade"
+                    trying an upgrade"
             Machine -- -s [storage $vm] upgrade $nm
         }
     }
-
+    
+    # Initiate or join swarm in swarm mode.
+    if { $swarmmode ne "" } {
+        if { ([dict exists $vm -swarm] \
+                    && (([string is boolean -strict [dict get $vm -swarm]] \
+                            && ![string is false [dict get $vm -swarm]])
+                        || ![string is boolean -strict [dict get $vm -swarm]])) \
+                || ![dict exists $vm -swarm] } {
+            swarmmode join $vm
+        }
+    }
+        
     return [dict get $vm -name]
 }
 
@@ -2093,50 +2182,50 @@ proc ::cluster::Create { vm { token "" } } {
 proc ::cluster::MachineOptions { driver } {
     log INFO "Actively discovering creation options"
     set machopts {};  # Empty list of discovered options
-
+    
     foreach l [Machine -return -- create --driver $driver] {
-	# Only considers indented lines, they contain the option
-	# descriptions (there are a lot!).
-	if { [string trim $l] ne "" && [string trimleft $l] ne $l } {
-	    set l [string trim $l]
-	    # Now only consider lines that start with a dash.
-	    if { [string index $l 1] eq "-" } {
-		# Get rid of the option textual description behind the
-		# first tab.
-		set tab [string first "\t" $l]
-		set lead [string trim [string range $l 0 $tab]]
-		# Now isolate the real option, starting from the back
-		# of the string.  Try capturing the default value if
-		# any.
-		set def_val {};   # Default value is empty by default
-		set back [expr {[string length $lead]-1}];  # End of lead
-		# Default value is at end, between quotes.
-		if { [string index $lead end] eq "\"" } {
-		    set op_quote [string last "\"" $lead end-1]
-		    set back [expr {$op_quote-1}];  # Skip default val
-		    set def_val [string trim [string range $lead $op_quote end] "\""]
-		}
-		# Skip multioption specification, which is enclosed by
-		# brackets.
-		set idx [string last "\]" $lead]
-		if { $idx >= 0 } {
-		    set back [expr {[string last "\[" $lead $idx]-1}]
-		}
-		# When we are here, the variable back contains the
-		# location within the lead where the options
-		# specifications are contained.  Split on coma and
-		# pick up the first with a double dash.
-		foreach opt [split [string range $lead 0 $back] ","] {
-		    set opt [string trim $opt]
-		    if { [string range $opt 0 1] eq "--" } {
-			lappend machopts [string range $opt 2 end] $def_val
-			break;   # Done, we have found one!
-		    }
-		}
-	    }
-	}
+        # Only considers indented lines, they contain the option
+        # descriptions (there are a lot!).
+        if { [string trim $l] ne "" && [string trimleft $l] ne $l } {
+            set l [string trim $l]
+            # Now only consider lines that start with a dash.
+            if { [string index $l 1] eq "-" } {
+                # Get rid of the option textual description behind the
+                # first tab.
+                set tab [string first "\t" $l]
+                set lead [string trim [string range $l 0 $tab]]
+                # Now isolate the real option, starting from the back
+                # of the string.  Try capturing the default value if
+                # any.
+                set def_val {};   # Default value is empty by default
+                set back [expr {[string length $lead]-1}];  # End of lead
+                # Default value is at end, between quotes.
+                if { [string index $lead end] eq "\"" } {
+                    set op_quote [string last "\"" $lead end-1]
+                    set back [expr {$op_quote-1}];  # Skip default val
+                    set def_val [string trim [string range $lead $op_quote end] "\""]
+                }
+                # Skip multioption specification, which is enclosed by
+                # brackets.
+                set idx [string last "\]" $lead]
+                if { $idx >= 0 } {
+                    set back [expr {[string last "\[" $lead $idx]-1}]
+                }
+                # When we are here, the variable back contains the
+                # location within the lead where the options
+                # specifications are contained.  Split on coma and
+                # pick up the first with a double dash.
+                foreach opt [split [string range $lead 0 $back] ","] {
+                    set opt [string trim $opt]
+                    if { [string range $opt 0 1] eq "--" } {
+                        lappend machopts [string range $opt 2 end] $def_val
+                        break;   # Done, we have found one!
+                    }
+                }
+            }
+        }
     }
-
+    
     return $machopts
 }
 
@@ -2162,8 +2251,8 @@ proc ::cluster::MachineOptions { driver } {
 proc ::cluster::POpen4 { args } {
     foreach chan {In Out Err} {
         lassign [chan pipe] read$chan write$chan
-    } 
-
+    }
+    
     if { [catch {exec {*}$args <@$readIn >@$writeOut 2>@$writeErr &} pid] } {
         foreach chan {In Out Err} {
             chan close write$chan
@@ -2174,7 +2263,7 @@ proc ::cluster::POpen4 { args } {
     }
     chan close $writeOut
     chan close $writeErr
-
+    
     foreach chan [list stdout stderr $readOut $readErr $writeIn] {
         chan configure $chan -buffering line -blocking false
     }
@@ -2204,60 +2293,60 @@ proc ::cluster::POpen4 { args } {
 #       Read lines, outputs
 proc ::cluster::LineRead { c fd } {
     upvar \#0 $c CMD
-
+    
     set line [gets $CMD($fd)]
     set outlvl [expr {$fd eq "stderr" ? "NOTICE":"INFO"}]
     # Parse and analyse output of docker-machine. Do some translation
     # of the loglevels between logrus and our internal levels.
     set bin [lindex $CMD(command) 0]
     if { [string first ${vars::-machine} $bin] >= 0 } {
-	if { [string first "msg=" $line] >= 0 } {
-	    foreach {k v} [string map {"=" " "} $line] {
-		if { $k eq "msg" } {
-		    set line $v
-		    break
-		}
-		# Translate between loglevels from logrus to internal
-		# levels.
-		if { $k eq "level" } {
-		    foreach { gl lvl } [list info INFO \
-					    warn NOTICE \
-					    error WARN \
-					    fatal ERROR \
-					    panic FATAL] {
-			if { [string equal -nocase $v $gl] } {
-			    set outlvl $lvl
-			}
-		    }
-		}
-	    }
-	}
+        if { [string first "msg=" $line] >= 0 } {
+            foreach {k v} [string map {"=" " "} $line] {
+                if { $k eq "msg" } {
+                    set line $v
+                    break
+                }
+                # Translate between loglevels from logrus to internal
+                # levels.
+                if { $k eq "level" } {
+                    foreach { gl lvl } [list info INFO \
+                            warn NOTICE \
+                            error WARN \
+                            fatal ERROR \
+                            panic FATAL] {
+                        if { [string equal -nocase $v $gl] } {
+                            set outlvl $lvl
+                        }
+                    }
+                }
+            }
+        }
     }
     # Respect -keepblanks and output or accumulate in result
     if { ( !$CMD(keep) && [string trim $line] ne "") || $CMD(keep) } {
-	if { $CMD(back) } {
-	    if { ( $CMD(outerr) && $fd eq "stderr" ) || $fd eq "stdout" } {
-		log TRACE "Appending '$line' to result"
-		lappend CMD(result) $line
-	    }
-	} elseif { $CMD(relay) } {
-	    puts $fd $line
-	} else {
-	    # Output even what was captured on stderr, which is
-	    # probably what we wanted in the first place.
-	    log $outlvl "  $line"
-	}
+        if { $CMD(back) } {
+            if { ( $CMD(outerr) && $fd eq "stderr" ) || $fd eq "stdout" } {
+                log TRACE "Appending '$line' to result"
+                lappend CMD(result) $line
+            }
+        } elseif { $CMD(relay) } {
+            puts $fd $line
+        } else {
+            # Output even what was captured on stderr, which is
+            # probably what we wanted in the first place.
+            log $outlvl "  $line"
+        }
     }
-
+    
     # On EOF, we stop this very procedure to be triggered.  If there
     # are no more outputs to listen to, then the process has ended and
     # we are done.
     if { [eof $CMD($fd)] } {
-	fileevent $CMD($fd) readable {}
-	if { ($CMD(stdout) eq "" || [fileevent $CMD(stdout) readable] eq "" ) \
-		 && ($CMD(stderr) eq "" || [fileevent $CMD(stderr) readable] eq "" ) } {
-	    set CMD(done) 1
-	}
+        fileevent $CMD($fd) readable {}
+        if { ($CMD(stdout) eq "" || [fileevent $CMD(stdout) readable] eq "" ) \
+                    && ($CMD(stderr) eq "" || [fileevent $CMD(stderr) readable] eq "" ) } {
+            set CMD(done) 1
+        }
     }
 }
 
@@ -2297,7 +2386,7 @@ proc ::cluster::Run { args } {
     } else {
         set opts [list]
     }
-
+    
     # Create an array global to the namespace that we'll use for
     # synchronisation and context storage.
     set c [namespace current]::command[incr ${vars::generator}]
@@ -2305,7 +2394,7 @@ proc ::cluster::Run { args } {
     set CMD(id) $c
     set CMD(command) $args
     log DEBUG "Executing $CMD(command) and capturing its output"
-
+    
     # Extract some options and start building the
     # pipe.  As we want to capture output of the command, we will be
     # using the Tcl command "open" with a file path that starts with a
@@ -2316,7 +2405,7 @@ proc ::cluster::Run { args } {
     set CMD(relay) [getopt opts -raw]
     set CMD(done) 0
     set CMD(result) {}
-
+    
     # Kick-off the command and wait for its end
     # Kick-off the command and wait for its end
     if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
@@ -2335,11 +2424,11 @@ proc ::cluster::Run { args } {
         fileevent $CMD(stderr) readable [namespace code [list LineRead $c stderr]]
     }
     vwait ${c}(done);   # Wait for command to end
-
+    
     catch {close $CMD(stdin)}
     catch {close $CMD(stdout)}
     catch {close $CMD(stderr)}
-
+    
     set res $CMD(result)
     unset $c
     return $res
@@ -2372,7 +2461,7 @@ proc ::cluster::Docker { args } {
     } else {
         set opts [list]
     }
-
+    
     # Put docker in debug mode when we are ourselves at debug level.
     if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --debug]
@@ -2427,7 +2516,7 @@ proc ::cluster::Compose { args } {
     } else {
         set opts [list]
     }
-
+    
     # Put docker in debug mode when we are ourselves at debug level.
     if { [LogLevel ${vars::-verbose}] >= 7 } {
         set args [linsert $args 0 --verbose]
@@ -2463,7 +2552,7 @@ proc ::cluster::Machine { args } {
     } else {
         set opts [list]
     }
-
+    
     # Put docker-machine in debug mode when we are ourselves at debug
     # level.
     if { [LogLevel ${vars::-verbose}] >= 7 } {
@@ -2472,7 +2561,7 @@ proc ::cluster::Machine { args } {
     if { 0 && [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
         set args [linsert $args 0 --native-ssh]
     }
-
+    
     return [eval Run $opts -- [auto_execok ${vars::-machine}] $args]
 }
 
@@ -2509,14 +2598,14 @@ proc ::cluster::Attach { vm args } {
     if { $external } {
         set nm $vm
     } else {
-        set nm [dict get $vm -name]    
+        set nm [dict get $vm -name]
     }
     if { $nm ne [lindex $vars::attached 0] \
-             || $swarm != [lindex $vars::attached 1] \
-             || $force } {
+                || $swarm != [lindex $vars::attached 1] \
+                || $force } {
         log INFO "Attaching to $nm"
         array set DENV {};   # Will hold the set of variables to be set.
-
+        
         set cmd [list Machine -return --]
         if { !$external } {
             lappend cmd -s [storage $vm]
@@ -2526,7 +2615,7 @@ proc ::cluster::Attach { vm args } {
             lappend cmd --swarm
         }
         lappend cmd $nm
-
+        
         set response [eval $cmd]
         if { [llength $response] > 0 } {
             foreach l $response {
@@ -2553,7 +2642,7 @@ proc ::cluster::Attach { vm args } {
                 set DENV(DOCKER_HOST) tcp://[dict get $response Driver IPAddress]:2376
             }
         }
-
+        
         if { [llength [array names DENV]] > 0 } {
             array set env [array get DENV]
             set vars::attached [list $nm $swarm]
@@ -2630,12 +2719,12 @@ proc ::cluster::Ports { pspec } {
             set host $pspec
         }
     }
-
+    
     # Arrange for an empty protocol to be tcp
     if { $proto eq "" } {
         set proto "tcp"
     }
-
+    
     # And make sure we only have udp or tcp as a port.
     switch -nocase -- $proto {
         "tcp" {
@@ -2649,10 +2738,10 @@ proc ::cluster::Ports { pspec } {
             return {}
         }
     }
-
+    
     # Scream whenever ports are not integer and return.
     if { [string is integer -strict $host] \
-             && [string is integer -strict $mchn] } {
+                && [string is integer -strict $mchn] } {
         if { $mchn < 0 } {
             set mchn $host
         }
@@ -2666,20 +2755,20 @@ proc ::cluster::Ports { pspec } {
 
 proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     set composed ""
-
+    
     if { [string toupper $op] ni {START STOP KILL RM UP} } {
         log WARM "Operation should be one of\
-                  [join {START STOP KILL RM UP} {, }]"
+                [join {START STOP KILL RM UP} {, }]"
         return $composed
     }
-
+    
     # Change dir to solve relative access to env files.  This is ugly,
     # but there does not seem to be any other solution at this point
     # for compose < 1.2
     if { [vcompare lt [Version compose] 1.2] } {
         cd [file dirname $fpath]
     }
-
+    
     # Perform substituion of environment variables if requested from
     # the VM description (and thus the YAML file).
     set temporaries {}
@@ -2691,7 +2780,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
         set fd [open $fpath]
         set yaml [Resolve [read $fd]]
         close $fd
-
+        
         # Parse the YAML project to see if it contains extending
         # services, in which case we need to make sure the extended
         # services are also available to the temporary copy.
@@ -2701,11 +2790,11 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
             if { [dict exists $p extends] && [dict exists $p extends file] } {
                 lappend associated [dict get $p extends file]
             }
-	    if { [dict exists $p env_file] } {
-		lappend associated [dict get $p env_file]
-	    }
+            if { [dict exists $p env_file] } {
+                lappend associated [dict get $p env_file]
+            }
         }
-
+        
         # Resolve the associated files, i.e. the one that the YAML
         # extends to a temporary location.
         set included {}
@@ -2715,56 +2804,56 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
             set src_path [file normalize [file join [file dirname $fpath] $f]]
             if { [file exists $src_path] } {
                 set rootname [file rootname [file tail $f]]
-		set ext [file extension $f]
+                set ext [file extension $f]
                 set tmp_fpath [Temporary \
-                                   [file join [TempDir] $rootname]]$ext
+                        [file join [TempDir] $rootname]]$ext
                 log INFO "Copying a resolved version of $src_path to\
-                          $tmp_fpath"
+                        $tmp_fpath"
                 set in_fd [open $src_path]
                 set out_fd [open $tmp_fpath w]
                 puts -nonewline $out_fd [Resolve [read $in_fd]]
                 close $in_fd
                 close $out_fd
-
+                
                 lappend temporaries $tmp_fpath
                 lappend included $f $tmp_fpath
             } else {
                 log WARN "Cannot find location of $f at $src_path!"
             }
         }
-
+        
         # Do some manual query/replace on the source YAML so that
         # mentions of relative extended services are replaced by a
         # reference to the temporary file resolved just above
         set i 0
         foreach {f dst} $included {
-	    # Replace and count replacements.
-	    set count 0
-	    while 1 {
-		set i [string first $f $yaml $i]
-		if { $i < 0 } {
-		    # Nothing left to be found, done!
-		    break
-		} else {
-		    # We've found a occurence of the filename, we
-		    # replace if we can find a preceeding file:
-		    # otherwise, we just advance.
-		    set extender [string last "file:" $yaml $i]
-		    if { $extender >= 0 } {
-			set j [expr {$i+[string length $f]-1}]
-			set yaml [string replace $yaml $i $j $dst]
-			# Advance to next possible, account for
-			# length of replacement.
-			incr i [expr {[string length $dst]-1}];
-			incr count 1
-		    } else {
-			incr i [expr {[string length $f]-1}]
-		    }
-		}
-	    }
-	    log DEBUG "Replaced $count occurrences of $f in source YAML"
+            # Replace and count replacements.
+            set count 0
+            while 1 {
+                set i [string first $f $yaml $i]
+                if { $i < 0 } {
+                    # Nothing left to be found, done!
+                    break
+                } else {
+                    # We've found a occurence of the filename, we
+                    # replace if we can find a preceeding file:
+                    # otherwise, we just advance.
+                    set extender [string last "file:" $yaml $i]
+                    if { $extender >= 0 } {
+                        set j [expr {$i+[string length $f]-1}]
+                        set yaml [string replace $yaml $i $j $dst]
+                        # Advance to next possible, account for
+                        # length of replacement.
+                        incr i [expr {[string length $dst]-1}];
+                        incr count 1
+                    } else {
+                        incr i [expr {[string length $f]-1}]
+                    }
+                }
+            }
+            log DEBUG "Replaced $count occurrences of $f in source YAML"
         }
-
+        
         # Copy resolved result to temporary file
         set projdirname [file tail [file dirname $fpath]]
         set projname [file rootname [file tail $fpath]]
@@ -2773,28 +2862,28 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
         puts -nonewline $fd $yaml
         close $fd
         lappend temporaries $tmp_fpath
-
+        
         log NOTICE "Substituting environment variables in\
-                    compose project at $fpath via $tmp_fpath"
+                compose project at $fpath via $tmp_fpath"
         if { $project eq "" } {
             set project $projdirname
         }
-
+        
         # Arrange for compose to pick up the temporary
         # file, but still use the proper project name.
         set cmd [list Compose -stderr -- \
-                     --file $tmp_fpath --project-name $project]
+                --file $tmp_fpath --project-name $project]
         set composed $tmp_fpath
     } else {
         if { $project eq "" } {
             set cmd [list Compose -stderr -- --file $fpath]
         } else {
             set cmd [list Compose -stderr -- \
-                         --file $fpath --project-name $project]
+                    --file $fpath --project-name $project]
         }
         set composed $fpath
     }
-
+    
     # Finalise command
     lappend cmd [string tolower $op]
     switch -nocase -- $op {
@@ -2809,23 +2898,23 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
             lappend cmd --force
         }
     }
-
+    
     # Run compose command that we have built up and return to the main
     # directory at once for older versions of compose
     eval $cmd
     if { [vcompare lt [Version compose] 1.2] } {
         cd $maindir
     }
-
+    
     # Cleanup files in temporaries list.
     if { $substitution < 2 && [llength $temporaries] > 0 } {
         log INFO "Cleaning up [llength $temporaries] temporary file(s)\
-                  from [TempDir]"
+                from [TempDir]"
         foreach tmp_fpath $temporaries {
             file delete -force -- $tmp_fpath
         }
     }
-
+    
     return $composed
 }
 
@@ -2859,23 +2948,23 @@ proc ::cluster::Mounting { vm {shares {}} {types *}} {
         }
         set shares [dict get $vm -shares]
     }
-
+    
     # Access origin to be able to resolve path of relative shares.
     set origin ""
     if { [dict exists $vm origin] } {
-	set origin [file dirname [dict get $vm origin]]
+        set origin [file dirname [dict get $vm origin]]
     }
-
+    
     # Detect default sharing type based on the driver of the virtual
     # machine.
     set sharing ""
     foreach {driver type} ${vars::-sharing} {
-	if { [string match $driver [dict get $vm -driver]] } {
-	    set sharing $type
-	    break
-	}
+        if { [string match $driver [dict get $vm -driver]] } {
+            set sharing $type
+            break
+        }
     }
-
+    
     # Convert xx:yy constructs to pairs of shares, convert single
     # shares to two shares (the same) and append all these pairs to
     # the list called opening.  Arrange for the list to only contain
@@ -2890,7 +2979,7 @@ proc ::cluster::Mounting { vm {shares {}} {types *}} {
             }
         }
     }
-
+    
     return $opening
 }
 
@@ -2919,7 +3008,7 @@ proc ::cluster::Shares { spec {origin ""} {type ""}} {
     set host ""
     set mchn ""
     set sharing ""
-
+    
     # Segregates list from the string representation of shares.
     if { [llength $spec] >= 2 } {
         foreach {host mchn sharing} $spec break
@@ -2931,16 +3020,16 @@ proc ::cluster::Shares { spec {origin ""} {type ""}} {
             set host $spec
         }
     }
-
+    
     # Make sure we have a sharing type if default and segragate away
     # types that are not recognised.
     if { $sharing eq "" } { set sharing $type }
     if { $sharing ne "" && $sharing ni $vars::sharing } {
 	log ERROR "Sharing type $sharing is not supported, should be one of\
-                   [join $vars::sharing ,\ ]"
-	return {}
+                [join $vars::sharing ,\ ]"
+        return {}
     }
-
+    
     # Resolve (local) environement variables to the values and make
     # sure relative directories are resolved.
     set host [Resolve $host]
@@ -2948,12 +3037,12 @@ proc ::cluster::Shares { spec {origin ""} {type ""}} {
     if { $mchn eq "" } {
         set mchn $host
     }
-
+    
     if { $origin ne "" } {
-	set host [file normalize [file join $origin $host]]
-	set mchn [file normalize [file join $origin $mchn]]
+        set host [file normalize [file join $origin $host]]
+        set mchn [file normalize [file join $origin $mchn]]
     }
-
+    
     # Scream on errors and return
     if { $host eq "" } {
         log ERROR "No host path specified!"
@@ -2971,12 +3060,12 @@ proc ::cluster::Shares { spec {origin ""} {type ""}} {
 
 proc ::cluster::ListParser { state { hdrfix {}} } {
     set content {};   # The list of dictionaries we will return
-
+    
     set cols [lindex $state 0]
     if { [llength $hdrfix] > 0 } {
-	set cols [string map $hdrfix $cols]
+        set cols [string map $hdrfix $cols]
     }
-
+    
     # Arrange for indices to contain the character index at which each
     # column of the output starts (in same order as the list of keys
     # above).
@@ -2984,7 +3073,7 @@ proc ::cluster::ListParser { state { hdrfix {}} } {
     foreach c $cols {
         lappend indices [string first $c $cols]
     }
-
+    
     # Now loop through all lines of the output, i.e. the complete
     # state of the cluster.
     foreach m [lrange $state 1 end] {
@@ -3006,9 +3095,9 @@ proc ::cluster::ListParser { state { hdrfix {}} } {
             set v [string range $m [lindex $indices $c] $end]
             dict set nfo [string trim [string tolower $k]] [string trim $v]
         }
-	lappend content $nfo
+        lappend content $nfo
     }
-
+    
     return $content
 }
 
@@ -3036,29 +3125,29 @@ proc ::cluster::Exec { vm args } {
         set substitution 0
         if { [dict exists $exe substitution] } {
             set substitution \
-                [string is true [dict get $exe substitution]]
+                    [string is true [dict get $exe substitution]]
         }
-
+        
         set cargs [list]
         if { [dict exists $exe args] } {
             set cargs [dict get $exe args]
         }
-
+        
         set remotely 0
         if { [dict exists $exe remote] } {
             set remotely [string is true [dict get $exe remote]]
         }
-
+        
         set copy 1
         if { [dict exists $exe copy] } {
             set copy [string is true [dict get $exe copy]]
         }
-
+        
         set keep 0
         if { [dict exists $exe keep] } {
             set keep [string is true [dict get $exe keep]]
         }
-
+        
         # Resolve using initial location of YAML description file
         set cmd ""
         set tmp_fpath ""
@@ -3070,7 +3159,7 @@ proc ::cluster::Exec { vm args } {
                     set fd [open $fpath]
                     set dta [Resolve [read $fd]]
                     close $fd
-        
+                    
                     # Dump to temporary location
                     set rootname [file rootname [file tail $fpath]]
                     set ext [file extension $fpath]
@@ -3078,7 +3167,7 @@ proc ::cluster::Exec { vm args } {
                     set fd [open $tmp_fpath w]
                     puts -nonewline $fd $dta
                     close $fd
-        
+                    
                     set cmd $tmp_fpath
                 } else {
                     set cmd $fpath
@@ -3102,9 +3191,9 @@ proc ::cluster::Exec { vm args } {
                 }
             } else {
                 log NOTICE "Executing $fpath locally (args: $cargs)"
-                Run -keepblanks -stderr -raw -- $cmd {*}$cargs                
+                Run -keepblanks -stderr -raw -- $cmd {*}$cargs
             }
-
+            
             # Remove temporary (subsituted) file, if any.
             if { $tmp_fpath ne "" && !$keep } {
                 file delete -force -- $tmp_fpath
@@ -3143,69 +3232,69 @@ proc ::cluster::Discovery { vm } {
     set pfx [string trimright ${vars::-prefix} "_"]_; # Force ending _ on prefix
     set prefixes [list $pfx[string map [list - _] [string toupper $nm]]]
     if { [dict exists $vm -aliases] } {
-	foreach alias [dict get $vm -aliases] {
-	    lappend prefixes $pfx[string map [list - _] [string toupper $alias]]
-	}
+        foreach alias [dict get $vm -aliases] {
+            lappend prefixes $pfx[string map [list - _] [string toupper $alias]]
+        }
     }
     if { [dict exists $vm origin] } {
         # Get current discovery values for this machine from the cache.
         set env_path [CacheFile [dict get $vm origin] ${vars::-ext}]
         set environment [EnvRead $env_path]
-
+        
         # Remove all keys that are associated to this machine's name
         # and aliases, we are going to override (or won't have any if
         # it was stopped!)
         dict for {k v} $environment {
-	    foreach pfx $prefixes {
-		if { [string first $pfx $k] == 0 } {
-		    dict unset environment $k
-		}
-	    }
+            foreach pfx $prefixes {
+                if { [string first $pfx $k] == 0 } {
+                    dict unset environment $k
+                }
+            }
         }
-
+        
         # If the machine is running, go get all information we can
         # about its network interfaces and its (main) IP address.
         if { [IsRunning $vm] } {
             # Get complete network interface description (except the
             # virtual interfaces)
             foreach itf [unix ifs $vm] {
-		foreach pfx $prefixes {
-		    set k ${pfx}_[string toupper [dict get $itf interface]]
-		    if { [dict exists $itf inet] } {
+                foreach pfx $prefixes {
+                    set k ${pfx}_[string toupper [dict get $itf interface]]
+                    if { [dict exists $itf inet] } {
 			log DEBUG "inet addr for [dict get $itf interface]\
-                                   is [dict get $itf inet]"
-			dict set environment ${k}_INET [dict get $itf inet]
-		    }
-		    if { [dict exists $itf inet6] } {
+                                is [dict get $itf inet]"
+                        dict set environment ${k}_INET [dict get $itf inet]
+                    }
+                    if { [dict exists $itf inet6] } {
 			log DEBUG "inet6 addr for [dict get $itf interface]\
-                                   is [dict get $itf inet6]"
-			dict set environment ${k}_INET6 [dict get $itf inet6]
-		    }
-		}
+                                is [dict get $itf inet6]"
+                        dict set environment ${k}_INET6 [dict get $itf inet6]
+                    }
+                }
             }
             # Add the official IP address, as this is what will be
             # usefull most of the time.
             set ip [lindex [Machine -return -- -s [storage $vm] ip $nm] 0]
             if { $ip ne "" \
-                     && [regexp {((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)|(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})} $ip] } {
-		foreach pfx $prefixes {
-		    if { [regexp {\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}} $ip] } {
-			dict set environment ${pfx}_IP $ip
-			dict set environment ${pfx}_HOSTNAME $ip
-		    }
-		    if { [regexp {(\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*} $ip] } {
-			dict set environment ${pfx}_HOSTNAME $ip
-			dict set environment ${pfx}_IP [::cluster::unix::resolve $ip]
-		    }
-		}
+                        && [regexp {((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)|(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})} $ip] } {
+                foreach pfx $prefixes {
+                    if { [regexp {\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}} $ip] } {
+                        dict set environment ${pfx}_IP $ip
+                        dict set environment ${pfx}_HOSTNAME $ip
+                    }
+                    if { [regexp {(\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*} $ip] } {
+                        dict set environment ${pfx}_HOSTNAME $ip
+                        dict set environment ${pfx}_IP [::cluster::unix::resolve $ip]
+                    }
+                }
             }
         }
-
+        
         # Dump the (modified) environment to the cache.
         log INFO "Writing cluster network information ($nm accounted)\
-                  to $env_path"
+                to $env_path"
         EnvWrite $env_path $environment
-
+        
         return $environment
     }
     return {}
@@ -3228,14 +3317,14 @@ proc ::cluster::Discovery { vm } {
 proc ::cluster::EnvSet { vm } {
     if { [dict exists $vm origin] } {
         set environment \
-            [EnvRead [CacheFile [dict get $vm origin] ${vars::-ext}]]
+                [EnvRead [CacheFile [dict get $vm origin] ${vars::-ext}]]
         dict for {k v} $environment {
             set ::env($k) $v
         }
     } else {
         set environment {}
     }
-
+    
     return $environment
 }
 
@@ -3266,7 +3355,7 @@ proc ::cluster::EnvRead { fpath } {
         close $fd
     }
     log DEBUG "Read [join [dict keys $d] {, }] from $fpath"
-
+    
     return $d
 }
 
@@ -3293,15 +3382,15 @@ proc ::cluster::EnvLine { d_ line } {
         # Skip leading "export" bash instruction
         if { [string first "export " $line] == 0 } {
             set line [string trim \
-                          [string range $line [string length "export "] end]]
+                    [string range $line [string length "export "] end]]
         }
         set eql [string first "=" $line]
         if { $eql >= 0 } {
             set k [string range $line 0 [expr {$eql-1}]]
             set v [string range $line [expr {$eql+1}] end]
             dict set d \
-                [string trim $k] \
-                [string trim [string trim [string trim $v] "'\""]]
+                    [string trim $k] \
+                    [string trim [string trim [string trim $v] "'\""]]
             return [string trim $k]
         }
     }
@@ -3325,7 +3414,7 @@ proc ::cluster::EnvLine { d_ line } {
 #       None.
 proc ::cluster::EnvWrite { fpath enviro { quote "\""} } {
     log DEBUG "Writing [join [dict keys $enviro] {, }] to\
-               description file at $fpath"
+            description file at $fpath"
     set fd [open $fpath "w"]
     dict for {k v} $enviro {
         if { [string first " " $v] < 0 } {
@@ -3365,7 +3454,7 @@ proc ::cluster::Resolve { str } {
         lappend mapper \$\{${e}\} [set ::env($e)]
     }
     set quick [string map $mapper $str]
-
+    
     # Iteratively modify quick for replacing occurences of
     # ${name:default} constructs.  We do this until there are no
     # match.
@@ -3386,17 +3475,17 @@ proc ::cluster::Resolve { str } {
             # value, otherwise replace with the default value.
             if { [info exists ::env($var)] } {
                 set quick [string replace $quick $range_start $range_stop \
-                               [set ::env($var)]]
+                        [set ::env($var)]]
             } else {
                 foreach {dft_start dft_stop} $dft break
                 set quick [string replace $quick $range_start $range_stop \
-                               [string range $quick $dft_start $dft_stop]]
+                        [string range $quick $dft_start $dft_stop]]
             }
         } else {
             set done 1
         }
     }
-
+    
     return $quick
 }
 
@@ -3442,7 +3531,7 @@ proc ::cluster::LogTerminal { lvl msg } {
     } else {
         append line $msg
     }
-
+    
     return $line
 }
 
@@ -3503,7 +3592,7 @@ proc ::cluster::Temporary { pfx } {
         }
     }
     if { $dirname eq "." || $dirname eq "" } {
-        return ${nm}-[pid]-[expr {int(rand()*1000)}]        
+        return ${nm}-[pid]-[expr {int(rand()*1000)}]
     } else {
         return [file join $dirname ${nm}-[pid]-[expr {int(rand()*1000)}]]
     }
@@ -3530,8 +3619,8 @@ proc ::cluster::CacheFile { yaml ext } {
     set dirname [file dirname $yaml]
     set rootname [string trimleft [file rootname [file tail $yaml]] .]
     set path [file join [pwd] $dirname \
-                  ".$rootname.[string trimleft $ext .]"]
-
+            ".$rootname.[string trimleft $ext .]"]
+    
     return $path
 }
 
@@ -3555,18 +3644,18 @@ proc ::cluster::CacheFile { yaml ext } {
 proc ::cluster::NameCmp { name nm {op equal}} {
     # Lookup with proper name
     if { [string $op $nm $name] } {
-	return 1
+        return 1
     }
     # Lookup the separator separating the prefix from the machine name
     # and match on the name.
     set sep [string first ${vars::-separator} $name]
     if { $sep >= 0 } {
-	incr sep [string length ${vars::-separator}]
-	if { [string $op $nm [string range $name $sep end]] } {
-	    return 1
-	}
+        incr sep [string length ${vars::-separator}]
+        if { [string $op $nm [string range $name $sep end]] } {
+            return 1
+        }
     }
-
+    
     return 0
 }
 
@@ -3608,20 +3697,20 @@ proc ::cluster::VersionQuery { tool } {
 proc ::cluster::CommandsQuery { tool } {
     set hlp {}
     switch -nocase -- $tool {
-	docker {
-	    set hlp [Docker -return -keepblanks -- --help]
-	}
-	machine {
-	    set hlp [Machine -return -keepblanks -- --help]
-	}
-	compose {
-	    set hlp [Compose -return -keepblanks -- --help]
-	}
-	default {
-	    log WARN "$tool isn't a tool that we can query the commands for"
-	}
+        docker {
+            set hlp [Docker -return -keepblanks -- --help]
+        }
+        machine {
+            set hlp [Machine -return -keepblanks -- --help]
+        }
+        compose {
+            set hlp [Compose -return -keepblanks -- --help]
+        }
+        default {
+            log WARN "$tool isn't a tool that we can query the commands for"
+        }
     }
-
+    
     # Analyse the output of the help for the tool, they are all
     # formatted more or less the same way.  We look for a line that
     # starts with commands and considers that it marks the beginning
@@ -3629,38 +3718,38 @@ proc ::cluster::CommandsQuery { tool } {
     set commands {}
     set c_group 0
     foreach l $hlp {
-	if { $c_group } {
-	    set l [string trim $l]
-	    # Empty line marks the end of the command description
-	    # group, return what we've found.
-	    if { $l eq "" } {
-		return $commands
-	    }
-	    # Look for a separator between the command name(s) and
-	    # its/their description.  We prefer the tab, but accept
-	    # also a double space.
-	    set sep [string first "\t" $l]
-	    if { $sep < 0 } {
-		set sep [string first "  " $l]
-	    }
-	    # Separate the command name(s) from the description, split
-	    # on the coma sign in case there were aliases, then add
-	    # each command in turns.
-	    if { $sep < 0 } {
-		log WARN "Cannot find command leading '$l'"
-	    } else {
-		set spec [string trim [string range $l 0 $sep]]
-		foreach c [split $spec ,] {
-		    lappend commands [string trim $c]
-		}
-	    }
-	} else {
-	    # We don't do anything until we've found a line that marks
-	    # the start of the command description group.
-	    if { [string match -nocase "commands*" $l] } {
-		set c_group 1
-	    }
-	}
+        if { $c_group } {
+            set l [string trim $l]
+            # Empty line marks the end of the command description
+            # group, return what we've found.
+            if { $l eq "" } {
+                return $commands
+            }
+            # Look for a separator between the command name(s) and
+            # its/their description.  We prefer the tab, but accept
+            # also a double space.
+            set sep [string first "\t" $l]
+            if { $sep < 0 } {
+                set sep [string first "  " $l]
+            }
+            # Separate the command name(s) from the description, split
+            # on the coma sign in case there were aliases, then add
+            # each command in turns.
+            if { $sep < 0 } {
+                log WARN "Cannot find command leading '$l'"
+            } else {
+                set spec [string trim [string range $l 0 $sep]]
+                foreach c [split $spec ,] {
+                    lappend commands [string trim $c]
+                }
+            }
+        } else {
+            # We don't do anything until we've found a line that marks
+            # the start of the command description group.
+            if { [string match -nocase "commands*" $l] } {
+                set c_group 1
+            }
+        }
     }
     return $commands
 }
@@ -3688,7 +3777,7 @@ proc ::cluster::Version { tool } {
             if { [dict get $vars::versions $tool] eq "" } {
                 dict set vars::versions $tool [VersionQuery $tool]
                 log DEBUG "Current version for $tool is\
-                           [dict get $vars::versions $tool]"
+                        [dict get $vars::versions $tool]"
             }
             return [dict get $vars::versions $tool]
         }
@@ -3726,27 +3815,27 @@ proc ::cluster::Convert { spec {dft ""} { unit "" } { precision "%.01f"} } {
     # Extract value and first letter of unit specification from
     # string.
     set len [scan $spec "%f %c" val ustart]
-
+    
     # Convert incoming string to number of bytes in metric format,
     # see: http://en.wikipedia.org/wiki/Gigabyte
     if { $len == 2 } {
-	set i [string first [format %c $ustart] $spec]
-	set m [Multiplier [string range $spec $i end]]
-	set val [expr {$val*$m}]
+        set i [string first [format %c $ustart] $spec]
+        set m [Multiplier [string range $spec $i end]]
+        set val [expr {$val*$m}]
     } else {
-	if { $dft ne "" } {
-	    set m [Multiplier $dft]
-	    set val [expr {$val*$m}]
-	}
+        if { $dft ne "" } {
+            set m [Multiplier $dft]
+            set val [expr {$val*$m}]
+        }
     }
-
+    
     # Now convert back to the requested size
     if { $unit ne "" } {
-	set m [Multiplier $unit]
-	set val [expr {$val/$m}]
+        set m [Multiplier $unit]
+        set val [expr {$val/$m}]
     }
     if { [string match "*.0" $val] } {
-	return [expr {int($val)}]
+        return [expr {int($val)}]
     }
     return [format $precision $val]
 }
@@ -3754,9 +3843,9 @@ proc ::cluster::Convert { spec {dft ""} { unit "" } { precision "%.01f"} } {
 
 proc ::cluster::Multiplier { unit } {
     foreach {rx m} $vars::converters {
-	if { [regexp -nocase -- $rx $unit] } {
-	    return $m
-	}
+        if { [regexp -nocase -- $rx $unit] } {
+            return $m
+        }
     }
     
     return -code error "$unit is not a recognised multiple of bytes"
@@ -3793,9 +3882,9 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 5 } } {
         set machines [ls [storage $vm] $nm]
         if { [llength $machines] == 1 } {
             set mchn [lindex $machines 0]
-	    # If we have a state in the dictionary, match it against
-	    # the ones that we should stop at and, in that case,
-	    # return.
+            # If we have a state in the dictionary, match it against
+            # the ones that we should stop at and, in that case,
+            # return.
             if { [dict exists $mchn state] } {
                 foreach s $states {
                     if { [string equal -nocase [dict get $mchn state] $s] } {
@@ -3805,7 +3894,7 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 5 } } {
                 }
             }
         }
-	# Go on trying, this accepts floating number of seconds...
+        # Go on trying, this accepts floating number of seconds...
         incr retries -1;
         if { $retries > 0 } {
             log INFO "Still waiting for machine $nm to reach proper state..."
@@ -3839,22 +3928,22 @@ proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
         set retries ${vars::-retries}
     }
     while { $retries > 0 } {
-	log DEBUG "Waiting for $nm to be running..."
-	set state [Wait $vm]
-	if { $state eq "running" } {
-	    set vm [bind $vm]
-	    if { [dict exists $vm url] && [dict get $vm url] ne "" } {
-		return $vm
-	    } else {
-		log INFO "Machine $nm was $state, but docker not yet ready"
-	    }
-	} else {
-	    log INFO "Machine $nm was not $state"
-	}
-	after [expr {int($sleep*1000)}]
+        log DEBUG "Waiting for $nm to be running..."
+        set state [Wait $vm]
+        if { $state eq "running" } {
+            set vm [bind $vm]
+            if { [dict exists $vm url] && [dict get $vm url] ne "" } {
+                return $vm
+            } else {
+                log INFO "Machine $nm was $state, but docker not yet ready"
+            }
+        } else {
+            log INFO "Machine $nm was not $state"
+        }
+        after [expr {int($sleep*1000)}]
     }
     log WARN "Gave up waiting for $nm to be fully started!"
-
+    
     return {}
 }
 
@@ -3878,9 +3967,9 @@ proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
 proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
     set nm [dict get $vm -name]
     if { $d_fname eq "" } {
-	set d_fname $s_fname
+        set d_fname $s_fname
     }
-
+    
     if { [vcompare ge [Version machine] 0.3] } {
         set storage [storage $vm]
         # On windows we need to trick the underlying scp of docker-machine,
@@ -3915,12 +4004,12 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
             set src $s_fname
         }
         if { [string is true $recurse] } {
-            Machine -stderr -- -s $storage scp -r $src ${nm}:${d_fname}            
+            Machine -stderr -- -s $storage scp -r $src ${nm}:${d_fname}
         } else {
-            Machine -stderr -- -s $storage scp $src ${nm}:${d_fname}            
+            Machine -stderr -- -s $storage scp $src ${nm}:${d_fname}
         }
     } else {
-	unix defaults -ssh [SCommand $vm]
+        unix defaults -ssh [SCommand $vm]
         unix scp $vm $s_fname $d_fname
     }
 }
@@ -3951,29 +4040,29 @@ proc ::cluster::SCommand { vm } {
     set nm [dict get $vm -name]
     set ssh {}
     if { ${vars::-ssh} ne "" } {
-	set nfo [inspect $vm]
-	set mapper [list \
-			"%port%" [dict get $nfo Driver SSHPort] \
-			"%host%" [dict get $nfo Driver IPAddress] \
-			"%user%" [dict get $nfo Driver SSHUser]]
-	set id_path [file join [dict get $nfo StorePath] id_rsa]
-	if { [file exists $id_path] } {
-	    lappend mapper "%identity%" $id_path
-	}
-	set ssh [string map $mapper ${vars::-ssh}]
+        set nfo [inspect $vm]
+        set mapper [list \
+                "%port%" [dict get $nfo Driver SSHPort] \
+                "%host%" [dict get $nfo Driver IPAddress] \
+                "%user%" [dict get $nfo Driver SSHUser]]
+        set id_path [file join [dict get $nfo StorePath] id_rsa]
+        if { [file exists $id_path] } {
+            lappend mapper "%identity%" $id_path
+        }
+        set ssh [string map $mapper ${vars::-ssh}]
     } else {
-	set ssh [unix remote $vm]
+        set ssh [unix remote $vm]
     }
-
+    
     # Extract user name and host name from last argument if possible.
     # This follows RFC1123 for the extraction of the hostname (but is
     # probably wrong for non-latin chars?
     set last [lindex $ssh end]
     if { [regexp {(\w+)@((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)} $last x uname hname] } {
-	set ssh [lrange $ssh 0 end-1]
-	lappend ssh -l $uname $hname
+        set ssh [lrange $ssh 0 end-1]
+        lappend ssh -l $uname $hname
     }
-
+    
     return $ssh
 }
 
@@ -3984,23 +4073,23 @@ proc ::cluster::InstallRSync { vm } {
     set installer ""
     set id [OSIdentifier $vm]
     switch -glob -nocase -- $id {
-	"debian*" -
-	"ubuntu*" {
-	    # Ubuntu
-	    set installer "sudo apt-get update; sudo apt-get install -y rsync"
-	}
-	"*docker" {
-	    # Boot2docker
-	    set installer "tce-load -wi rsync"
-	}
+        "debian*" -
+        "ubuntu*" {
+            # Ubuntu
+            set installer "sudo apt-get update; sudo apt-get install -y rsync"
+        }
+        "*docker" {
+            # Boot2docker
+            set installer "tce-load -wi rsync"
+        }
     }
-
+    
     if { $installer eq "" } {
 	log WARN "Cannot install rsync in $nm: OS '$id' in $nm\
-                  is not (yet?) supported"
+                is not (yet?) supported"
     } else {
-	log NOTICE "Installing rsync in $nm"
-	Machine -- -s [storage $vm] ssh $nm $installer
+        log NOTICE "Installing rsync in $nm"
+        Machine -- -s [storage $vm] ssh $nm $installer
     }
 }
 
@@ -4009,7 +4098,7 @@ proc ::cluster::OSInfo { vm } {
     set nfo {}
     set nm [dict get $vm -name]
     foreach l [Machine -return -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
-	set k [EnvLine nfo $l]
+        set k [EnvLine nfo $l]
     }
     
     return $nfo
@@ -4019,9 +4108,9 @@ proc ::cluster::OSInfo { vm } {
 proc ::cluster::OSIdentifier { vm } {
     set nfo [OSInfo $vm]
     if { [dict exists $nfo ID] } {
-	return [dict get $nfo ID]
+        return [dict get $nfo ID]
     } else {
-	return ""
+        return ""
     }
 }
 
@@ -4036,7 +4125,7 @@ proc ::cluster::AbsolutePath { vm fpath { native 0 } } {
     if { [string is true $native] } {
         set fpath [file nativename $fpath]
     }
-
+    
     return $fpath
 }
 
@@ -4048,10 +4137,10 @@ proc ::cluster::TempDir {} {
     
     if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
         set resolutions [list USERPROFILE AppData/Local/Temp \
-                                    windir TEMP \
-                                    SystemRoot TEMP \
-                                    TEMP "" TMP "" \
-                                    "" "C:/TEMP" "" "C:/TMP" "" "C:/"]
+                windir TEMP \
+                SystemRoot TEMP \
+                TEMP "" TMP "" \
+                "" "C:/TEMP" "" "C:/TMP" "" "C:/"]
     } else {
         set resolutions [list TMP "" "" /tmp]
     }
@@ -4114,11 +4203,11 @@ proc ::cluster::DefaultMachine {} {
         # Docker for Windows beta or we were attached to something (something
         # else?)
         set info [dict create]; # Dictionary to hold info parsing results
-
+        
         # Parse what was returned by docker info. As it is a tree, using
         # indentation, we represent the different levels by dot-separated keys.
         # (the format is not compatible with what Tcl considers as a dictionary)
-        set lvl [list]        
+        set lvl [list]
         foreach l $d_info {
             set clean [string trimleft $l]
             # Key and value are composed of what is directly before and
@@ -4128,7 +4217,7 @@ proc ::cluster::DefaultMachine {} {
             if { $colon >= 0 } {
                 set k [string trim [string range $clean 0 [expr {$colon-1}]]]
                 set v [string trim [string range $clean [expr {$colon+1}] end]]
-
+                
                 # Count the number of spaces and compare to the current level
                 # (this suppose one space for indentation)
                 set lead [expr {[string length $l]-[string length $clean]}]
@@ -4142,12 +4231,12 @@ proc ::cluster::DefaultMachine {} {
                 dict set info [join $lvl .] $v
             }
         }
-
+        
         # If the machine against which we are running is a boot2docker machine,
         # good chance is that we are running against the docker toolbox (and had
         # attached to the default machine).
         if { [dict exists $info "Operating System"] \
-                && [string match -nocase "*Boot2Docker*" [dict get $info "Operating System"]] } {
+                    && [string match -nocase "*Boot2Docker*" [dict get $info "Operating System"]] } {
             # Pick up the machine that we had attached to, or "default" if we
             # can't find one.
             if { [dict exists $info "Name"] } {
@@ -4167,7 +4256,7 @@ proc ::cluster::DefaultMachine {} {
         foreach nfo [ListParser $state] {
             # Add only machines which name matches the incoming pattern.
             if { [dict exists $nfo name] \
-                     && [dict get $nfo name] eq "default" } {
+                        && [dict get $nfo name] eq "default" } {
                 return "default"
             }
         }
@@ -4176,4 +4265,13 @@ proc ::cluster::DefaultMachine {} {
     return ""
 }
 
+
+proc ::cluster::Machines { cluster } {
+    if { [dict exists $cluster -machines] } {
+        return [dict get $cluster -machines]
+    }
+    return $cluster
+}
+
 package provide cluster 0.4
+

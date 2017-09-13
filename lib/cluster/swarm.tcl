@@ -7,9 +7,9 @@ namespace eval ::cluster::swarm {
     namespace eval vars {
         # Extension for token storage files
         variable -ext       .tkn
-	# Name of master agent and agents
-	variable -agent     "swarm-agent"
-	variable -master    "swarm-agent-master"
+        # Name of master agent and agents
+        variable -agent     "swarm-agent"
+        variable -master    "swarm-agent-master"
         # List of "on" state
         variable -running   {running timeout}
     }
@@ -20,6 +20,14 @@ namespace eval ::cluster::swarm {
     namespace export {[a-z]*}
     namespace path [namespace parent]
     namespace ensemble create -command ::swarm
+    namespace import [namespace parent]::Machine \
+            [namespace parent]::Machines \
+            [namespace parent]::IsRunning \
+            [namespace parent]::Attach \
+            [namespace parent]::Detach \
+            [namespace parent]::Docker \
+            [namespace parent]::Create \
+            [namespace parent]::CacheFile
 }
 
 
@@ -37,7 +45,7 @@ namespace eval ::cluster::swarm {
 # Side Effects:
 #       None.
 proc ::cluster::swarm::master { cluster } {
-    foreach vm $cluster {
+    foreach vm [Machines $cluster] {
         if { [dict exists $vm -master] } {
             if { [string is true [dict get $vm -master]] } {
                 return $vm
@@ -52,31 +60,30 @@ proc ::cluster::swarm::info { cluster } {
     # Dump out swarm master information
     set master [master $cluster]
     if { $master ne "" } {
-	if { [[namespace parent]::IsRunning $master] } {
-	    log NOTICE "Getting cluster info via\
-                        [dict get $master -name]"
-	    [namespace parent]::Attach $master -swarm
-	    [namespace parent]::Docker info
-	} else {
-	    log WARN "Cluster not bound or master not running"
-	}
+        if { [IsRunning $master] } {
+            log NOTICE "Getting cluster info via [dict get $master -name]"
+            Attach $master -swarm
+            Docker info
+        } else {
+            log WARN "Cluster not bound or master not running"
+        }
     } else {
-	log WARN "Cluster has no swarm master"
+        log WARN "Cluster has no swarm master"
     }
 }
 
 proc ::cluster::swarm::recapture { cluster } {
     set master [master $cluster]
     if { $master ne "" } {
-	if { [[namespace parent]::IsRunning $master] } {
-	    log NOTICE "Capturing current list of live machines in swarm"
-	    [namespace parent]::Attach $master
-	    [namespace parent]::Docker restart ${vars::-master}
-	} else {
-	    log WARN "Cluster not bound or master not running"
-	}
+        if { [IsRunning $master] } {
+            log NOTICE "Capturing current list of live machines in swarm"
+            Attach $master
+            Docker restart ${vars::-master}
+        } else {
+            log WARN "Cluster not bound or master not running"
+        }
     } else {
-	log WARN "Cluster has no swarm master"
+        log WARN "Cluster has no swarm master"
     }
 }
 
@@ -102,10 +109,10 @@ proc ::cluster::swarm::recapture { cluster } {
 #       None.
 proc ::cluster::swarm::token { yaml { force 0 } { driver virtualbox } } {
     set token ""
-
+    
     # Generate file name for token caching out of yaml path.
-    set tkn_path [[namespace parent]::CacheFile $yaml ${vars::-ext}]
-
+    set tkn_path [CacheFile $yaml ${vars::-ext}]
+    
     # Read from cache if we have a cache and force is not on.
     # Otherwise, generate a new token and cache it.
     if { [file exists $tkn_path] && [string is false $force] } {
@@ -143,7 +150,7 @@ proc ::cluster::swarm::token { yaml { force 0 } { driver virtualbox } } {
 #       virtual machine in which we will run "docker-machine run swarm
 #       create".  The temporary machine is removed once the token has
 #       been generated.  When the driver is empty, this will create
-#       the swarm token using a local component, thus leaving an extra
+#       the swarm token using a local container, thus leaving an extra
 #       image on the local machine.
 #
 # Arguments:
@@ -158,25 +165,26 @@ proc ::cluster::swarm::token { yaml { force 0 } { driver virtualbox } } {
 proc ::cluster::swarm::Token { {driver none} } {
     set token ""
     if { $driver eq "none" || $driver eq "" } {
-        [namespace parent]::Detach;   # Ensure we are running locally...
+        Detach;   # Ensure we are running locally...
         log INFO "Creating swarm token..."
-        set token [[namespace parent]::Docker -return -- run --rm swarm create]
+        set token [Docker -return -- run --rm swarm create]
         log NOTICE "Created cluster token $token"
     } else {
         set nm [Temporary "tokeniser"]
         log NOTICE "Creating machine $nm for token creation"
         set vm [dict create -name $nm -driver $driver]
-        if { [[namespace parent]::Create $vm] ne "" } {
-            [namespace parent]::Attach $vm
+        if { [Create $vm] ne "" } {
+            Attach $vm
             log INFO "Creating swarm token..."
-            set token [[namespace parent]::Docker -return -- run --rm swarm create]
+            set token [Docker -return -- run --rm swarm create]
             log NOTICE "Created cluster token $token"
-            [namespace parent]::Machine kill $nm;   # We want to make this quick!
-            [namespace parent]::Machine rm $nm
+            Machine kill $nm;   # We want to make this quick!
+            Machine rm $nm
         }
     }
     return $token
 }
 
 
-package provide cluster::swarm 0.2
+package provide cluster::swarm 0.3
+
