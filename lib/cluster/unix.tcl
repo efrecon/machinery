@@ -281,7 +281,7 @@ proc ::cluster::unix::remote { vm } {
 		    set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
 		}
 
-		log INFO "SSH command into $nm is '$cmd'"
+		log DEBUG "SSH command into $nm is '$cmd'"
 		return $cmd
 	    }
 	}
