@@ -514,13 +514,13 @@ proc ::api::cli::machines { cluster {shortnames {}} } {
 #
 # Side Effects:
 #       None.
-proc ::api::cli::up { vm token masters } {
+proc ::api::cli::up { vm token masters networks } {
     if { [dict exists $vm state] } {
         if { ![string equal -nocase [dict get $vm state] "running"] } {
             cluster start $vm
         }
     } else {
-        cluster create $vm $token $masters
+        cluster create $vm $token $masters $networks
     }
 }
 
@@ -584,7 +584,7 @@ proc ::api::cli::command { cmd args } {
                 set masters [swarmmode masters $cluster]
             }
             foreach vm [machines $cluster $args] {
-                up $vm $token $masters
+                up $vm $token $masters [dict get $cluster -networks]
             }
             if { [string match -nocase "docker*swarm" [dict get $cluster -options -clustering]] } {
                 ::cluster::swarm::recapture $cluster

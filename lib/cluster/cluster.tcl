@@ -89,6 +89,8 @@ namespace eval ::cluster {
         variable -sticky    off
         # Cluster state caching retention (in ms, negative for off)
         variable -retention 10000
+        # Defaults for networks
+        variable -networks  {-driver overlay -attachable true}
         # Supported sharing types.
         variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
@@ -468,8 +470,10 @@ proc ::cluster::bind { vm {ls -} {options {}} } {
         }
     }
     
-    # Copy options
-    dict set vm cluster $options
+    # Copy options if non empty
+    if { [llength $options] } {
+        dict set vm cluster $options
+    }
 
     # Return the new modified dictionary.
     return $vm
@@ -489,12 +493,21 @@ proc ::cluster::bind { vm {ls -} {options {}} } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::create { vm token masters } {
+proc ::cluster::create { vm token masters networks} {
     set nm [Create $vm $token $masters]
     
     if { $nm ne "" } {
         set vm [Running $vm]
         if { $vm ne {} } {
+            # Now that the machine is running, setup all swarm-wide networks if
+            # relevant.
+            if { [swarmmode mode $vm] eq "manager" && [llength $networks] } {
+                log INFO "Creating swarm-wide networks"
+                foreach net $networks {
+                    swarmmode network create $net $masters
+                }
+            }
+
             # Tag virtual machine with labels the hard-way, on older
             # versions.
             if { [vcompare lt [Version machine] 0.4] } {
@@ -1214,12 +1227,12 @@ proc ::cluster::shares { vm { shares {}} } {
                     puts $fd $l
                 }
                 close $fd
-		log DEBUG "Created temporary file with new bootlocal content at\
+                log DEBUG "Created temporary file with new bootlocal content at\
                         $fname"
                 
                 # Copy new file to same temp location, make sure it is
                 # executable and install it.
-		log INFO "Persisting shares at reboot through\
+                log INFO "Persisting shares at reboot through\
                         ${vars::-bootlocal}"
                 SCopy $vm $fname
                 Machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
@@ -1704,9 +1717,9 @@ proc ::cluster::parse { fname args } {
     # Get version, default to 1
     set version 1
     if { [dict exists $d version] } {
-        set version [dict get $d version]
-        if { ![string is double -strict $version] } {
-            log ERROR "Version $version is not a proper version number!"
+        set version [vcompare extract [dict get $d version]]
+        if { $version eq "" } {
+            log ERROR "Version [dict get $d version] does not contain a proper version number!"
             return {}
         }
     }
@@ -1724,6 +1737,37 @@ proc ::cluster::parse { fname args } {
         set machines [dict filter $d script {k v} \
                         { expr {![string equal $k "version"]}}]
     } elseif { [vcompare ge $version 2.0] } {
+        # Get list of external networks to create
+        if { [dict exists $d networks] } {
+            set opts [CommandOptions [Docker -return -- network create --help]]
+            dict for {n keys} [dict get $d networks] {
+                # Create net "object" with proper name, i.e. using the prefix.
+                # We also make sure that we keep a reference to the name of
+                # the file that the machine was originally read from.
+                if { $pfx eq "" } {
+                    set net [dict create -name $n origin $fname]
+                } else {
+                    set net [dict create -name ${pfx}${vars::-separator}$n origin $fname]
+                }
+                
+                # Set defaults for all networks
+                dict for {k v} ${vars::-networks} {
+                    dict set net -[string trimleft $k -] $v
+                }
+                
+                # Bring in options from network, as long as they are known
+                # options to create
+                dict for {k v} $keys {
+                    if { [lsearch [dict keys $opts] $k] < 0 } {
+                        log WARN "In $n, key $k is not recognised!"
+                    } else {
+                        dict set net -[string trimleft $k -] $v
+                    }
+                }
+                lappend networks $net
+            }
+        }
+
         if { [dict exists $d machines] } {
             set machines [dict get $d machines]
         } else {
@@ -1742,12 +1786,7 @@ proc ::cluster::parse { fname args } {
                     dict set options -[string trimleft $o -] $d
                 }
             }
-        }
-        
-        # Get list of external networks to create
-        if { [dict exists $d networks] } {
-            set networks [dict get $d networks]
-        }
+        }        
     }
 
     set master ""    
@@ -2180,6 +2219,9 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # Initiate or join swarm in swarm mode.
     if { [swarmmode mode $vm] ne "" } {
         swarmmode join $vm $masters
+        if { [swarmmode mode $vm] eq "manager" } {
+            swarmmode network xxx create $masters
+        }
     }
         
     return [dict get $vm -name]
@@ -2187,19 +2229,27 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
 
 
 proc ::cluster::MachineOptions { driver } {
-    log INFO "Actively discovering creation options"
-    set machopts {};  # Empty list of discovered options
+    log INFO "Actively discovering creation options for driver $driver"
+    return [CommandOptions [Machine -return -- create --driver $driver]]
+}
+
+
+proc ::cluster::CommandOptions { lines } {
+    set cmdopts {};  # Empty list of discovered options
     
-    foreach l [Machine -return -- create --driver $driver] {
+    foreach l $lines {
         # Only considers indented lines, they contain the option
-        # descriptions (there are a lot!).
+        # descriptions (there might be a lot!).
         if { [string trim $l] ne "" && [string trimleft $l] ne $l } {
             set l [string trim $l]
             # Now only consider lines that start with a dash.
-            if { [string index $l 1] eq "-" } {
+            if { [string index $l 0] eq "-" } {
                 # Get rid of the option textual description behind the
                 # first tab.
                 set tab [string first "\t" $l]
+                if { $tab < 0 } {
+                    set tab [string first "  " $l]
+                }
                 set lead [string trim [string range $l 0 $tab]]
                 # Now isolate the real option, starting from the back
                 # of the string.  Try capturing the default value if
@@ -2225,7 +2275,12 @@ proc ::cluster::MachineOptions { driver } {
                 foreach opt [split [string range $lead 0 $back] ","] {
                     set opt [string trim $opt]
                     if { [string range $opt 0 1] eq "--" } {
-                        lappend machopts [string range $opt 2 end] $def_val
+                        set space [string first " " $opt]
+                        if { $space >= 0 } {
+                            lappend cmdopts [string range $opt 2 [expr {$space - 1}]] $def_val                        
+                        } else {
+                            lappend cmdopts [string range $opt 2 end] $def_val
+                        }
                         break;   # Done, we have found one!
                     }
                 }
@@ -2233,7 +2288,7 @@ proc ::cluster::MachineOptions { driver } {
         }
     }
     
-    return $machopts
+    return $cmdopts    
 }
 
 # ::cluster::POpen4 -- Pipe open

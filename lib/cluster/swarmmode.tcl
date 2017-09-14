@@ -74,12 +74,7 @@ proc ::cluster::swarmmode::mode { vm } {
 proc ::cluster::swarmmode::join { vm masters } {
     # Construct a list of the running managers that are not the machine that we
     # want to make part of the cluster
-    set managers [list]
-    foreach mch $masters {
-        if { [dict get $mch -name] ne [dict get $vm -name] && [IsRunning $mch 1] } {
-            lappend managers $mch
-        }
-    }
+    set managers [Managers $masters $vm]
     
     # Now initialise or join (in most cases) the cluster
     if { [llength $managers] == 0 } {
@@ -173,6 +168,48 @@ proc ::cluster::swarmmode::leave { vm } {
 }
 
 
+proc ::cluster::swarmmode::network { cmd net masters } {
+    switch -nocase -- $cmd {
+        "up" -
+        "create" {
+            set managers [Managers $masters]
+            set mgr [PickManager $managers]
+            if { [dict exists $mgr -name] } {
+                set nm [dict get $mgr -name]
+                set id [NetworkID $mgr [dict get $net -name]]
+                if { $id eq "" } {
+                    # Construct network creation command out of network definition
+                    set cmd [list docker network create]
+                    dict for {k v} $net {
+                        if { $k ne "-name" && [string match -* $k] } {
+                            lappend cmd --[string trimleft $k -]=$v
+                        }
+                    }
+                    lappend cmd [dict get $net -name]
+                    set id [Machine -return -- -s [storage $mgr] ssh $nm $cmd]
+                    log NOTICE "Created swarm-wide network $id"
+                }
+                return $id
+            } else {
+                log WARN "No running manager to pick"
+            }
+        }
+        "destroy" -
+        "delete" -
+        "rm" -
+        "remove" -
+        "down" {
+            set managers [Managers $masters]
+            set mgr [PickManager $managers]
+            if { [dict exists $mgr -name] } {
+                set nm [dict get $mgr -name]
+                Machine -- -s [storage $mgr] ssh $nm "docker network rm $net"
+            }
+        }
+    }
+    return 0
+}
+
 
 # Actively initiate the (firt) node of a swarm
 proc ::cluster::swarmmode::Init { vm } {
@@ -200,6 +237,17 @@ proc ::cluster::swarmmode::Init { vm } {
     return "";   # Catch all errors
 }
 
+
+proc ::cluster::swarmmode::NetworkID { mgr name } {
+    set nm [dict get $mgr -name]
+    set networks [Machine -return -- -s [storage $mgr] ssh $nm "docker network ls --no-trunc=true"]
+    foreach n [ListParser $networks [list "NETWORK ID" NETWORK_ID]] {
+        if { [dict exists $n name] && [dict get $n name] eq $name } {
+            return [dict get $n network_id]
+        }
+    }
+    return ""
+}
 
 # Pick init/join options if there are some from swarm
 proc ::cluster::swarmmode::Options { cmd_ mode vm } {
@@ -237,6 +285,20 @@ proc ::cluster::swarmmode::PickManager { managers { ptn * } } {
     return [list]
 }
 
+
+proc ::cluster::swarmmode::Managers { masters {vm {}}} {
+    # Construct a list of the running managers that are not the machine that we
+    # want to make part of the cluster
+    set managers [list]
+    foreach mch $masters {
+        if { (![dict exists $vm -name] \
+                    || [dict get $mch -name] ne [dict get $vm -name]) \
+                && [IsRunning $mch] } {
+            lappend managers $mch
+        }
+    }
+    return $managers
+}
 
 
 # This should be the only proc to use.
