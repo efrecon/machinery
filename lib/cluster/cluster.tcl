@@ -87,6 +87,8 @@ namespace eval ::cluster {
         variable -running   {running timeout}
         # Force attachment via command line options
         variable -sticky    off
+        # Cluster state caching retention (in ms, negative for off)
+        variable -retention 10000
         # Supported sharing types.
         variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
@@ -130,6 +132,8 @@ namespace eval ::cluster {
         variable fpathCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.,=_"
         # Local volume mounts on windows
         variable volMounts {}
+        # Cluster status cache
+        variable cluster   { last 0 cluster {}}
     }
     # Automatically export all procedures starting with lower case and
     # create an ensemble for an easier API.
@@ -276,20 +280,37 @@ proc ::cluster::log { lvl msg } {
 #        machines    glob-style pattern to match on machine names
 #
 # Results:
-#       Return a list of dictionaries, one dictionary for the stat of
+#       Return a list of dictionaries, one dictionary for the state of
 #       each machine which name matches the argument.
 #
 # Side Effects:
 #       None.
-proc ::cluster::ls { yaml {machines *} } {
-    set cluster {};   # The list of dictionaries we will return
+proc ::cluster::ls { yaml {machines *} { force 0 } } {
+    # Decide if we really should capture
+    set now [clock milliseconds]
+    if { ${vars::-retention} < 0 } {
+        set capture 1
+    } elseif { $force } {
+        set capture 1
+    } else {
+        set capture [expr {$now - [dict get $vars::cluster last] > ${vars::-retention}}]
+        if { !$capture } {
+            log DEBUG "Skipping active capture of cluster overview, taking from cache instead"
+        }
+    }
     
     # Get current state of cluster and arrange for cols to be the list
     # of keys (this is the first line of docker-machine ls output,
     # meaning the header).
-    log NOTICE "Capturing current overview of cluster"
-    set state [Machine -return -- -s [StorageDir $yaml] ls]
-    foreach nfo [ListParser $state] {
+    if { $capture } {
+        log NOTICE "Capturing current overview of cluster"
+        set state [Machine -return -- -s [StorageDir $yaml] ls]
+        dict set vars::cluster cluster [ListParser $state]
+        dict set vars::cluster last $now
+    }
+    
+    set cluster {};   # The list of dictionaries we will return
+    foreach nfo [dict get $vars::cluster cluster] {
         # Add only machines which name matches the incoming pattern.
         if { [dict exists $nfo name] \
                     && [string match $machines [dict get $nfo name]] } {
@@ -468,19 +489,8 @@ proc ::cluster::bind { vm {ls -} {options {}} } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::create { vm token } {
-    # Create machine
-    set swarmmode ""
-    if { [string match -nocase "swarm*mode" \
-                [dict get $vm cluster -clustering]] } {
-        if { [dict exists $vm -master] \
-                && [string is true [dict get $vm -master]] } {
-            set swarmmode "master"
-        } else {
-            set swarmmode "worker"
-        }
-    }
-    set nm [Create $vm $token $swarmmode]
+proc ::cluster::create { vm token masters } {
+    set nm [Create $vm $token $masters]
     
     if { $nm ne "" } {
         set vm [Running $vm]
@@ -593,7 +603,7 @@ proc ::cluster::init { vm {steps {shares registries files images prelude compose
 }
 
 proc ::cluster::tempfile { pfx ext } {
-    return [Temporary [file join [TempDir] $pfx].[string trimleft $ext .]
+    return [Temporary [file join [TempDir] $pfx].[string trimleft $ext .]]
 }
 
 
@@ -1708,12 +1718,12 @@ proc ::cluster::parse { fname args } {
     set options {
         -clustering "docker swarm"
     }
-    if { $version >= 1.0 && $version < 2.0 } {
+    if { [vcompare ge $version 1.0] && [vcompare lt $version 2.0] } {
         # Isolate machines that are not named "version", this introduces a
         # backward compatibility!
         set machines [dict filter $d script {k v} \
                         { expr {![string equal $k "version"]}}]
-    } elseif { $version >= 2.0 } {
+    } elseif { [vcompare ge $version 2.0] } {
         if { [dict exists $d machines] } {
             set machines [dict get $d machines]
         } else {
@@ -2013,7 +2023,7 @@ proc ::cluster::+ { args } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::Create { vm { token "" } {swarmmode ""} } {
+proc ::cluster::Create { vm { token "" } {masters {}} } {
     set nm [dict get $vm -name]
     log NOTICE "Creating machine $nm"
     Detach
@@ -2038,6 +2048,7 @@ proc ::cluster::Create { vm { token "" } {swarmmode ""} } {
             vmwarefusion --vmwarefusion-memory-size
             vmwarevcloudair --vmwarevcloudair-memory-size
             vmwarevsphere --vmwarevsphere-memory-size
+            kvm --kvm-memory
         }
         if { [info exist MOPT($driver)] } {
             lappend cmd $MOPT($driver) [Convert [dict get $vm -memory] MiB MiB]
@@ -2051,6 +2062,7 @@ proc ::cluster::Create { vm { token "" } {swarmmode ""} } {
             softlayer --softlayer-cpu
             vmwarevcloudair --vmwarevcloudair-cpu-count
             vmwarevsphere --vmwarevsphere-cpu-count
+            kvm --kvm-cpu-count
         }
         # Setting the number of CPUs works with machine >= 0.2
         if { [vcompare ge [Version machine] 0.2] } {
@@ -2073,6 +2085,7 @@ proc ::cluster::Create { vm { token "" } {swarmmode ""} } {
             virtualbox --virtualbox-disk-size 1
             vmwarefusion --vmwarefusion-disk-size 1
             vmwarevsphere --vmwarevsphere-disk-size 1
+            kvm --kvm-disk-size 1
         }
         set found 0
         foreach { p opt mult } $SOPT {
@@ -2104,14 +2117,14 @@ proc ::cluster::Create { vm { token "" } {swarmmode ""} } {
                     lappend cmd --$k $v
                 }
             } else {
-                log WARM "--$k is not an option supported by 'create'"
+                log WARN "--$k is not an option supported by 'create'"
             }
         }
     }
     
     # Take care of old Docker Swarm. Turn it on in the first place, and
     # recognise the key master (and request for a swarm master when it is on).
-    if { $swarmmode eq "" } {
+    if { [llength $masters] == 0 } {
         if { $token ne "" } {
             if { ([dict exists $vm -swarm] \
                         && (([string is boolean -strict [dict get $vm -swarm]] \
@@ -2165,14 +2178,8 @@ proc ::cluster::Create { vm { token "" } {swarmmode ""} } {
     }
     
     # Initiate or join swarm in swarm mode.
-    if { $swarmmode ne "" } {
-        if { ([dict exists $vm -swarm] \
-                    && (([string is boolean -strict [dict get $vm -swarm]] \
-                            && ![string is false [dict get $vm -swarm]])
-                        || ![string is boolean -strict [dict get $vm -swarm]])) \
-                || ![dict exists $vm -swarm] } {
-            swarmmode join $vm
-        }
+    if { [swarmmode mode $vm] ne "" } {
+        swarmmode join $vm $masters
     }
         
     return [dict get $vm -name]
@@ -3102,7 +3109,17 @@ proc ::cluster::ListParser { state { hdrfix {}} } {
 }
 
 
-proc ::cluster::IsRunning { vm } {
+proc ::cluster::IsRunning { vm { force 0 } } {
+    set nfo [lindex [ls [storage $vm] [dict get $vm -name] $force] 0]
+    if { [dict exists $nfo state] } {
+        set state [dict get $nfo state]
+        if { [lsearch -nocase ${vars::-running} $state] >= 0 } {
+            return 1
+        }
+    }
+    return 0
+    
+    
     if { [dict exists $vm state] } {
         set state [dict get $vm state]
         if { [lsearch -nocase ${vars::-running} $state] >= 0 } {

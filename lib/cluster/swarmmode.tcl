@@ -5,12 +5,8 @@ namespace eval ::cluster::swarmmode {
     # values can be changed to influence the behaviour of this
     # implementation.
     namespace eval vars {
-        # Extension for managers info storage
-        variable -manager   .mgr
         # Extension for token cache file
-        variable -token     .swt
-        # List of "on" state
-        variable -running   {running timeout}
+        variable -ext       .swt
     }
     # Export all lower case procedure, arrange to be able to access
     # commands from the parent (cluster) namespace from here and
@@ -20,51 +16,36 @@ namespace eval ::cluster::swarmmode {
     namespace path [namespace parent]
     namespace ensemble create -command ::swarmmode
     namespace import [namespace parent]::Machine \
+                        [namespace parent]::Machines \
+                        [namespace parent]::IsRunning \
                         [namespace parent]::CacheFile \
                         [namespace parent]::ListParser
 }
 
 
-proc ::cluster::swarmmode::join { vm } {
-    ManagerSync $vm
-    set manager [ManagerGet $vm]
-    if { [llength $manager] } {
-        lassign $manager mgr addr        
-        set nm [dict get $vm -name]
-        lassign [Tokens $vm] tkn_mngr tkn_wrkr
-    
-        set cmd [list docker swarm join]
-        Options cmd join $vm
-        # Add token and ip address of master that we communicate with
-        if { [dict exists $vm -master] && [dict get $vm -master] } {
-            set mode manager
-            lappend cmd --token $tkn_mngr $addr
-        } else {
-            set mode worker
-            lappend cmd --token $tkn_wrkr $addr          
-        }
-        set res [Machine -return -- -s [storage $vm] ssh $nm $cmd]
-        if { [string match "*swarm*${mode}*" $res] } {
-            set id [string trim \
-                        [Machine -return -- -s [storage $vm] ssh $mgr \
-                            "docker node inspect --format '{{ .ID }}' $nm"]]
-            log NOTICE "Machine $nm joined swarm as $mode as node $id"
-
-            # Arrange to cache information abount manager
-            if { $mode eq "manager" } {
-                ManagerPut $vm
+# ::cluster::swarmmode::masters -- Masters description
+#
+#       This procedure looks up the swarm masters out of a cluster
+#       description and returns their vm description.
+#
+# Arguments:
+#        cluster        List of machine description dictionaries.
+#
+# Results:
+#       List of virtual machine description of swarm masters, empty if none.
+#
+# Side Effects:
+#       None.
+proc ::cluster::swarmmode::masters { cluster { alive 0 } } {
+    set masters [list]
+    foreach vm [Machines $cluster] {
+        if { [mode $vm] eq "manager" } {
+            if { ($alive && [IsRunning $vm]) || !$alive} {
+                lappend masters $vm
             }
-
-            return $id
-        } else {
-            log WARN "Machine $nm could not join swarm as $mode: $res"
-            return ""
         }
-        return $res
-    } else {
-        return [Init $vm]
     }
-    return ""; # Never reached
+    return $masters
 }
 
 
@@ -90,14 +71,93 @@ proc ::cluster::swarmmode::mode { vm } {
 }
 
 
+proc ::cluster::swarmmode::join { vm masters } {
+    # Construct a list of the running managers that are not the machine that we
+    # want to make part of the cluster
+    set managers [list]
+    foreach mch $masters {
+        if { [dict get $mch -name] ne [dict get $vm -name] && [IsRunning $mch 1] } {
+            lappend managers $mch
+        }
+    }
+    
+    # Now initialise or join (in most cases) the cluster
+    if { [llength $managers] == 0 } {
+        # No running managers and the machine we are "joining" is a manager
+        # itself, then we deem the cluster to be uninitialise and initialise it.
+        if { [mode $vm] eq "manager" } {
+            log INFO "No running managers, initialising cluster"
+            return [Init $vm]
+        } else {
+            log WARN "Cannot join a non-running cluster!"
+        }
+    } else {
+        # Pick a manager to use when joining the cluster
+        set mgr [PickManager $managers]
+        if { [dict exists $mgr -name] } {
+            # Get the (cached?) tokens for joining the cluster
+            lassign [Tokens $mgr] tkn_mngr tkn_wrkr
+
+            if { $tkn_mngr eq "" || $tkn_wrkr eq "" } {
+                log WARN "Cannot join swarm without available tokens!"
+            } else {
+                # Get the swarm address to use for the manager
+                set mnm [dict get $mgr -name]
+                set addr [Machine -return -- \
+                            -s [storage $vm] ssh $mnm \
+                                "docker node inspect --format '{{ .ManagerStatus.Addr }}' self"]
+                set addr [string trim $addr]
+    
+                if { $addr ne "" } {
+                    set nm [dict get $vm -name]
+                    # Construct joining command
+                    set cmd [list docker swarm join]
+                    Options cmd join $vm
+                    # Add token and ip address of master that we communicate with
+                    set mode [mode $vm]
+                    if { $mode eq "manager" } {
+                        lappend cmd --token $tkn_mngr $addr
+                    } else {
+                        lappend cmd --token $tkn_wrkr $addr          
+                    }
+                    
+                    # Join and check result
+                    set res [Machine -return -- -s [storage $vm] ssh $nm $cmd]
+                    if { [string match "*swarm*${mode}*" $res] } {
+                        # Ask manager about whole swarm state and find out the
+                        # identifier of the newly created node.
+                        set state [Machine -return -- -s [storage $vm] ssh $mnm "docker node ls"]
+                        foreach m [ListParser $state [list "MANAGER STATUS" "MANAGER_STATUS"]] {
+                            if { [dict exists $m id] && [dict exists $m hostname] } {
+                                if { [dict get $m hostname] eq $nm } {
+                                    set id [string trim [dict get $m id] " *"]
+                                    log NOTICE "Machine $nm joined swarm as $mode as node $id"                        
+                                    return $id
+                                }
+                            }
+                        }
+                        log WARN "Machine $nm not visible in swarm (yet?)"
+                    } else {
+                        log WARN "Machine $nm could not join swarm as $mode: $res"
+                    }
+                } else {
+                    log WARN "Cannot find swarm address of manager: [dict get $mgr -name]"
+                }
+            }
+        } else {
+            log WARN "No running manager available to join swarm cluster!"
+        }
+    }
+    return "";   # Catch all for errors
+}
+
+
 proc ::cluster::swarmmode::leave { vm } {
-    ManagerSync $vm
     set nm [dict get $vm -name]    
     switch -- [mode $vm] {
         "manager" {
             # Demote the manager from the swarm so it can gracefully handover state
             # to other managers.
-            ManagerDel $vm        
             Machine -- -s [storage $vm] ssh $nm "docker node demote $nm"
             set response [Machine -return -stderr \
                             -- -s [storage $vm] ssh $nm "docker swarm leave"]
@@ -126,8 +186,10 @@ proc ::cluster::swarmmode::Init { vm } {
             log NOTICE "Initialised machine $nm as node $id in swarm"
 
             # Arrange to cache information abount manager and swarm
-            ManagerPut $vm
-            TokenStore $vm
+            if { [TokenStore $vm] } {
+                lassign [TokenCache $vm] mngr wrkr
+                log INFO "Generated swarm tokens -- Managers: $mngr, Workers: $wrkr"
+            }
             
             return $res
         } else {
@@ -154,108 +216,27 @@ proc ::cluster::swarmmode::Options { cmd_ mode vm } {
 }
 
 
-# Synchronise cached status with current swarm status, as long as we can find an
-# available manager
-proc ::cluster::swarmmode::ManagerSync { vm } {
-    lassign [ManagerGet $vm] mgr addr
-    if { $mgr ne "" && $addr ne "" } {
-        set state [Machine -return -- -s [storage $vm] ssh $mgr "docker node ls"]
-        foreach m [ListParser $state [list "MANAGER STATUS" "MANAGER_STATUS"]] {
-            if { [dict exists $m manager_status] && [dict exists $m hostname] } {
-                switch -nocase -- [dict get $mgr manager_status] {
-                    "leader" -
-                    "reachable" {
-                        set addr [Machine -return -- \
-                                    -s [storage $vm] ssh $mgr \
-                                        "docker node inspect --format '{{ .ManagerStatus.Addr }}' [dict get $m hostname]"]
-                        set addr [string trim $addr]
-                        if { $addr ne "" } {
-                            set MGRS([dict get $m hostname]) $addr
-                        }
-                    }
-                }
-            }
+proc ::cluster::swarmmode::PickManager { managers { ptn * } } {
+    # Build a list of possible candidates based on the name pattern
+    set candidates {}
+    foreach vm $managers {
+        if { [string match $ptn [dict get $vm -name]] } {
+            lappend candidates $vm
         }
-        set mgr_path [CacheFile [dict get $vm origin] ${vars::-manager}]
-        ManagerCache $mgr_path MGRS write
     }
-}
-
-
-proc ::cluster::swarmmode::ManagerGet { vm { ptn * } } {
-    # Generate file name for managers caching out of yaml path.
-    set mgr_path [CacheFile [dict get $vm origin] ${vars::-manager}]
     
-    # Read current state
-    ManagerCache $mgr_path MGRS read
-
-    # Pick up a manager at random out of the known managers from the cache.
-    set len [llength [array names MGRS $ptn]]
+    # Choose one!
+    set len [llength $candidates]
     if { $len > 0 } {
-        set i [expr {int(rand()*$len)}]
-        set mch [lindex [array names MGRS $ptn] $i]
-        return [list $mch $MGRS($mch)]
+        set vm [lindex $candidates [expr {int(rand()*$len)}]]
+        log INFO "Picked manager [dict get $vm -name] to operate on swarm"
+        return $vm
+    } else {
+        log WARN "Cannot find any manager matching $ptn!"
     }
-    
     return [list]
 }
 
-
-proc ::cluster::swarmmode::ManagerPut { vm } {
-    if { [dict exists $vm -master] && [dict get $vm -master] } {
-        # Generate file name for managers caching out of yaml path.
-        set mgr_path [CacheFile [dict get $vm origin] ${vars::-manager}]
-        
-        set nm [dict get $vm -name]    
-        ManagerCache $mgr_path MGRS read
-        set addr [Machine -return -- \
-                    -s [storage $vm] ssh $nm "docker node inspect --format '{{ .ManagerStatus.Addr }}' self"]
-        set MGRS($nm) [string trim $addr]
-        ManagerCache $mgr_path MGRS write
-    }
-}
-
-
-proc ::cluster::swarmmode::ManagerDel { vm } {
-    if { [mode $vm] eq "manager" } {
-        # Generate file name for managers caching out of yaml path.
-        set mgr_path [CacheFile [dict get $vm origin] ${vars::-manager}]
-        
-        ManagerCache $mgr_path MGRS read
-        set nm [dict get $vm -name]
-        catch {unset MGRS($nm)}
-        ManagerCache $mgr_path MGRS write
-    }
-}
-
-
-proc ::cluster::swarmmode::ManagerCache { mgr_path mgrs_ mode } {
-    upvar $mgrs_ MGRS
-    
-    switch -nocase -- $mode {
-        "read" {
-            # Read current state
-            if { [file exists $mgr_path] } {
-                log DEBUG "Reading current manager state from $mgr_path"
-                set fd [open $mgr_path]
-                array set MGRS [read $fd]
-                close $fd
-                return 1
-            }            
-        }
-        "write" {
-            log DEBUG "Caching swarm mode tokens at $mgr_path"
-            if { [catch {open $mgr_path w} fd] == 0 } {
-                puts $fd [array get MGRS]
-                close $fd
-                return 1
-            } else {
-                log WARN "Cannot store swarm managers at $mgr_path: $fd"
-            }            
-        }
-    }
-    return 0; # Catch all errors
-}
 
 
 # This should be the only proc to use.
@@ -268,7 +249,7 @@ proc ::cluster::swarmmode::Tokens { vm { force 0 } } {
         }
     }
 
-    set tkn_path [CacheFile [dict get $vm origin] ${vars::-token}]
+    set tkn_path [CacheFile [dict get $vm origin] ${vars::-ext}]
     if { ![file exists $tkn_path] && [mode $vm] eq "manager" } {
         TokenStore $vm
     }
@@ -278,7 +259,7 @@ proc ::cluster::swarmmode::Tokens { vm { force 0 } } {
 
 proc ::cluster::swarmmode::TokenStore { vm } {
     # Generate file name for token caching out of yaml path.
-    set tkn_path [CacheFile [dict get $vm origin] ${vars::-token}]
+    set tkn_path [CacheFile [dict get $vm origin] ${vars::-ext}]
 
     # Actively get tokens from virtual machine, which must be one of the managers.
     set manager [TokenGet $vm manager]
@@ -301,7 +282,7 @@ proc ::cluster::swarmmode::TokenStore { vm } {
 
 proc ::cluster::swarmmode::TokenCache { vm } {
     # Generate file name for token caching out of yaml path.
-    set tkn_path [CacheFile [dict get $vm origin] ${vars::-token}]
+    set tkn_path [CacheFile [dict get $vm origin] ${vars::-ext}]
 
     if { [catch {open $tkn_path} fd] == 0 } {
         lassign [read $fd] manager worker
@@ -339,4 +320,4 @@ proc ::cluster::swarmmode::TokenGet { vm mode } {
 }
 
 
-package provide cluster::swarmmode 0.1
+package provide cluster::swarmmode 0.2
