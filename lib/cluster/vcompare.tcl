@@ -83,7 +83,7 @@ proc ::cluster::vcompare::le { current base } {
 
 proc ::cluster::vcompare::extract { vline } {
     if { $vline ne "" } {
-        if { [regexp {\d+(\.\d+)*\.\d+} $vline version] } {
+        if { [regexp {\d+(\.\d+)*} $vline version] } {
             return $version
         } else {
             log WARN "Cannot extract a version number out of '$vline'!"
