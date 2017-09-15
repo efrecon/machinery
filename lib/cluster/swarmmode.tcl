@@ -1,3 +1,15 @@
+##################
+## Module Name     --  swarmmode.tcl
+## Original Author --  Emmanuel Frécon - emmanuel.frecon@ri.se
+## Description:
+##
+##  This module focuses on the new Swarm Mode available as part of the Docker
+##  Engine. The main procedure is called 'join': given a set of (declared
+##  masters/managers) it will arrange for a node to join the Swarm cluster,
+##  which inclused initialisation of the Swarm.
+##
+##################
+
 namespace eval ::cluster::swarmmode {
     # Encapsulates variables global to this namespace under their own
     # namespace, an idea originating from http://wiki.tcl.tk/1489.
@@ -30,6 +42,7 @@ namespace eval ::cluster::swarmmode {
 #
 # Arguments:
 #        cluster        List of machine description dictionaries.
+#        alive          Only return machines that are running.
 #
 # Results:
 #       List of virtual machine description of swarm masters, empty if none.
@@ -49,11 +62,28 @@ proc ::cluster::swarmmode::masters { cluster { alive 0 } } {
 }
 
 
+# ::cluster::swarmmode::mode -- Node mode
+#
+#   Return the mode of the node as of the Swarm Mode terminology. This respects
+#   the clustering mode (as we still support the old Docker Swarm), and the
+#   ability to turn off swarming for machines (including the ability to specify
+#   swarming options).
+#
+# Arguments:
+#	vm	Virtual machine description dictionary.
+#
+# Results:
+#	manager, worker or empty string
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::mode { vm } {
     # Check if running new swarm mode
     if { [string match -nocase "swarm*mode" \
                 [dict get $vm cluster -clustering]] } {
-        # Check if we haven't turned off swarming for that node
+        # Check if we haven't turned off swarming for that node, this is
+        # convoluted because we both access swarm as a boolean, but also as a
+        # dictionary containing swarming options.
         if { ([dict exists $vm -swarm] \
                     && (([string is boolean -strict [dict get $vm -swarm]] \
                             && ![string is false [dict get $vm -swarm]])
@@ -71,6 +101,24 @@ proc ::cluster::swarmmode::mode { vm } {
 }
 
 
+# ::cluster::swarmmode::join -- join/initiate swarm
+#
+#   Provided a number of possible masters (marked with the master key in the
+#   YAML description), this procedure will arrange for the machine which
+#   description is passed as a parameter to join the swarm. If the maching
+#   should be a manager and no masters are alive, then the swarm is deemed
+#   non-initiated and will be iniitiated on that machine.
+#
+# Arguments:
+#	vm	Virtual machine description dictionary.
+#	masters	List of possible masters (dictionaries themselves)
+#
+# Results:
+#   Return the node ID inside the Swarm of the machine that was attached to the
+#   swarm, or an empty string.
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::join { vm masters } {
     # Construct a list of the running managers that are not the machine that we
     # want to make part of the cluster
@@ -147,6 +195,21 @@ proc ::cluster::swarmmode::join { vm masters } {
 }
 
 
+# ::cluster::swarmmode::leave -- Leave swarm
+#
+#   Arrange for the machine passed as a parameter to leave the swarm. Leaving is
+#   done in gentle form, i.e. managers are first demoted and are only forced out
+#   whenever Docker says so. This leaves a chance to other managers to pick up
+#   the state and for other workers to pick up the tasks.
+#
+# Arguments:
+#	vm	Virtual machine description dictionary.
+#
+# Results:
+#	None
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::leave { vm } {
     set nm [dict get $vm -name]    
     switch -- [mode $vm] {
@@ -168,6 +231,24 @@ proc ::cluster::swarmmode::leave { vm } {
 }
 
 
+# ::cluster::swarmmode::procname -- create/destroy networks
+#
+#   This procedure will arrange for the creation/deletion of cluster-wide
+#   networks. These are usually overlay networks that can be declared as
+#   external in stack definition files so that several stacks can exchange
+#   information. Creation and deletion occurs via a randomly chosen running
+#   managers among the possible masters.
+#
+# Arguments:
+#	cmd	command: create or delete (aliases are available.)
+#	net	Dictionary describing the network, mostly options to docker
+#	masters	List of possible masters (dictionaries themselves)
+#
+# Results:
+#	None
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::network { cmd net masters } {
     switch -nocase -- $cmd {
         "up" -
@@ -211,7 +292,28 @@ proc ::cluster::swarmmode::network { cmd net masters } {
 }
 
 
-# Actively initiate the (firt) node of a swarm
+
+####################################################################
+#
+# Procedures below are internal to the implementation, they shouldn't
+# be changed unless you wish to help...
+#
+####################################################################
+
+
+# ::cluster::swarmmode::Init -- Initialise first node of swarm
+#
+#   Initialise the swarm, arranging for the virtual machine passed as an
+#   argument to be the (first) manager in the swarm.
+#
+# Arguments:
+#	vm	Virtual machine description dictionary.
+#
+# Results:
+#	Return the swarm node identifier of the (first) manager.
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::Init { vm } {
     if { [mode $vm] eq "manager" } {    
         set nm [dict get $vm -name]    
@@ -238,6 +340,20 @@ proc ::cluster::swarmmode::Init { vm } {
 }
 
 
+# ::cluster::swarmmode::NetworkID -- Get Swarm network ID
+#
+#   Actively ask a manager for the node identifier of a machine in the cluster.
+#
+# Arguments:
+#	mgr	Virtual machine description dictionary of a manager.
+#	name	Name of the machine to query
+#
+# Results:
+#   Return the complete node identifier of the machine within the swarm, or an
+#   empty string.
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::NetworkID { mgr name } {
     set nm [dict get $mgr -name]
     set networks [Machine -return -- -s [storage $mgr] ssh $nm "docker network ls --no-trunc=true"]
@@ -249,7 +365,21 @@ proc ::cluster::swarmmode::NetworkID { mgr name } {
     return ""
 }
 
-# Pick init/join options if there are some from swarm
+# ::cluster::swarmmode::Options -- Append command with swarm options.
+#
+#   Pick swarm specific options for join/initialisation from virtual machine and
+#   append these to a command (being constructed).
+#
+# Arguments:
+#	cmd_	"POinter" to command to modify
+#	mode	Mode: join or init supported in YAML right now.
+#	vm	Virtual machine description dictionary, containing swarm-specific options..
+#
+# Results:
+#	None
+#
+# Side Effects:
+#	Modifies the command!
 proc ::cluster::swarmmode::Options { cmd_ mode vm } {
     upvar $cmd_ cmd
     # Pick init options if there are some from swarm
@@ -264,6 +394,19 @@ proc ::cluster::swarmmode::Options { cmd_ mode vm } {
 }
 
 
+# ::cluster::swarmmode::PickManager -- Pick a manager
+#
+#	Pick a manager at random
+#
+# Arguments:
+#	managers	List of managers to pick from
+#	ptn	Pattern to match on names to restrict set of candidates.
+#
+# Results:
+#	The dictionary representing the managers that was chosen.
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::PickManager { managers { ptn * } } {
     # Build a list of possible candidates based on the name pattern
     set candidates {}
@@ -286,6 +429,22 @@ proc ::cluster::swarmmode::PickManager { managers { ptn * } } {
 }
 
 
+# ::cluster::swarmmode::Managers -- Running managers
+#
+#   Return the list of possible managers out of a number of declared masters.
+#   Managers need to be running and this procedure will check their status.This
+#   procedure is also able to avoid a virtual machine from the set of returned
+#   managers.
+#
+# Arguments:
+#	masters	List of possible managers.
+#	vm	Virtual machine to exclude from the list.
+#
+# Results:
+#	List of running managers that are candidates for swarm mode operations.
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::Managers { masters {vm {}}} {
     # Construct a list of the running managers that are not the machine that we
     # want to make part of the cluster
@@ -301,7 +460,23 @@ proc ::cluster::swarmmode::Managers { masters {vm {}}} {
 }
 
 
-# This should be the only proc to use.
+# ::cluster::swarmmode::Tokens -- Get swarm tokens
+#
+#   Get the swarm tokens to use for a given machine. Tokens are cached and this
+#   procedure will actively request the tokens from the virtual machine whenever
+#   it is forced to do so or the cache is empty. This can only happen when the
+#   machine passed as a parameter is a (running) manager.
+#
+# Arguments:
+#	vm	Virtual machine description dictionary
+#	force	Force active collection of tokens from a manager.
+#
+# Results:
+#   List of two tokens: token for joining managers and token for joining
+#   workers.
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::Tokens { vm { force 0 } } {
     if { $force } {
         if { [mode $vm] ne "manager" } {
@@ -319,6 +494,20 @@ proc ::cluster::swarmmode::Tokens { vm { force 0 } } {
 }
 
 
+# ::cluster::swarmmode::TokenStore -- Request swarm tokens and store them
+#
+#   Request the machine passed as an argument (a manager!) for the swarm tokens
+#   and store these in the cache so callers will more easily access them later
+#   on.
+#
+# Arguments:
+#	vm	Virtual machine description dictionary
+#
+# Results:
+#	1 on storage success, 0 otherwise
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::TokenStore { vm } {
     # Generate file name for token caching out of yaml path.
     set tkn_path [CacheFile [dict get $vm origin] ${vars::-ext}]
@@ -342,6 +531,19 @@ proc ::cluster::swarmmode::TokenStore { vm } {
 }
 
 
+# ::cluster::swarmmode::TokenCache -- Get swarm tokens from cache
+#
+#	Return the swarm tokens from the cache, if any
+#
+# Arguments:
+#	vm	Virtual machine description dictionary
+#
+# Results:
+#   List of two tokens: token for joining managers and token for joining
+#   workers, or an empty list.
+#
+# Side Effects:
+#	None
 proc ::cluster::swarmmode::TokenCache { vm } {
     # Generate file name for token caching out of yaml path.
     set tkn_path [CacheFile [dict get $vm origin] ${vars::-ext}]
