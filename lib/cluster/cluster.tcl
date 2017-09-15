@@ -2078,6 +2078,9 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # (in numbers) options into options that are specific to the
     # drivers.
     
+    # For kvm, you need the https://github.com/dhiltgen/docker-machine-kvm
+    # plugin to docker-machine.
+    
     # Memory size is in MB
     if { [dict exists $vm -memory] } {
         array set MOPT {
@@ -3951,7 +3954,7 @@ proc ::cluster::Wait { vm {states {"running"}} { sleep 1 } { retries 5 } } {
         set retries ${vars::-retries}
     }
     while { $retries > 0 } {
-        set machines [ls [storage $vm] $nm]
+        set machines [ls [storage $vm] $nm 1]
         if { [llength $machines] == 1 } {
             set mchn [lindex $machines 0]
             # If we have a state in the dictionary, match it against
