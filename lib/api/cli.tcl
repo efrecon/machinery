@@ -345,12 +345,12 @@ proc ::api::cli::resolve { pfx_ {fname ""} } {
             set candidates [cluster candidates]
             if { [llength $candidates] > 1 } {
                 cluster log WARN "Found [llength $candidates] possible cluster\
-                                  files, cannot pickup one automatically!"
+                        files, cannot pickup one automatically!"
             } else {
                 # Pick the only possible candidate
                 set fname [lindex $candidates 0]
                 cluster log NOTICE "Automatically picking YAML file at:\
-                                    $fname"
+                        $fname"
             }
         }
     }
@@ -382,7 +382,7 @@ proc ::api::cli::resolve { pfx_ {fname ""} } {
 #       Dumps help and exit on parsing problems.
 proc ::api::cli::yaml { fname {pfx ""} } {
     if { [catch {cluster parse $fname \
-                    -prefix $pfx -driver ${vars::-driver}} cluster] } {
+                -prefix $pfx -driver ${vars::-driver}} cluster] } {
         help $cluster
     }
     return $cluster
@@ -415,13 +415,13 @@ proc ::api::cli::init { {fname ""} } {
     # descriptions that represent the whole cluster that we should
     # operate on.
     set cluster [dict create \
-                    -options [dict get $cspec -options] \
-                    -networks [dict get $cspec -networks] \
-                    -machines [list]]
+            -options [dict get $cspec -options] \
+            -networks [dict get $cspec -networks] \
+            -machines [list]]
     set state [cluster ls $vars::yaml]
     foreach vm [dict get $cspec -machines] {
         dict lappend cluster \
-            -machines [cluster bind $vm $state [dict get $cspec -options]]
+                -machines [cluster bind $vm $state [dict get $cspec -options]]
     }
     
     return $cluster
@@ -556,6 +556,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "token" {
+            cluster runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Possibly generate and print out the swarm token for this cluster.  Tokens are cached on disk in a hidden file for reuse. Use the -force option to force the generation of a new token if necessary." \
@@ -567,6 +568,7 @@ proc ::api::cli::command { cmd args } {
         }
         "start" -
         "up" {
+            cluster runtime exit
             # Start up one or several machines (or the whole cluster if no
             # arguments), the machines will be created if they did not
             # exists
@@ -591,6 +593,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "swarm" {
+            cluster runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "When called with no arguments, just print out the cluster info.  When called with arguments, these should be YAML file ready for compose, or YAML files containing indirections to YAML project files, as in the main cluster YAML description syntax." \
@@ -648,6 +651,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "ps" {
+            cluster runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "When called with no arguments, this will request the swarm master for a list of components.  When called with arguments, these should be the names of virtual machines and the list of components for each of these machines will be printed out.   Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
@@ -664,6 +668,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "ls" {
+            cluster runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "List current machines in cluster and their state" \
@@ -717,6 +722,7 @@ proc ::api::cli::command { cmd args } {
             Tabulate 7 $state
         }
         "reinit" {
+            cluster runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Reinitialise one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
@@ -736,6 +742,7 @@ proc ::api::cli::command { cmd args } {
         "down" -
         "stop" -
         "halt" {
+            cluster runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Bring down one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
@@ -750,6 +757,7 @@ proc ::api::cli::command { cmd args } {
             ::cluster::swarm::recapture $cluster
         }
         "restart" {
+            cluster runtime exit
             # Halt one or several machines (or the whole cluster if no
             # arguments)
             if { [cluster getopt args -help] } {
@@ -765,6 +773,7 @@ proc ::api::cli::command { cmd args } {
         }
         "rm" -
         "destroy" {
+            cluster runtime exit
             # Destroy one or several machines (or the whole cluster if no
             # arguments).  The machines will be halted before removal.
             if { [cluster getopt args -help] } {
@@ -779,6 +788,7 @@ proc ::api::cli::command { cmd args } {
             ::cluster::swarm::recapture $cluster
         }
         "sync" {
+            cluster runtime exit
             # Destroy one or several machines (or the whole cluster if no
             # arguments).  The machines will be halted before removal.
             if { [cluster getopt args -help] } {
@@ -794,6 +804,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "env" {
+            cluster runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Print out exporting commands to get (discovery) environment of one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
@@ -804,6 +815,7 @@ proc ::api::cli::command { cmd args } {
             cluster env $cluster [cluster getopt args -force] stdout
         }
         "ssh" {
+            cluster runtime exit
             # Execute one command in a running virtual machine.  This is
             # mainly an alias to docker-machine ssh.
             if { [cluster getopt args -help] } {
@@ -822,6 +834,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "server" {
+            cluster runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Start a web server providing a REST API to operate on the cluster." \
@@ -843,6 +856,7 @@ proc ::api::cli::command { cmd args } {
             vwait forever;   # Wait forever!
         }
         "search" {
+            cluster runtime exit
             # Search for components, arguments are glob-style patterns
             # to match against container names.
             if { [cluster getopt args -help] } {
@@ -867,6 +881,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "forall" {
+            cluster runtime exit
             # Execute docker commands, first argument is glob-style
             # pattern to match against component name, second is
             # docker command to execute, remaining arguments are
@@ -1069,4 +1084,5 @@ proc ::api::cli::Justify {text {width 72}} {
 }
 
 package provide api::cli 0.2
+
 

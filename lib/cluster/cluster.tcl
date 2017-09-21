@@ -1849,6 +1849,31 @@ proc ::cluster::parse { fname args } {
     return [dict create -machines $vms -options $options -networks $networks]
 }
 
+# ::cluster::runtime -- Runtime check
+#
+#   Check for the presence of (and access to) the underlying necessary docker
+#   tools and execute a command when they are not available.
+#
+# Arguments:
+#	cmd	Command to execute when one tool is not available
+#
+# Results:
+#	A boolean telling if all runtime configuration is proper (or not)
+#
+# Side Effects:
+#	None
+proc ::cluster::runtime { { cmd {} } } {
+    foreach tool [list docker compose machine] {
+        if { [auto_execok [set vars::-[string trimleft $tool -]]] eq "" } {
+            log FATAL "Cannot access '$tool'!"
+            if { [llength $cmd] } {
+                eval {*}$cmd
+            }
+            return 0
+        }
+    }
+    return 1
+}
 
 # ::cluster::env -- Output cluster environment
 #
@@ -2321,7 +2346,13 @@ proc ::cluster::CommandOptions { lines } {
 #       None.
 proc ::cluster::POpen4 { args } {
     foreach chan {In Out Err} {
-        lassign [chan pipe] read$chan write$chan
+        set pipe [chan pipe]
+        if { [llength $pipe] >= 2 } {
+            lassign $pipe read$chan write$chan
+        } else {
+            log FATAL "Cannot create channel pipes!"
+            return [list]
+        }
     }
     
     if { [catch {exec {*}$args <@$readIn >@$writeOut 2>@$writeErr &} pid] } {
