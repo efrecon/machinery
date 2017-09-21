@@ -2204,26 +2204,32 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # This seems to be necessary to make docker-machine happy and
     # we'll compare to our local version below for upgrades.
     log DEBUG "Testing SSH connection to $nm"
+    WaitSSH $vm 10 5
     set rv_line [lindex [Machine -return -- -s [storage $vm] ssh $nm "docker --version"] 0]
     set remote_version [vcompare extract $rv_line]
     if { $remote_version eq "" } {
         log FATAL "Cannot log into $nm!"
         return ""
     } else {
+        WaitSSH $vm 10 5
         log INFO "Machine $nm running docker v. $remote_version,\
-                running v. [Version docker] locally"
-        if { [vcompare gt $docker_version $remote_version] } {
-            log NOTICE "Local docker version greater than machine,\
-                    trying an upgrade"
-            Machine -- -s [storage $vm] upgrade $nm
+                  running v. [Version docker] locally"
+        if { [unix release $vm ID] ne "rancheros" } {
+            # RancherOS cannot be upgraded through docker machine
+            if { [vcompare gt $docker_version $remote_version] } {
+                log NOTICE "Local docker version greater than machine,\
+                            trying an upgrade"
+                Machine -- -s [storage $vm] upgrade $nm
+            }
         }
     }
     
     # Initiate or join swarm in swarm mode.
     if { [swarmmode mode $vm] ne "" } {
-        swarmmode join $vm $masters
-        if { [swarmmode mode $vm] eq "manager" } {
-            swarmmode network xxx create $masters
+        if { [swarmmode join $vm $masters] eq "" } {
+            log WARN "Could not join/initiate swarm mode for $nm!"
+        } elseif { [swarmmode mode $vm] eq "manager" } {
+            swarmmode network create $masters
         }
     }
         
@@ -4346,6 +4352,28 @@ proc ::cluster::Machines { cluster } {
         return [dict get $cluster -machines]
     }
     return $cluster
+}
+
+
+proc ::cluster::WaitSSH { vm { sleep 5 } { retries 5 } } {
+    set nm [dict get $vm -name]
+    if { $retries < 0 } {
+        set retries ${vars::-retries}
+    }
+    log DEBUG "Waiting for ssh to be ready on $nm"
+    while { $retries > 0 } {
+        set l [lindex [Machine -return -- -s [storage $vm] ssh $nm "echo ready"] 0]
+        if { $l eq "ready" } {
+            return $retries
+        }
+        incr retries -1;
+        if { $retries > 0 } {
+            log INFO "Still waiting for SSH to be ready on $nm..."
+            after [expr {int($sleep*1000)}]
+        }
+    }
+    log WARN "Gave up waiting for SSH on $nm!"
+    return $retries
 }
 
 package provide cluster 0.4
