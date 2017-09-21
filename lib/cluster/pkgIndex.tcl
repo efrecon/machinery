@@ -14,3 +14,4 @@ package ifneeded cluster::swarmmode 0.2 [list source [file join $dir swarmmode.t
 package ifneeded cluster::vcompare 0.1 [list source [file join $dir vcompare.tcl]]
 package ifneeded cluster::virtualbox 0.1 [list source [file join $dir virtualbox.tcl]]
 package ifneeded cluster::unix 0.3 [list source [file join $dir unix.tcl]]
+package ifneeded proctrace 0.2 [list source [file join $dir proctrace.tcl]]

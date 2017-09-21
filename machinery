@@ -21,6 +21,9 @@ lappend auto_path [file join $dirname lib] [file join $dirname lib til]
 package require cluster;   # This implements the core of our routines!
 package require api::cli
 
+#package require proctrace
+#proctrace init -allowed ::cluster*
+
 
 # Parse global options out of program arguments.
 cli globals $appname argv
