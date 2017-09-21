@@ -1966,8 +1966,8 @@ proc ::cluster::commands { tool } {
         docker {
             if { [dict get $vars::commands $tool] eq "" } {
                 dict set vars::commands $tool [CommandsQuery $tool]
-		log DEBUG "Current set of commands for $tool is\
-                        [join [dict get $vars::commands $tool] ,\ ]"
+                log DEBUG "Current set of commands for $tool is\
+                           [join [dict get $vars::commands $tool] ,\ ]"
             }
             return [dict get $vars::commands $tool]
         }
@@ -2229,14 +2229,13 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # This seems to be necessary to make docker-machine happy and
     # we'll compare to our local version below for upgrades.
     log DEBUG "Testing SSH connection to $nm"
-    WaitSSH $vm 10 5
+    WaitSSH $vm
     set rv_line [lindex [Machine -return -- -s [storage $vm] ssh $nm "docker --version"] 0]
     set remote_version [vcompare extract $rv_line]
     if { $remote_version eq "" } {
         log FATAL "Cannot log into $nm!"
         return ""
     } else {
-        WaitSSH $vm 10 5
         log INFO "Machine $nm running docker v. $remote_version,\
                   running v. [Version docker] locally"
         if { [unix release $vm ID] ne "rancheros" } {
@@ -2248,16 +2247,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             }
         }
     }
-    
-    # Initiate or join swarm in swarm mode.
-    if { [swarmmode mode $vm] ne "" } {
-        if { [swarmmode join $vm $masters] eq "" } {
-            log WARN "Could not join/initiate swarm mode for $nm!"
-        } elseif { [swarmmode mode $vm] eq "manager" } {
-            swarmmode network create $masters
-        }
-    }
-        
+            
     return [dict get $vm -name]
 }
 

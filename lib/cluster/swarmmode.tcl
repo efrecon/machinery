@@ -231,7 +231,7 @@ proc ::cluster::swarmmode::leave { vm } {
 }
 
 
-# ::cluster::swarmmode::procname -- create/destroy networks
+# ::cluster::swarmmode::network -- create/destroy networks
 #
 #   This procedure will arrange for the creation/deletion of cluster-wide
 #   networks. These are usually overlay networks that can be declared as
