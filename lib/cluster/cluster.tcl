@@ -24,6 +24,8 @@ package require cluster::virtualbox
 package require cluster::vcompare
 package require cluster::unix
 package require cluster::swarmmode
+package require cluster::environment
+
 
 # Hard sourcing of the local json package to avoid using the one from
 # tcllib.
@@ -65,10 +67,8 @@ namespace eval ::cluster {
         variable -marker    "#### A U T O M A T E D  ## S/E/C/T/I/O/N ####"
         # Mapping from integer to string representation of verbosity levels
         variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG 7 TRACE}
-        # Extension for env storage cache files
-        variable -ext       .env
         # Extension for machine storage cache directory
-        variable -storageExt .mch
+        variable -ext       .mch
         # File descriptor to dump log messages to
         variable -log       stderr
         # Date log output
@@ -690,7 +690,7 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
     # Make sure we resolve in proper directory.
     set fpath [AbsolutePath $master $fpath]
     
-    EnvSet $master;    # Pass environment to composition.
+    environment set $master;    # Pass environment to composition.
     if { [file exists $fpath] } {
         log NOTICE "Reading projects from $fpath"
         set pinfo [::yaml::yaml2dict -file $fpath]
@@ -765,7 +765,7 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
     
     # Pass the discovery variables to compose in case they were needed
     # there...
-    EnvSet $vm
+    environment set $vm
     
     set nm [dict get $vm -name]
     if { $swarm } {
@@ -871,7 +871,7 @@ proc ::cluster::prelude { vm { execs {} }} {
     }
     
     # Pass the environment variables in case they were needed
-    EnvSet $vm
+    environment set $vm
     
     set nm [dict get $vm -name]
     foreach exe $execs {
@@ -890,7 +890,7 @@ proc ::cluster::addendum { vm { execs {} } } {
     }
     
     # Pass the environment variables in case they were needed
-    EnvSet $vm
+    environment set $vm
     
     set nm [dict get $vm -name]
     foreach exe $execs {
@@ -980,7 +980,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # from perfect, but should do as we are only creating one file and
     # will be removing it soon.
     set fname [Temporary [file join [TempDir] profile]]
-    EnvWrite $fname [array get DARGS] "'"
+    environment write $fname [array get DARGS] "'"
     
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
@@ -1896,6 +1896,7 @@ proc ::cluster::runtime { { cmd {} } } {
 # Side Effects:
 #       Query all VMs or read from cache on disk.
 proc ::cluster::env { cluster {force 0} {fd ""} } {
+    set cluster [Machines $cluster]
     # Nothing to do on an empty cluster...
     if { [llength $cluster] == 0 } {
         return
@@ -1903,7 +1904,7 @@ proc ::cluster::env { cluster {force 0} {fd ""} } {
     
     set vm [lindex $cluster 0]
     if { [dict exists $vm origin] } {
-        set env_path [CacheFile [dict get $vm origin] ${vars::-ext}]
+        set env_path [environment cache $vm]
     } else {
         # Should not happen
         log WARN "Cannot discover where cluster originates from!"
@@ -1920,17 +1921,11 @@ proc ::cluster::env { cluster {force 0} {fd ""} } {
     
     # Either return content of environment file as a dictionary, or
     # return so it contains exporting variables commands.
+    set e [environment read $env_path]
     if { $fd ne "" } {
-        set e [open $env_path]
-        while { ![eof $e] } {
-            set l [gets $e]
-            if { $l ne "" } {
-                puts $fd "export $l"
-            }
-        }
-        close $e
+        environment write $fd $e "export "
     } else {
-        return [EnvRead $env_path]
+        return [environment read $env_path]
     }
 }
 
@@ -2024,7 +2019,7 @@ proc ::cluster::LogLevel { lvl } {
 #       Create the directory if it did not exist prior to this call.
 proc ::cluster::StorageDir { yaml } {
     if { ${vars::-storage} eq "" } {
-        set dir [CacheFile $yaml ${vars::-storageExt}]
+        set dir [CacheFile $yaml ${vars::-ext}]
     } else {
         set dir ${vars::-storage}
     }
@@ -2711,7 +2706,7 @@ proc ::cluster::Attach { vm args } {
         set response [eval $cmd]
         if { [llength $response] > 0 } {
             foreach l $response {
-                set k [EnvLine d $l]
+                set k [environment line d $l]
                 if { $k ne "" } {
                     set DENV($k) [dict get $d $k]
                 }
@@ -2870,7 +2865,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
         # whenever a variable does not exist,
         # e.g. ${VARNAME:defaultValue}.
         set fd [open $fpath]
-        set yaml [Resolve [read $fd]]
+        set yaml [environment resolve [read $fd]]
         close $fd
         
         # Parse the YAML project to see if it contains extending
@@ -2903,7 +2898,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
                         $tmp_fpath"
                 set in_fd [open $src_path]
                 set out_fd [open $tmp_fpath w]
-                puts -nonewline $out_fd [Resolve [read $in_fd]]
+                puts -nonewline $out_fd [environment resolve [read $in_fd]]
                 close $in_fd
                 close $out_fd
                 
@@ -3124,8 +3119,8 @@ proc ::cluster::Shares { spec {origin ""} {type ""}} {
     
     # Resolve (local) environement variables to the values and make
     # sure relative directories are resolved.
-    set host [Resolve $host]
-    set mchn [Resolve $mchn]
+    set host [environment resolve $host]
+    set mchn [environment resolve $mchn]
     if { $mchn eq "" } {
         set mchn $host
     }
@@ -3259,7 +3254,7 @@ proc ::cluster::Exec { vm args } {
                 if { $substitution } {
                     # Read and substitute content of file
                     set fd [open $fpath]
-                    set dta [Resolve [read $fd]]
+                    set dta [environment resolve [read $fd]]
                     close $fd
                     
                     # Dump to temporary location
@@ -3340,8 +3335,8 @@ proc ::cluster::Discovery { vm } {
     }
     if { [dict exists $vm origin] } {
         # Get current discovery values for this machine from the cache.
-        set env_path [CacheFile [dict get $vm origin] ${vars::-ext}]
-        set environment [EnvRead $env_path]
+        set env_path [environment cache $vm]
+        set environment [environment read $env_path]
         
         # Remove all keys that are associated to this machine's name
         # and aliases, we are going to override (or won't have any if
@@ -3395,7 +3390,7 @@ proc ::cluster::Discovery { vm } {
         # Dump the (modified) environment to the cache.
         log INFO "Writing cluster network information ($nm accounted)\
                 to $env_path"
-        EnvWrite $env_path $environment
+        environment write $env_path $environment
         
         return $environment
     }
@@ -3403,193 +3398,6 @@ proc ::cluster::Discovery { vm } {
 }
 
 
-# ::cluster::EnvSet -- Set environement
-#
-#       Set the (discovery) environment based on the origin of a
-#       virtual machine.
-#
-# Arguments:
-#	vm	Virtual machine description
-#
-# Results:
-#       Return the full dictionary of what was set, empty dict on errors.
-#
-# Side Effects:
-#       Changes the ::env global array, which will be passed to sub-processes.
-proc ::cluster::EnvSet { vm } {
-    if { [dict exists $vm origin] } {
-        set environment \
-                [EnvRead [CacheFile [dict get $vm origin] ${vars::-ext}]]
-        dict for {k v} $environment {
-            set ::env($k) $v
-        }
-    } else {
-        set environment {}
-    }
-    
-    return $environment
-}
-
-
-# ::cluster::EnvRead -- Read an environment file
-#
-#       Read the content of an environment file, such as the ones used
-#       for declaring defaults in /etc (or for our discovery cache).
-#       This isn't a perfect parser, but is able to skip comments and
-#       blank lines.
-#
-# Arguments:
-#        fpath        Full path to file to read
-#
-# Results:
-#       Content of file as a dictionary
-#
-# Side Effects:
-#       None.
-proc ::cluster::EnvRead { fpath } {
-    set d [dict create]
-    if { [file exists $fpath] } {
-        log DEBUG "Reading environment description file at $fpath"
-        set fd [open $fpath]
-        while {![eof $fd]} {
-            EnvLine d [gets $fd]
-        }
-        close $fd
-    }
-    log DEBUG "Read [join [dict keys $d] {, }] from $fpath"
-    
-    return $d
-}
-
-
-# ::cluster::EnvLine -- Parse lines of environment files
-#
-#       Parses the line passed as an argument and set the
-#       corresponding keys in the dictionary from the arguments.
-#
-# Arguments:
-#	d_	Name of dictionary variable to modify
-#	line	Line to parse
-#
-# Results:
-#       Return the key that was extracted from the line, or an empty
-#       string on errors, empty lines, comments, etc.
-#
-# Side Effects:
-#       None.
-proc ::cluster::EnvLine { d_ line } {
-    upvar $d_ d;   # Get to the dictionary variable.
-    set line [string trim $line]
-    if { $line ne "" || [string index $line 0] ne "\#" } {
-        # Skip leading "export" bash instruction
-        if { [string first "export " $line] == 0 } {
-            set line [string trim \
-                    [string range $line [string length "export "] end]]
-        }
-        set eql [string first "=" $line]
-        if { $eql >= 0 } {
-            set k [string range $line 0 [expr {$eql-1}]]
-            set v [string range $line [expr {$eql+1}] end]
-            dict set d \
-                    [string trim $k] \
-                    [string trim [string trim [string trim $v] "'\""]]
-            return [string trim $k]
-        }
-    }
-    return ""
-}
-
-
-# ::cluster::EnvWrite -- Write an environment file
-#
-#       Write the content of a dictionary to an environment file.
-#
-# Arguments:
-#        fpath        Full path to file to write to.
-#        enviro       Environment to write
-#        quote        Character to quote values containing spaces with
-#
-# Results:
-#       None.
-#
-# Side Effects:
-#       None.
-proc ::cluster::EnvWrite { fpath enviro { quote "\""} } {
-    log DEBUG "Writing [join [dict keys $enviro] {, }] to\
-            description file at $fpath"
-    set fd [open $fpath "w"]
-    dict for {k v} $enviro {
-        if { [string first " " $v] < 0 } {
-            puts $fd "${k}=${v}"
-        } else {
-            puts $fd "${k}=${quote}${v}${quote}"
-        }
-    }
-    close $fd
-}
-
-
-# ::cluster::Resolve -- Environement variable resolution
-#
-#       This procedure will resolve every occurence of a construct
-#       $name where name is the name of an environment variable to the
-#       value of that variable, as long as it exists.  It also
-#       recognises ${name} and ${name:default} (i.e. replace by the
-#       content of the variable if it exists, or by the default value
-#       if the variable does not exist).
-#
-# Arguments:
-#        str        Incoming string
-#
-# Results:
-#       String where environment variables have been resolved to their
-#       values.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Resolve { str } {
-    # Do a quick string mapping for $VARNAME and ${VARNAME} and store
-    # result in variable called quick.
-    set mapper {}
-    foreach e [array names ::env] {
-        lappend mapper \$${e} [set ::env($e)]
-        lappend mapper \$\{${e}\} [set ::env($e)]
-    }
-    set quick [string map $mapper $str]
-    
-    # Iteratively modify quick for replacing occurences of
-    # ${name:default} constructs.  We do this until there are no
-    # match.
-    set done 0
-    # The regexp below using varnames as bash seems to be considering
-    # them.
-    set exp "\\$\{(\[a-zA-Z_\]+\[a-zA-Z0-9_\]*):(\[^\}\]*?)\}"
-    while { !$done } {
-        # Look for the expression and if we have a match, extract the
-        # name of the variable.
-        set rpl [regexp -inline -indices -- $exp $quick]
-        if { [llength $rpl] >= 3 } {
-            foreach {range var dft} $rpl break
-            foreach {range_start range_stop} $range break
-            foreach {var_start var_stop} $var break
-            set var [string range $quick $var_start $var_stop]
-            # If that variable is declared and exist, replace by its
-            # value, otherwise replace with the default value.
-            if { [info exists ::env($var)] } {
-                set quick [string replace $quick $range_start $range_stop \
-                        [set ::env($var)]]
-            } else {
-                foreach {dft_start dft_stop} $dft break
-                set quick [string replace $quick $range_start $range_stop \
-                        [string range $quick $dft_start $dft_stop]]
-            }
-        } else {
-            set done 1
-        }
-    }
-    
-    return $quick
-}
 
 
 # ::cluster::LogTerminal -- Create log line for terminal output
@@ -4200,7 +4008,7 @@ proc ::cluster::OSInfo { vm } {
     set nfo {}
     set nm [dict get $vm -name]
     foreach l [Machine -return -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
-        set k [EnvLine nfo $l]
+        set k [environment line nfo $l]
     }
     
     return $nfo

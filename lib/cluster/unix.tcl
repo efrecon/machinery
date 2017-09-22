@@ -11,6 +11,8 @@
 ##
 ##################
 
+package require cluster::environment
+
 namespace eval ::cluster::unix {
     namespace eval vars {
 	# Path of docker daemon init script
@@ -55,28 +57,16 @@ proc ::cluster::unix::defaults { args } {
 proc ::cluster::unix::release { vm { search ""} } {
     set nm [dict get $vm -name]
     log DEBUG "Getting OS information from $nm..."
-	array set NFO {}
+	set nfo [dict create]
     foreach l [Machine -return -stderr -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
-		set equal [string first "=" $l]
-		if { $equal >= 0 } {
-			set key [string trim [string range $l 0 [expr {$equal-1}]]]
-			set val [string trim [string range $l [expr {$equal+1}] end]]
-			set val [string trim $val "\"'"];  # Remove UNIX outer-quoting
-			# Remove backslashed special shell-characters
-			set val [string map [list 	"\\\$" "\$" \
-				"\\\"" \" \
-				"\\'" ' \
-				"\\\\" "\\" \
-				"\\`" "`"] $val]
-			set NFO($key) $val
-		}
+        environment line nfo $l
 	}
 
 	if { $search eq "" } {
-		return [array get NFO]
+		return $nfo
 	} else {
-		if { [info exists NFO([string toupper $search])] } {
-			return $NFO([string toupper $search])
+		if { [dict exists $nfo [string toupper $search]] } {
+			return [dict get $nfo [string toupper $search]]
 		}
 	}
 	return "";  # Failsafe for all errors.
