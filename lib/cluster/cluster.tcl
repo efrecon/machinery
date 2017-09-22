@@ -25,6 +25,7 @@ package require cluster::vcompare
 package require cluster::unix
 package require cluster::swarmmode
 package require cluster::environment
+package require cluster::tooling
 
 
 # Hard sourcing of the local json package to avoid using the one from
@@ -44,11 +45,6 @@ namespace eval ::cluster {
         variable -keys      {cpu size memory master labels driver options \
                              ports shares images compose registries aliases \
                              addendum files swarm prelude}
-        # Path to common executables
-        variable -machine   docker-machine
-        variable -docker    docker
-        variable -compose   docker-compose
-        variable -rsync     rsync
         # Current verbosity level
         variable -verbose   NOTICE
         # Locally cache images?
@@ -85,8 +81,6 @@ namespace eval ::cluster {
         variable -ssh       ""
         # List of "on" state
         variable -running   {running timeout}
-        # Force attachment via command line options
-        variable -sticky    off
         # Cluster state caching retention (in ms, negative for off)
         variable -retention 10000
         # Defaults for networks
@@ -95,12 +89,6 @@ namespace eval ::cluster {
         variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
         variable attached   ""
-        # CLI commands supported by tools (on demand)
-        variable commands   {docker "" compose "" machine ""}
-        # version numbers for our tools (on demand)
-        variable versions   {docker "" compose "" machine ""}
-        # Object generation identifiers
-        variable generator  0
         # Size converters
         variable converters [list \
                 {^b$} 1 \
@@ -144,9 +132,6 @@ namespace eval ::cluster {
 }
 
 ## TODO/Ideas
-#
-# Break out the Env* procedures to a separate module.  This makes some
-# sort of sense as they are at least used in two different places.
 #
 # Start using the TRACE level of verbosity and migrate some of the
 # DEBUG to trace.  When in TRACE, we should force debug on docker and
@@ -249,13 +234,9 @@ proc ::cluster::getopt {_argv name {_var ""} {dft ""}} {
 # Side Effects:
 #       Output message to logging channel whenever at the proper level.
 proc ::cluster::log { lvl msg } {
-    # Convert incoming level from string to integer.
-    set lvl [LogLevel $lvl]
-    # Convert module level from string to integer.
-    set current [LogLevel ${vars::-verbose}]
     # If we should output (i.e. level of message is below the global
     # module level), pretty print and output.
-    if { $current >= $lvl } {
+    if { [Log? $lvl] } {
         set toTTY [dict exists [fconfigure ${vars::-log}] -mode]
         # Output the whole line.
         if { $toTTY } {
@@ -306,7 +287,7 @@ proc ::cluster::ls { yaml {machines *} { force 0 } } {
     # meaning the header).
     if { $capture } {
         log NOTICE "Capturing current overview of cluster"
-        set state [Machine -return -- -s [StorageDir $yaml] ls]
+        set state [tooling machine -return -- -s [StorageDir $yaml] ls]
         dict set vars::cluster cluster [ListParser $state]
         dict set vars::cluster last $now
     }
@@ -510,7 +491,7 @@ proc ::cluster::create { vm token masters networks} {
 
             # Tag virtual machine with labels the hard-way, on older
             # versions.
-            if { [vcompare lt [Version machine] 0.4] } {
+            if { [vcompare lt [tooling version machine] 0.4] } {
                 set vm [tag $vm]
             }
             
@@ -525,7 +506,7 @@ proc ::cluster::create { vm token masters networks} {
                     log DEBUG "Testing that machine $nm has a working docker\
                                via busybox"
                     Attach $vm
-                    if { [Docker -return -- run --rm busybox echo $nm] eq "$nm" } {
+                    if { [tooling docker -return -- run --rm busybox echo $nm] eq "$nm" } {
                         log INFO "Docker setup properly on $nm"
                     } else {
                         log ERROR "Cannot test docker for $nm, check manually!"
@@ -631,9 +612,9 @@ proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
         Attach $vm
     }
     if { $direct } {
-        Docker -raw -- ps
+        tooling docker -raw -- ps
     } else {
-        set state [Docker -return -- ps -a]
+        set state [tooling docker -return -- ps -a]
         return [ListParser $state [list "CONTAINER ID" "CONTAINER_ID"]]
     }
 }
@@ -667,7 +648,7 @@ proc ::cluster::forall { cluster ptn cmd args } {
         if { $ptn eq "" } {
             log NOTICE "Executing on [dict get $vm -name]: $cmd $args"
             Attach $vm
-            Docker -- $cmd {*}$args
+            tooling docker -- $cmd {*}$args
         } else {
             foreach c [ps $vm 0 0] {
                 if { [dict exists $c names] && [dict exists $c container_id] } {
@@ -676,7 +657,7 @@ proc ::cluster::forall { cluster ptn cmd args } {
                             set id [dict get $c container_id]
                             log NOTICE "Executing on $nm: $cmd $args $id"
                             Attach $vm;   # We should really already be attached!
-                            Docker -- $cmd {*}$args $id
+                            tooling docker -- $cmd {*}$args $id
                         }
                     }
                 }
@@ -820,7 +801,7 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
     
     if { [llength $composed] > 0 } {
         log INFO "Machine $nm now running the following components"
-        Docker ps
+        tooling docker ps
     }
     
     return $composed
@@ -845,7 +826,7 @@ proc ::cluster::mcopy { vm { fspecs {}} } {
                 set dst $src
             }
             # Create directory at target
-            Machine -- -s [storage $vm] ssh $nm mkdir -p [file dirname $dst]
+            tooling machine -- -s [storage $vm] ssh $nm mkdir -p [file dirname $dst]
             # Copy file(s)
             if { [lsearch -nocase [split $hint ","] "norecurse"] >= 0 } {
                 log INFO "Copying $src to ${nm}:$dst"
@@ -943,7 +924,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # quoting.
     log DEBUG "Getting current boot2docker profile"
     set k ""
-    foreach l [Machine -return -- -s [storage $vm] ssh $nm cat ${vars::-profile}] {
+    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm cat ${vars::-profile}] {
         if { $k eq "" } {
             set l [string trim $l]
             if { $l ne "" && [string index $l 0] ne "\#" } {
@@ -985,11 +966,11 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
     SCopy $vm $fname
-    Run ${vars::-machine} ssh $nm sudo mv $fname ${vars::-profile}
+    tooling machine -- -s [storage $vm] ssh $nm sudo mv $fname ${vars::-profile}
     
     # Cleanup and restart machine to make sure the labels get live.
     file delete -force -- $fname;        # Remove local file, not needed anymore
-    Machine -- -s [storage $vm] restart $nm;# Restart machine to activate tags
+    tooling machine -- -s [storage $vm] restart $nm;# Restart machine to activate tags
     
     return [Running $vm]
 }
@@ -1175,10 +1156,10 @@ proc ::cluster::shares { vm { shares {}} } {
                 # recreation of data would be possible.
                 set b2d_dir [file dirname ${vars::-bootlocal}]
                 set bootlocal {}
-                foreach f [Machine -return -- \
+                foreach f [tooling machine -return -- \
                         -s [storage $vm] ssh $nm "ls -1 $b2d_dir"] {
                     if { $f eq [file tail ${vars::-bootlocal}] } {
-                        set bootlocal [Machine -return -- \
+                        set bootlocal [tooling machine -return -- \
                                 -s [storage $vm] \
                                 ssh $nm "cat ${vars::bootlocal}"]
                     }
@@ -1235,8 +1216,8 @@ proc ::cluster::shares { vm { shares {}} } {
                 log INFO "Persisting shares at reboot through\
                         ${vars::-bootlocal}"
                 SCopy $vm $fname
-                Machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
-                Machine -- -s [storage $vm] ssh $nm "sudo mv $fname ${vars::-bootlocal}"
+                tooling machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
+                tooling machine -- -s [storage $vm] ssh $nm "sudo mv $fname ${vars::-bootlocal}"
             }
             "rsync" {
                 # Detect SSH command
@@ -1248,15 +1229,15 @@ proc ::cluster::shares { vm { shares {}} } {
                 foreach {host mchn} $SHARINFO(rsync) {
                     # Create directory on remote VM and arrange for
                     # the UID to match (should we?)
-                    Machine -- -s [storage $vm] ssh $nm "sudo mkdir -p $mchn"
+                    tooling machine -- -s [storage $vm] ssh $nm "sudo mkdir -p $mchn"
                     if { $uid ne "" } {
-                        Machine -- -s [storage $vm] ssh $nm "sudo chown $uid $mchn"
+                        tooling machine -- -s [storage $vm] ssh $nm "sudo chown $uid $mchn"
                     }
                     # Synchronise the content of the local host
                     # directory onto the remote VM directory.  Arrange
                     # for rsync to understand those properly as
                     # directories and not only files.
-                    Run -- [auto_execok ${vars::-rsync}] -az -e $ssh \
+                    tooling run -- [auto_execok ${vars::-rsync}] -az -e $ssh \
                             [string trimright $host "/"]/ \
                             $hname:[string trimright $mchn "/"]/
                     lappend mounted $mchn
@@ -1327,7 +1308,7 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
     switch -nocase -glob -- $op {
         "g*" {
             foreach {host mchn type} $sharing {
-                Run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
+                tooling run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
                         $hname:[string trimright $mchn "/"]/ \
                         [string trimright $host "/"]/
                 lappend synchronised $mchn
@@ -1335,7 +1316,7 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
         }
         "p*" {
             foreach {host mchn type} $sharing {
-                Run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
+                tooling run -- [auto_execok ${vars::-rsync}] -auz --delete -e $ssh \
                         [string trimright $host "/"]/ \
                         $hname:[string trimright $mchn "/"]/
                 lappend synchronised $mchn
@@ -1377,7 +1358,7 @@ proc ::cluster::halt { vm } {
     # stop command of docker-machine.
     if { [IsRunning $vm] } {
         log INFO "Attempting graceful shutdown of $nm"
-        Machine -- -s [storage $vm] stop $nm
+        tooling machine -- -s [storage $vm] stop $nm
     }
     # Ask state of cluster again and if the machine still isn't
     # stopped, force a kill.
@@ -1385,7 +1366,7 @@ proc ::cluster::halt { vm } {
     if { [dict exists $state state] \
                 && ![string equal -nocase [dict get $vm state] "stopped"] } {
         log NOTICE "Forcing stop of $nm"
-        Machine -- -s [storage $vm] kill $nm
+        tooling machine -- -s [storage $vm] kill $nm
     }
     
     Discovery [bind $vm]
@@ -1411,7 +1392,7 @@ proc ::cluster::ssh { vm args } {
     set nm [dict get $vm -name]
     log NOTICE "Entering machine $nm..."
     if { [llength $args] > 0 } {
-        set res [eval [linsert $args 0 Machine -raw -stderr -- -s [storage $vm] ssh $nm]]
+        set res [eval [linsert $args 0 tooling machine -raw -stderr -- -s [storage $vm] ssh $nm]]
     } else {
         foreach fd {stdout stderr stdin} {
             fconfigure $fd -buffering none -translation binary
@@ -1462,7 +1443,7 @@ proc ::cluster::login { vm {regs {}} } {
                 }
             }
             append cmd [dict get $reg server]
-            Machine -- -s [storage $vm] ssh $nm $cmd
+            tooling machine -- -s [storage $vm] ssh $nm $cmd
         }
     }
 }
@@ -1541,12 +1522,12 @@ proc ::cluster::pull { vm {images {}} } {
                 Attach $cache -external
             }
             # Pull image locally
-            Docker -stderr -- pull $img
+            tooling docker -stderr -- pull $img
             # Get unique identifier for image locally and remotely
-            set local_id [Docker -return -- images -q --no-trunc $img]
+            set local_id [tooling docker -return -- images -q --no-trunc $img]
             log TRACE "Identifier for local image is $local_id"
             Attach $vm
-            set remote_id [Docker -return -- images -q --no-trunc $img]
+            set remote_id [tooling docker -return -- images -q --no-trunc $img]
             log TRACE "Identifier for remote image is $remote_id"
             if { $local_id eq $remote_id } {
                 log INFO "Image $img already present on $nm at version $local_id"
@@ -1564,13 +1545,13 @@ proc ::cluster::pull { vm {images {}} } {
                         [file join [TempDir] $rootname]].tar
                 log INFO "Using a local snapshot at $tmp_fpath to copy $img\
                         to $nm..."
-                Docker -stderr -- save -o $tmp_fpath $img
+                tooling docker -stderr -- save -o $tmp_fpath $img
                 log DEBUG "Created local snapshot of $img at $tmp_fpath"
                 
                 # Give the tar to docker on the remote machine
                 log DEBUG "Loading $tmp_fpath into $img at $nm..."
                 Attach $vm
-                Docker load -i $tmp_fpath
+                tooling docker load -i $tmp_fpath
                 
                 # Cleanup
                 log DEBUG "Cleaning up $tmp_fpath"
@@ -1578,8 +1559,8 @@ proc ::cluster::pull { vm {images {}} } {
             }
         } else {
             log INFO "Pulling $img directly in $nm"
-            Machine -- -s [storage $vm] ssh $nm "docker pull $img"
-            # Should we Attach - Docker pull $img - Detach instead?
+            tooling machine -- -s [storage $vm] ssh $nm "docker pull $img"
+            # Should we Attach - tooling docker pull $img - Detach instead?
         }
     }
 }
@@ -1603,7 +1584,7 @@ proc ::cluster::destroy { vm } {
     set nm [dict get $vm -name]
     if { [dict exists $vm state] } {
         log NOTICE "Removing machine $nm..."
-        Machine -- -s [storage $vm] rm -y $nm
+        tooling machine -- -s [storage $vm] rm -y $nm
     } else {
         log INFO "Machine $nm does not exist, nothing to do"
     }
@@ -1630,7 +1611,7 @@ proc ::cluster::destroy { vm } {
 proc ::cluster::inspect { vm } {
     set nm [dict get $vm -name]
     set json ""
-    foreach l [Machine -return -- -s [storage $vm] inspect $nm] {
+    foreach l [tooling machine -return -- -s [storage $vm] inspect $nm] {
         append json $l
         append json " "
     }
@@ -1671,7 +1652,7 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
             return 1
         }
         log NOTICE "Bringing up machine $nm..."
-        Machine -- -s [storage $vm] start $nm
+        tooling machine -- -s [storage $vm] start $nm
         incr retries -1
         if { $retries > 0 } {
             log INFO "Machine $nm could not start, trying again..."
@@ -1739,7 +1720,7 @@ proc ::cluster::parse { fname args } {
     } elseif { [vcompare ge $version 2.0] } {
         # Get list of external networks to create
         if { [dict exists $d networks] } {
-            set opts [CommandOptions [Docker -return -- network create --help]]
+            set opts [tooling options [tooling docker -return -- network create --help]]
             dict for {n keys} [dict get $d networks] {
                 # Create net "object" with proper name, i.e. using the prefix.
                 # We also make sure that we keep a reference to the name of
@@ -1849,31 +1830,6 @@ proc ::cluster::parse { fname args } {
     return [dict create -machines $vms -options $options -networks $networks]
 }
 
-# ::cluster::runtime -- Runtime check
-#
-#   Check for the presence of (and access to) the underlying necessary docker
-#   tools and execute a command when they are not available.
-#
-# Arguments:
-#	cmd	Command to execute when one tool is not available
-#
-# Results:
-#	A boolean telling if all runtime configuration is proper (or not)
-#
-# Side Effects:
-#	None
-proc ::cluster::runtime { { cmd {} } } {
-    foreach tool [list docker compose machine] {
-        if { [auto_execok [set vars::-[string trimleft $tool -]]] eq "" } {
-            log FATAL "Cannot access '$tool'!"
-            if { [llength $cmd] } {
-                eval {*}$cmd
-            }
-            return 0
-        }
-    }
-    return 1
-}
 
 # ::cluster::env -- Output cluster environment
 #
@@ -1954,21 +1910,6 @@ proc ::cluster::candidates { {dir .} } {
 }
 
 
-proc ::cluster::commands { tool } {
-    switch -nocase -- $tool {
-        compose -
-        machine -
-        docker {
-            if { [dict get $vars::commands $tool] eq "" } {
-                dict set vars::commands $tool [CommandsQuery $tool]
-                log DEBUG "Current set of commands for $tool is\
-                           [join [dict get $vars::commands $tool] ,\ ]"
-            }
-            return [dict get $vars::commands $tool]
-        }
-    }
-    return {}
-}
 
 
 ####################################################################
@@ -2002,6 +1943,22 @@ proc ::cluster::LogLevel { lvl } {
         return -1
     }
     return $lvl
+}
+
+
+proc ::cluster::Log? { { lvl "" } } {
+    # Convert current module level from string to integer.
+    set current [LogLevel ${vars::-verbose}]
+    
+    # Either return current log level or if we should log.
+    if { $lvl eq "" } {
+        return $current
+    } else {
+        # Convert incoming level from string to integer.
+        set lvl [LogLevel $lvl]
+        return [expr {$current >= $lvl}]
+    }
+    return -1
 }
 
 
@@ -2086,13 +2043,13 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     set nm [dict get $vm -name]
     log NOTICE "Creating machine $nm"
     Detach
-    set docker_version [Version docker]
+    set docker_version [tooling version docker]
     
     # Start creating a command that we will be able to call for
     # machine creation: first insert creation command with proper
     # driver.
     set driver [dict get $vm -driver]
-    set cmd [list Machine -- -s [storage $vm] create -d $driver]
+    set cmd [list tooling machine -- -s [storage $vm] create -d $driver]
     
     # Now translate the standard memory (in MB), size (in MB) and cpu
     # (in numbers) options into options that are specific to the
@@ -2127,7 +2084,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             kvm --kvm-cpu-count
         }
         # Setting the number of CPUs works with machine >= 0.2
-        if { [vcompare ge [Version machine] 0.2] } {
+        if { [vcompare ge [tooling version machine] 0.2] } {
             set COPT(virtualbox) --virtualbox-cpu-count
         }
         if { [info exist COPT($driver)] } {
@@ -2168,7 +2125,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # files so locally stored cached arguments will keep working.
     if { [dict exists $vm -options] } {
         if { [llength $vars::machopts] <= 0 } {
-            set vars::machopts [MachineOptions $driver]
+            set vars::machopts [tooling machineOptions $driver]
         }
         dict for {k v} [dict get $vm -options] {
             set k [string trimleft $k "-"]
@@ -2207,7 +2164,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     }
     
     # Add the tags, if version permits.
-    if { [vcompare ge [Version machine] 0.4] } {
+    if { [vcompare ge [tooling version machine] 0.4] } {
         if { [dict exists $vm -labels] } {
             foreach {k v} [dict get $vm -labels] {
                 lappend cmd --engine-label ${k}=${v};   # Should we quote?
@@ -2225,431 +2182,25 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # we'll compare to our local version below for upgrades.
     log DEBUG "Testing SSH connection to $nm"
     WaitSSH $vm
-    set rv_line [lindex [Machine -return -- -s [storage $vm] ssh $nm "docker --version"] 0]
+    set rv_line [lindex [tooling machine -return -- -s [storage $vm] ssh $nm "docker --version"] 0]
     set remote_version [vcompare extract $rv_line]
     if { $remote_version eq "" } {
         log FATAL "Cannot log into $nm!"
         return ""
     } else {
         log INFO "Machine $nm running docker v. $remote_version,\
-                  running v. [Version docker] locally"
+                  running v. [tooling version docker] locally"
         if { [unix release $vm ID] ne "rancheros" } {
             # RancherOS cannot be upgraded through docker machine
             if { [vcompare gt $docker_version $remote_version] } {
                 log NOTICE "Local docker version greater than machine,\
                             trying an upgrade"
-                Machine -- -s [storage $vm] upgrade $nm
+                tooling machine -- -s [storage $vm] upgrade $nm
             }
         }
     }
             
     return [dict get $vm -name]
-}
-
-
-proc ::cluster::MachineOptions { driver } {
-    log INFO "Actively discovering creation options for driver $driver"
-    return [CommandOptions [Machine -return -- create --driver $driver]]
-}
-
-
-proc ::cluster::CommandOptions { lines } {
-    set cmdopts {};  # Empty list of discovered options
-    
-    foreach l $lines {
-        # Only considers indented lines, they contain the option
-        # descriptions (there might be a lot!).
-        if { [string trim $l] ne "" && [string trimleft $l] ne $l } {
-            set l [string trim $l]
-            # Now only consider lines that start with a dash.
-            if { [string index $l 0] eq "-" } {
-                # Get rid of the option textual description behind the
-                # first tab.
-                set tab [string first "\t" $l]
-                if { $tab < 0 } {
-                    set tab [string first "  " $l]
-                }
-                set lead [string trim [string range $l 0 $tab]]
-                # Now isolate the real option, starting from the back
-                # of the string.  Try capturing the default value if
-                # any.
-                set def_val {};   # Default value is empty by default
-                set back [expr {[string length $lead]-1}];  # End of lead
-                # Default value is at end, between quotes.
-                if { [string index $lead end] eq "\"" } {
-                    set op_quote [string last "\"" $lead end-1]
-                    set back [expr {$op_quote-1}];  # Skip default val
-                    set def_val [string trim [string range $lead $op_quote end] "\""]
-                }
-                # Skip multioption specification, which is enclosed by
-                # brackets.
-                set idx [string last "\]" $lead]
-                if { $idx >= 0 } {
-                    set back [expr {[string last "\[" $lead $idx]-1}]
-                }
-                # When we are here, the variable back contains the
-                # location within the lead where the options
-                # specifications are contained.  Split on coma and
-                # pick up the first with a double dash.
-                foreach opt [split [string range $lead 0 $back] ","] {
-                    set opt [string trim $opt]
-                    if { [string range $opt 0 1] eq "--" } {
-                        set space [string first " " $opt]
-                        if { $space >= 0 } {
-                            lappend cmdopts [string range $opt 2 [expr {$space - 1}]] $def_val                        
-                        } else {
-                            lappend cmdopts [string range $opt 2 end] $def_val
-                        }
-                        break;   # Done, we have found one!
-                    }
-                }
-            }
-        }
-    }
-    
-    return $cmdopts    
-}
-
-# ::cluster::POpen4 -- Pipe open
-#
-#       This procedure executes an external command and arranges to
-#       redirect locally assiged channel descriptors to its stdin,
-#       stdout and stderr.  This makes it possible to send input to
-#       the command, but also to properly separate its two forms of
-#       outputs.
-#
-# Arguments:
-#	args	Command to execute
-#
-# Results:
-#       A list of four elements.  Respectively: the list of process
-#       identifiers for the command(s) that were piped, channel for
-#       input to command pipe, for regular output of command pipe and
-#       channel for errors of command pipe.
-#
-# Side Effects:
-#       None.
-proc ::cluster::POpen4 { args } {
-    foreach chan {In Out Err} {
-        set pipe [chan pipe]
-        if { [llength $pipe] >= 2 } {
-            lassign $pipe read$chan write$chan
-        } else {
-            log FATAL "Cannot create channel pipes!"
-            return [list]
-        }
-    }
-    
-    if { [catch {exec {*}$args <@$readIn >@$writeOut 2>@$writeErr &} pid] } {
-        foreach chan {In Out Err} {
-            chan close write$chan
-            chan close read$chan
-        }
-        log CRITICAL "Cannot execute $args: $pid"
-        return [list]
-    }
-    chan close $writeOut
-    chan close $writeErr
-    
-    foreach chan [list stdout stderr $readOut $readErr $writeIn] {
-        chan configure $chan -buffering line -blocking false
-    }
-    
-    return [list $pid $writeIn $readOut $readErr]
-}
-
-
-# ::cluster::LineRead -- Read line output from started commands
-#
-#       This reads the output from commands that we have started, line
-#       by line and either prints it out or accumulate the result.
-#       Properly mark for end of output so the caller will stop
-#       waiting for output to happen.  When outputing through the
-#       logging facility, the procedure is able to recognise the
-#       output of docker-machine commands (which uses the logrus
-#       package) and to convert between loglevels.
-#
-# Arguments:
-#	c	Identifier of command being run
-#	fd	Which channel to read (refers to index in command)
-#
-# Results:
-#       None.
-#
-# Side Effects:
-#       Read lines, outputs
-proc ::cluster::LineRead { c fd } {
-    upvar \#0 $c CMD
-    
-    set line [gets $CMD($fd)]
-    set outlvl [expr {$fd eq "stderr" ? "NOTICE":"INFO"}]
-    # Parse and analyse output of docker-machine. Do some translation
-    # of the loglevels between logrus and our internal levels.
-    set bin [lindex $CMD(command) 0]
-    if { [string first ${vars::-machine} $bin] >= 0 } {
-        if { [string first "msg=" $line] >= 0 } {
-            foreach {k v} [string map {"=" " "} $line] {
-                if { $k eq "msg" } {
-                    set line $v
-                    break
-                }
-                # Translate between loglevels from logrus to internal
-                # levels.
-                if { $k eq "level" } {
-                    foreach { gl lvl } [list info INFO \
-                            warn NOTICE \
-                            error WARN \
-                            fatal ERROR \
-                            panic FATAL] {
-                        if { [string equal -nocase $v $gl] } {
-                            set outlvl $lvl
-                        }
-                    }
-                }
-            }
-        }
-    }
-    # Respect -keepblanks and output or accumulate in result
-    if { ( !$CMD(keep) && [string trim $line] ne "") || $CMD(keep) } {
-        if { $CMD(back) } {
-            if { ( $CMD(outerr) && $fd eq "stderr" ) || $fd eq "stdout" } {
-                log TRACE "Appending '$line' to result"
-                lappend CMD(result) $line
-            }
-        } elseif { $CMD(relay) } {
-            puts $fd $line
-        } else {
-            # Output even what was captured on stderr, which is
-            # probably what we wanted in the first place.
-            log $outlvl "  $line"
-        }
-    }
-    
-    # On EOF, we stop this very procedure to be triggered.  If there
-    # are no more outputs to listen to, then the process has ended and
-    # we are done.
-    if { [eof $CMD($fd)] } {
-        fileevent $CMD($fd) readable {}
-        if { ($CMD(stdout) eq "" || [fileevent $CMD(stdout) readable] eq "" ) \
-                    && ($CMD(stderr) eq "" || [fileevent $CMD(stderr) readable] eq "" ) } {
-            set CMD(done) 1
-        }
-    }
-}
-
-
-# ::cluster::Run -- Run command
-#
-#       Run an external (local!) command and possibly capture its
-#       output.  The commands is followed of all the arguments placed
-#       after --, meaning that all dash-led options before the -- are
-#       options to this procedure.  These options are as follows:
-#       -return     Return result of command instead: list of (non-empty) lines
-#       -keepblanks Keep blank lines (default is to omit them)
-#       -stderr     Also capture standard error.
-#
-#       When output of the command should simply be shown, we do some
-#       extra extraction and parsing work on the output of
-#       docker-machine and output at the log level INFO (but maybe
-#       could we translate between log levels?)
-#
-# Arguments:
-#        args   (Optional dash-led options, followed by --) and command
-#               to execute.
-#
-# Results:
-#       Result of command
-#
-# Side Effects:
-#       Run local command and (possibly) show its output.
-proc ::cluster::Run { args } {
-    # Isolate -- that will separate options to procedure from options
-    # that would be for command.  Using -- is MANDATORY if you want to
-    # specify options to the procedure.
-    set sep [lsearch $args "--"]
-    if { $sep >= 0 } {
-        set opts [lrange $args 0 [expr {$sep-1}]]
-        set args [lrange $args [expr {$sep+1}] end]
-    } else {
-        set opts [list]
-    }
-    
-    # Create an array global to the namespace that we'll use for
-    # synchronisation and context storage.
-    set c [namespace current]::command[incr ${vars::generator}]
-    upvar \#0 $c CMD
-    set CMD(id) $c
-    set CMD(command) $args
-    log DEBUG "Executing $CMD(command) and capturing its output"
-    
-    # Extract some options and start building the
-    # pipe.  As we want to capture output of the command, we will be
-    # using the Tcl command "open" with a file path that starts with a
-    # "|" sign.
-    set CMD(keep) [getopt opts -keepblanks]
-    set CMD(back) [getopt opts -return]
-    set CMD(outerr) [getopt opts -stderr]
-    set CMD(relay) [getopt opts -raw]
-    set CMD(done) 0
-    set CMD(result) {}
-    
-    # Kick-off the command and wait for its end
-    # Kick-off the command and wait for its end
-    if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
-        set pipe |[concat $args]
-        if { $CMD(outerr) } {
-            append pipe " 2>@1"
-        }
-        set CMD(stdin) ""
-        set CMD(stderr) ""
-        set CMD(stdout) [open $pipe]
-        set CMD(pid) [pid $CMD(stdout)]
-        fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
-    } else {
-        lassign [POpen4 {*}$args] CMD(pid) CMD(stdin) CMD(stdout) CMD(stderr)
-        fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
-        fileevent $CMD(stderr) readable [namespace code [list LineRead $c stderr]]
-    }
-    vwait ${c}(done);   # Wait for command to end
-    
-    catch {close $CMD(stdin)}
-    catch {close $CMD(stdout)}
-    catch {close $CMD(stderr)}
-    
-    set res $CMD(result)
-    unset $c
-    return $res
-}
-
-
-# ::cluster::Docker -- Run docker binary
-#
-#       Run the docker binary registered as part as the global library
-#       options under the control of this program.  This wrapper will
-#       turn on extra debbuggin in docker itself whenever the
-#       verbosity level of the library is greated or equal than DEBUG.
-#
-# Arguments:
-#        args        Arguments to docker command (compatible with Run)
-#
-# Results:
-#       Result of command.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Docker { args } {
-    # Isolate -- that will separate options to procedure from options
-    # that would be for command.  Using -- is MANDATORY if you want to
-    # specify options to the procedure.
-    set sep [lsearch $args "--"]
-    if { $sep >= 0 } {
-        set opts [lrange $args 0 [expr {$sep-1}]]
-        set args [lrange $args [expr {$sep+1}] end]
-    } else {
-        set opts [list]
-    }
-    
-    # Put docker in debug mode when we are ourselves at debug level.
-    if { [LogLevel ${vars::-verbose}] >= 7 } {
-        set args [linsert $args 0 --debug]
-    }
-    if { [string is true ${vars::-sticky}] } {
-        if { [info exists ::env(DOCKER_TLS_VERIFY)] } {
-            if { [string is true $::env(DOCKER_TLS_VERIFY)] } {
-                set args [linsert $args 0 --tls --tlsverify=true]
-            }
-        }
-        if { [info exists ::env(DOCKER_CERT_PATH)] } {
-            foreach {opt fname} [list cacert ca.pem cert cert.pem key key.pem] {
-                set fpath [file join $::env(DOCKER_CERT_PATH) $fname]
-                if { [file exists $fpath] } {
-                    set args [linsert $args 0 --tls$opt [file nativename $fpath]]
-                }
-            }
-        }
-        if { [info exists ::env(DOCKER_HOST)] } {
-            set args [linsert $args 0 -H $::env(DOCKER_HOST)]
-        }
-        log INFO "Automatically added command line arguments to docker: $args"
-    }
-    return [eval Run $opts -- [auto_execok ${vars::-docker}] $args]
-}
-
-
-# ::cluster::Compose -- Run compose binary
-#
-#       Run the compose binary registered as part as the global
-#       library options under the control of this program.  This
-#       wrapper will turn on extra debbuggin in compose itself
-#       whenever the verbosity level of the library is greated or
-#       equal than DEBUG.
-#
-# Arguments:
-#        args        Arguments to compose command (compatible with Run)
-#
-# Results:
-#       Result of command.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Compose { args } {
-    # Isolate -- that will separate options to procedure from options
-    # that would be for command.  Using -- is MANDATORY if you want to
-    # specify options to the procedure.
-    set sep [lsearch $args "--"]
-    if { $sep >= 0 } {
-        set opts [lrange $args 0 [expr {$sep-1}]]
-        set args [lrange $args [expr {$sep+1}] end]
-    } else {
-        set opts [list]
-    }
-    
-    # Put docker in debug mode when we are ourselves at debug level.
-    if { [LogLevel ${vars::-verbose}] >= 7 } {
-        set args [linsert $args 0 --verbose]
-    }
-    return [eval Run $opts -- [auto_execok ${vars::-compose}] $args]
-}
-
-
-# ::cluster::Machine -- Run machine binary
-#
-#       Run the docker machine binary registered as part as the global
-#       library options under the control of this program.  This
-#       wrapper will turn on extra debbuggin in machine itself
-#       whenever the verbosity level of the library is greated or
-#       equal than DEBUG.
-#
-# Arguments:
-#        args        Arguments to machine command (compatible with Run)
-#
-# Results:
-#       Result of command.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Machine { args } {
-    # Isolate -- that will separate options to procedure from options
-    # that would be for command.  Using -- is MANDATORY if you want to
-    # specify options to the procedure.
-    set sep [lsearch $args "--"]
-    if { $sep >= 0 } {
-        set opts [lrange $args 0 [expr {$sep-1}]]
-        set args [lrange $args [expr {$sep+1}] end]
-    } else {
-        set opts [list]
-    }
-    
-    # Put docker-machine in debug mode when we are ourselves at debug
-    # level.
-    if { [LogLevel ${vars::-verbose}] >= 7 } {
-        set args [linsert $args 0 --debug]
-    }
-    if { 0 && [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
-        set args [linsert $args 0 --native-ssh]
-    }
-    
-    return [eval Run $opts -- [auto_execok ${vars::-machine}] $args]
 }
 
 
@@ -2693,7 +2244,7 @@ proc ::cluster::Attach { vm args } {
         log INFO "Attaching to $nm"
         array set DENV {};   # Will hold the set of variables to be set.
         
-        set cmd [list Machine -return --]
+        set cmd [list tooling machine -return --]
         if { !$external } {
             lappend cmd -s [storage $vm]
         }
@@ -2713,7 +2264,7 @@ proc ::cluster::Attach { vm args } {
             }
         } else {
             log INFO "Could not request environment through machine, trying a good guess through inspection"
-            set cmd [list Machine -return --]
+            set cmd [list tooling machine -return --]
             if { !$external } {
                 lappend cmd -s [storage $vm]
             }
@@ -2852,7 +2403,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     # Change dir to solve relative access to env files.  This is ugly,
     # but there does not seem to be any other solution at this point
     # for compose < 1.2
-    if { [vcompare lt [Version compose] 1.2] } {
+    if { [vcompare lt [tooling version compose] 1.2] } {
         cd [file dirname $fpath]
     }
     
@@ -2958,14 +2509,14 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
         
         # Arrange for compose to pick up the temporary
         # file, but still use the proper project name.
-        set cmd [list Compose -stderr -- \
+        set cmd [list tooling compose -stderr -- \
                 --file $tmp_fpath --project-name $project]
         set composed $tmp_fpath
     } else {
         if { $project eq "" } {
-            set cmd [list Compose -stderr -- --file $fpath]
+            set cmd [list tooling compose -stderr -- --file $fpath]
         } else {
-            set cmd [list Compose -stderr -- \
+            set cmd [list tooling compose -stderr -- \
                     --file $fpath --project-name $project]
         }
         set composed $fpath
@@ -2989,7 +2540,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     # Run compose command that we have built up and return to the main
     # directory at once for older versions of compose
     eval $cmd
-    if { [vcompare lt [Version compose] 1.2] } {
+    if { [vcompare lt [tooling version compose] 1.2] } {
         cd $maindir
     }
     
@@ -3288,7 +2839,7 @@ proc ::cluster::Exec { vm args } {
                 }
             } else {
                 log NOTICE "Executing $fpath locally (args: $cargs)"
-                Run -keepblanks -stderr -raw -- $cmd {*}$cargs
+                tooling run -keepblanks -stderr -raw -- $cmd {*}$cargs
             }
             
             # Remove temporary (subsituted) file, if any.
@@ -3371,7 +2922,7 @@ proc ::cluster::Discovery { vm } {
             }
             # Add the official IP address, as this is what will be
             # usefull most of the time.
-            set ip [lindex [Machine -return -- -s [storage $vm] ip $nm] 0]
+            set ip [lindex [tooling machine -return -- -s [storage $vm] ip $nm] 0]
             if { $ip ne "" \
                         && [regexp {((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)|(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})} $ip] } {
                 foreach pfx $prefixes {
@@ -3570,131 +3121,6 @@ proc ::cluster::NameCmp { name nm {op equal}} {
 }
 
 
-# ::cluster::VersionQuery -- Version of underlying tools
-#
-#       Query and return the version number of one of the underlying
-#       tools that we support.  This will call the appropriate tool
-#       with the proper arguments to get the version number.
-#
-# Arguments:
-#        tool   Tool to query, a string, one of: docker, machine or compose
-#
-# Results:
-#       Return the version number or an empty string.
-#
-# Side Effects:
-#       None.
-proc ::cluster::VersionQuery { tool } {
-    set vline ""
-    switch -nocase -- $tool {
-        docker {
-            set vline [lindex [Docker -return -- --version] 0]
-        }
-        machine {
-            set vline [lindex [Machine -return -- -version] 0]
-        }
-        compose {
-            set vline [lindex [Compose -return -- --version] 0]
-        }
-        default {
-            log WARN "$tool isn't a tool that we can query the version for"
-        }
-    }
-    return [vcompare extract $vline];    # Catch all for errors
-}
-
-
-proc ::cluster::CommandsQuery { tool } {
-    set hlp {}
-    switch -nocase -- $tool {
-        docker {
-            set hlp [Docker -return -keepblanks -- --help]
-        }
-        machine {
-            set hlp [Machine -return -keepblanks -- --help]
-        }
-        compose {
-            set hlp [Compose -return -keepblanks -- --help]
-        }
-        default {
-            log WARN "$tool isn't a tool that we can query the commands for"
-        }
-    }
-    
-    # Analyse the output of the help for the tool, they are all
-    # formatted more or less the same way.  We look for a line that
-    # starts with commands and considers that it marks the beginning
-    # of the list of commands.
-    set commands {}
-    set c_group 0
-    foreach l $hlp {
-        if { $c_group } {
-            set l [string trim $l]
-            # Empty line marks the end of the command description
-            # group, return what we've found.
-            if { $l eq "" } {
-                return $commands
-            }
-            # Look for a separator between the command name(s) and
-            # its/their description.  We prefer the tab, but accept
-            # also a double space.
-            set sep [string first "\t" $l]
-            if { $sep < 0 } {
-                set sep [string first "  " $l]
-            }
-            # Separate the command name(s) from the description, split
-            # on the coma sign in case there were aliases, then add
-            # each command in turns.
-            if { $sep < 0 } {
-                log WARN "Cannot find command leading '$l'"
-            } else {
-                set spec [string trim [string range $l 0 $sep]]
-                foreach c [split $spec ,] {
-                    lappend commands [string trim $c]
-                }
-            }
-        } else {
-            # We don't do anything until we've found a line that marks
-            # the start of the command description group.
-            if { [string match -nocase "commands*" $l] } {
-                set c_group 1
-            }
-        }
-    }
-    return $commands
-}
-
-
-# ::cluster::Version -- (Cached) version of underlying tools.
-#
-#       This will return the core version number of one of the
-#       underlying tools that we support.  The version number is
-#       cached in a global variable so it will only be queried once.
-#
-# Arguments:
-#       tool    Tool to query, a string, one of: docker, machine or compose
-#
-# Results:
-#       Return the version number or an empty string.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Version { tool } {
-    switch -nocase -- $tool {
-        compose -
-        machine -
-        docker {
-            if { [dict get $vars::versions $tool] eq "" } {
-                dict set vars::versions $tool [VersionQuery $tool]
-                log DEBUG "Current version for $tool is\
-                        [dict get $vars::versions $tool]"
-            }
-            return [dict get $vars::versions $tool]
-        }
-    }
-    return ""
-}
-
 
 # ::cluster::Convert -- SI multiples converter
 #
@@ -3880,7 +3306,7 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
         set d_fname $s_fname
     }
     
-    if { [vcompare ge [Version machine] 0.3] } {
+    if { [vcompare ge [tooling version machine] 0.3] } {
         set storage [storage $vm]
         # On windows we need to trick the underlying scp of docker-machine,
         # which really is a relay to the scp command. We force in localhost:
@@ -3914,9 +3340,9 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
             set src $s_fname
         }
         if { [string is true $recurse] } {
-            Machine -stderr -- -s $storage scp -r $src ${nm}:${d_fname}
+            tooling machine -stderr -- -s $storage scp -r $src ${nm}:${d_fname}
         } else {
-            Machine -stderr -- -s $storage scp $src ${nm}:${d_fname}
+            tooling machine -stderr -- -s $storage scp $src ${nm}:${d_fname}
         }
     } else {
         unix defaults -ssh [SCommand $vm]
@@ -3999,7 +3425,7 @@ proc ::cluster::InstallRSync { vm } {
                 is not (yet?) supported"
     } else {
         log NOTICE "Installing rsync in $nm"
-        Machine -- -s [storage $vm] ssh $nm $installer
+        tooling machine -- -s [storage $vm] ssh $nm $installer
     }
 }
 
@@ -4007,7 +3433,7 @@ proc ::cluster::InstallRSync { vm } {
 proc ::cluster::OSInfo { vm } {
     set nfo {}
     set nm [dict get $vm -name]
-    foreach l [Machine -return -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
+    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
         set k [environment line nfo $l]
     }
     
@@ -4077,7 +3503,7 @@ proc ::cluster::VolumeLocation { vol } {
     if { [dict exists $vars::volMounts $vol] } {
         return [dict get $vars::volMounts $vol]
     } else {
-        foreach l [Run -return -- mount] {
+        foreach l [tooling run -return -- mount] {
             set on [string first " on " $l]
             if { $on >= 0 } {
                 set type [string first " type " $l $on]
@@ -4102,7 +3528,7 @@ proc ::cluster::DefaultMachine {} {
     set possible ""; # Will hold the name of a possible machine to use as default
     
     # Get docker system-wide information
-    set d_info [Docker -return -raw -stderr -- info]
+    set d_info [tooling docker -return -raw -stderr -- info]
     if { [string match -nocase "*error occurred trying to connect*" $d_info] } {
         # If we get an error, and since we know that we are on windows, we are
         # probably running on top of the Docker Toolbox. Then the default
@@ -4162,7 +3588,7 @@ proc ::cluster::DefaultMachine {} {
     # this really is one of the default known machines and pick it up as the
     # default machine for caching if it was.
     if { $possible ne "" } {
-        set state [Machine -return -- ls]
+        set state [tooling machine -return -- ls]
         foreach nfo [ListParser $state] {
             # Add only machines which name matches the incoming pattern.
             if { [dict exists $nfo name] \
@@ -4191,7 +3617,7 @@ proc ::cluster::WaitSSH { vm { sleep 5 } { retries 5 } } {
     }
     log DEBUG "Waiting for ssh to be ready on $nm"
     while { $retries > 0 } {
-        set l [lindex [Machine -return -- -s [storage $vm] ssh $nm "echo ready"] 0]
+        set l [lindex [tooling machine -return -- -s [storage $vm] ssh $nm "echo ready"] 0]
         if { $l eq "ready" } {
             return $retries
         }

@@ -20,12 +20,10 @@ namespace eval ::cluster::swarm {
     namespace export {[a-z]*}
     namespace path [namespace parent]
     namespace ensemble create -command ::swarm
-    namespace import [namespace parent]::Machine \
-            [namespace parent]::Machines \
+    namespace import [namespace parent]::Machines \
             [namespace parent]::IsRunning \
             [namespace parent]::Attach \
             [namespace parent]::Detach \
-            [namespace parent]::Docker \
             [namespace parent]::Create \
             [namespace parent]::CacheFile
 }
@@ -63,7 +61,7 @@ proc ::cluster::swarm::info { cluster } {
         if { [IsRunning $master] } {
             log NOTICE "Getting cluster info via [dict get $master -name]"
             Attach $master -swarm
-            Docker info
+            tooling docker info
         } else {
             log WARN "Cluster not bound or master not running"
         }
@@ -78,7 +76,7 @@ proc ::cluster::swarm::recapture { cluster } {
         if { [IsRunning $master] } {
             log NOTICE "Capturing current list of live machines in swarm"
             Attach $master
-            Docker restart ${vars::-master}
+            tooling docker restart ${vars::-master}
         } else {
             log WARN "Cluster not bound or master not running"
         }
@@ -167,7 +165,7 @@ proc ::cluster::swarm::Token { {driver none} } {
     if { $driver eq "none" || $driver eq "" } {
         Detach;   # Ensure we are running locally...
         log INFO "Creating swarm token..."
-        set token [Docker -return -- run --rm swarm create]
+        set token [tooling docker -return -- run --rm swarm create]
         log NOTICE "Created cluster token $token"
     } else {
         set nm [Temporary "tokeniser"]
@@ -176,10 +174,10 @@ proc ::cluster::swarm::Token { {driver none} } {
         if { [Create $vm] ne "" } {
             Attach $vm
             log INFO "Creating swarm token..."
-            set token [Docker -return -- run --rm swarm create]
+            set token [tooling docker -return -- run --rm swarm create]
             log NOTICE "Created cluster token $token"
-            Machine kill $nm;   # We want to make this quick!
-            Machine rm $nm
+            tooling machine kill $nm;   # We want to make this quick!
+            tooling machine rm $nm
         }
     }
     return $token

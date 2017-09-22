@@ -9,6 +9,7 @@
 ##
 ##################
 
+package require cluster::tooling
 namespace eval ::cluster::virtualbox {
     # Encapsulates variables global to this namespace under their own
     # namespace, an idea originating from http://wiki.tcl.tk/1489.
@@ -139,8 +140,8 @@ proc ::cluster::virtualbox::addshare { vm path } {
         Manage sharedfolder add $vm \
             --name $nm \
             --hostpath $path
-	Manage setextradata $vm \
-	    VBoxInternal2/SharedFoldersEnableSymlinksCreate/$nm 1
+        Manage setextradata $vm \
+            VBoxInternal2/SharedFoldersEnableSymlinksCreate/$nm 1
     }
     return $nm
 }
@@ -264,8 +265,8 @@ proc ::cluster::virtualbox::Manage { args } {
         set opts [list]
     }
 
-    return [eval [namespace parent]::Run $opts -- \
-		[auto_execok ${vars::-manage}] $args]
+    return [eval tooling run $opts -- \
+                [auto_execok ${vars::-manage}] $args]
 }
 
 

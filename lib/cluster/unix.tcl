@@ -12,15 +12,16 @@
 ##################
 
 package require cluster::environment
+package require cluster::tooling
 
 namespace eval ::cluster::unix {
     namespace eval vars {
-	# Path of docker daemon init script
-	variable -daemon    "/etc/init.d"
-	# Path where PID files are stored
-	variable -run       "/var/run"
-	# ssh command to use towards host
-	variable -ssh       ""
+        # Path of docker daemon init script
+        variable -daemon    "/etc/init.d"
+        # Path where PID files are stored
+        variable -run       "/var/run"
+        # ssh command to use towards host
+        variable -ssh       ""
     }
     namespace export {[a-z]*}
     namespace path [namespace parent]
@@ -54,22 +55,39 @@ proc ::cluster::unix::defaults { args } {
 }
 
 
+# ::cluster::unix::release -- OS Identification
+#
+#      Read the os-release file as specified by
+#      https://www.freedesktop.org/software/systemd/man/os-release.html and
+#      either return its whole content or search for the value of a given key.
+#
+# Arguments:
+#      vm       Dictionary description of virtual machine
+#      search   Key to search for (case insensitive), empty for entire content
+#
+# Results:
+#      Return either the value for the key (or an empty string) when the key to
+#      search for is non-empty, either the entire content of the OS
+#      identification file as a dictionary.
+#
+# Side Effects:
+#      Read /etc/os-release on remote machine.
 proc ::cluster::unix::release { vm { search ""} } {
     set nm [dict get $vm -name]
     log DEBUG "Getting OS information from $nm..."
-	set nfo [dict create]
-    foreach l [Machine -return -stderr -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
+    set nfo [dict create]
+    foreach l [tooling machine -return -stderr -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
         environment line nfo $l
-	}
-
-	if { $search eq "" } {
-		return $nfo
-	} else {
-		if { [dict exists $nfo [string toupper $search]] } {
-			return [dict get $nfo [string toupper $search]]
-		}
-	}
-	return "";  # Failsafe for all errors.
+    }
+    
+    if { $search eq "" } {
+        return $nfo
+    } else {
+        if { [dict exists $nfo [string toupper $search]] } {
+            return [dict get $nfo [string toupper $search]]
+        }
+    }
+    return "";  # Failsafe for all errors.
 }
 
 
@@ -83,7 +101,7 @@ proc ::cluster::unix::release { vm { search ""} } {
 #       process
 #
 # Arguments:
-#	nm	Name of virtual machine
+#	nm	    Name of virtual machine
 #	filter	Glob-style filter for main process name filter.
 #
 # Results:
@@ -96,19 +114,19 @@ proc ::cluster::unix::ps { vm {filter *}} {
     log DEBUG "Getting list of processes on $nm..."
     set processes {}
     set skip 1
-    foreach l [Machine -return -- -s [storage $vm] ssh $nm "sudo ps -e -o pid,comm,args"] {
-	if { $skip } {
-	    # Skip header!
-	    set skip 0
-	} else {
-	    set l [string trim $l]
-	    set pid [lindex $l 0]
-	    set cmd [lindex $l 1]
-	    set args [lrange $l 2 end]
-	    if { [string match $filter $cmd] } {
-		lappend processes $pid $cmd $args
-	    }
-	}
+    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm "sudo ps -e -o pid,comm,args"] {
+        if { $skip } {
+            # Skip header!
+            set skip 0
+        } else {
+            set l [string trim $l]
+            set pid [lindex $l 0]
+            set cmd [lindex $l 1]
+            set args [lrange $l 2 end]
+            if { [string match $filter $cmd] } {
+                lappend processes $pid $cmd $args
+            }
+        }
     }
     return $processes
 }
@@ -123,9 +141,9 @@ proc ::cluster::unix::ps { vm {filter *}} {
 #       daemon is actually running and will start it if not.
 #
 # Arguments:
-#	nm	Name of the virtual machine
+#	nm	    Name of the virtual machine
 #	daemon	Name of the daemon (docker anyone?)
-#	cmd	Sub-command to execute
+#	cmd	    Sub-command to execute
 #	args	Possible sub-commands arguments.
 #
 # Results:
@@ -136,18 +154,18 @@ proc ::cluster::unix::ps { vm {filter *}} {
 #       None.
 proc ::cluster::unix::daemon { vm daemon cmd args } {
     switch -nocase -- $cmd {
-	"pid" {
-	    return [eval [linsert $args 0 \
-			      [namespace current]::DaemonPID $vm $daemon]]
-	}
-	"up" -
-	"start" {
-	    return [eval [linsert $args 0 \
-			      [namespace current]::DaemonUp $vm $daemon]]
-	}
-	default {
-	    return -code error "$cmd is not a known sub-command!"
-	}
+        "pid" {
+            return [eval [linsert $args 0 \
+                    [namespace current]::DaemonPID $vm $daemon]]
+        }
+        "up" -
+        "start" {
+            return [eval [linsert $args 0 \
+                    [namespace current]::DaemonUp $vm $daemon]]
+        }
+        default {
+            return -code error "$cmd is not a known sub-command!"
+        }
     }
 }
 
@@ -176,43 +194,43 @@ proc ::cluster::unix::mounts { vm } {
     # Parse the output of the 'mount' command line by line, we do this
     # by looking for specific keywords in the string, but we might be
     # better off using regular expressions?
-    foreach l [Machine -return -- -s [storage $vm] ssh $nm mount] {
-	# Advance to word "on" and isolate the device specification
-	# that should be placed before.
-	set on [string first " on " $l]
-	if { $on >= 0 } {
-	    set dev [string trim [string range $l 0 $on]]
-	    # Advance to the keyword "type" and isolate the path that
-	    # should be between "on" and "type".
-	    set type [string first " type " $l $on]
-	    if { $type >= 0 } {
-		set dst [string trim [string range $l [expr {$on+4}] $type]]
-		# Advance to the parenthesis, this is where the
-		# options will begin.  The type is between the keyword
-		# type and the parenthesis (or the end of the
-		# string/line).
-		set paren [string first " (" $l $type]
-		if { $paren >= 0 } {
-		    set type [string trim \
-                                  [string range $l [expr {$type+6}] $paren]]
-		    set optstr [string trim \
-                                    [string range $l [expr {$paren+2}] end]]
-		    # Remove leading and trailing parenthesis, there
-		    # are the options, separated by coma signs.
-		    set optstr [string trim $optstr "()"]
-		    set opts [split $optstr ","]
-		} else {
-		    set type [string trim \
-                                  [string range $l [expr {$type+6}] end]]
-		    set opts {}
-		}
-		lappend mounts $dev $dst $type $opts
-	    } else {
-		log WARN "Cannot find 'type' in output"
-	    }
-	} else {
-	    log WARN "Cannot find 'on' in output"
-	}
+    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm mount] {
+        # Advance to word "on" and isolate the device specification
+        # that should be placed before.
+        set on [string first " on " $l]
+        if { $on >= 0 } {
+            set dev [string trim [string range $l 0 $on]]
+            # Advance to the keyword "type" and isolate the path that
+            # should be between "on" and "type".
+            set type [string first " type " $l $on]
+            if { $type >= 0 } {
+                set dst [string trim [string range $l [expr {$on+4}] $type]]
+                # Advance to the parenthesis, this is where the
+                # options will begin.  The type is between the keyword
+                # type and the parenthesis (or the end of the
+                # string/line).
+                set paren [string first " (" $l $type]
+                if { $paren >= 0 } {
+                    set type [string trim \
+                            [string range $l [expr {$type+6}] $paren]]
+                    set optstr [string trim \
+                            [string range $l [expr {$paren+2}] end]]
+                    # Remove leading and trailing parenthesis, there
+                    # are the options, separated by coma signs.
+                    set optstr [string trim $optstr "()"]
+                    set opts [split $optstr ","]
+                } else {
+                    set type [string trim \
+                            [string range $l [expr {$type+6}] end]]
+                    set opts {}
+                }
+                lappend mounts $dev $dst $type $opts
+            } else {
+                log WARN "Cannot find 'type' in output"
+            }
+        } else {
+            log WARN "Cannot find 'on' in output"
+        }
     }
     return $mounts
 }
@@ -241,72 +259,87 @@ proc ::cluster::unix::scp { vm src_fname { dst_fname "" } { recurse 1 } } {
     if { $dst_fname eq "" } {
         set dst_fname $src_fname
     }
-
+    
     set nm [dict get $vm -name]
     log NOTICE "Copying local $src_fname to ${nm}:$dst_fname"
-
+    
     # Construct an scp command out of the ssh command!  This converts
     # the arguments between the ssh and scp namespaces, which are not
     # exactly the same.
     if { ${vars::-ssh} eq "" } {
-	set cmd [remote $vm]
+        set cmd [remote $vm]
     } else {
-	set cmd ${vars::-ssh}
+        set cmd ${vars::-ssh}
     }
-
+    
     set cmd [regsub ^ssh $cmd scp];  # Need to improve this!
     set cmd [regsub -- -p $cmd -P]
     # Extract username and hostname in uname and hname using the
     # various ways they can appear in ssh commands (i.e. -l option or
     # user@host specification at end).
     if { [regexp -- {-l\s+(\w+)} $cmd - uname] } {
-	set cmd [regsub -- {-l\s+(\w+)} $cmd ""];  # Remove -l from command
-	set hname [lindex $cmd end]
+        set cmd [regsub -- {-l\s+(\w+)} $cmd ""];  # Remove -l from command
+        set hname [lindex $cmd end]
     } else {
-	if { ![regexp -- {(\w+)@([\w.]+)} [lindex $cmd end] - uname hname] } {
-	    log WARN "Cannot find user and host names in $cmd!"
-	    return 0
-	}
+        if { ![regexp -- {(\w+)@([\w.]+)} [lindex $cmd end] - uname hname] } {
+            log WARN "Cannot find user and host names in $cmd!"
+            return 0
+        }
     }
     set scp [lrange $cmd 0 end-1]
     log DEBUG "Constructed command $scp, destination: ${uname}@${hname}"
-
+    
     # Finalise the scp command by adding file paths information and
     # execute it.
     if { [string is true $recurse] } {
-	lappend scp -r $src_fname ${uname}@${hname}:$dst_fname
+        lappend scp -r $src_fname ${uname}@${hname}:$dst_fname
     } else {
-	lappend scp $src_fname ${uname}@${hname}:$dst_fname
+        lappend scp $src_fname ${uname}@${hname}:$dst_fname
     }
     eval [linsert $scp 0 Run]
     return 1
 }
 
 
+# ::cluster::unix::remote -- Detect ssh command to machine
+#
+#      Actively detect the entire ssh command that docker machine uses to gain
+#      access to the remote machine. The implementation relies on the --debug
+#      command-line option of docker machine and introspection of the result
+#      when executing a noop command.
+#
+# Arguments:
+#      vm       Dictionary description of the virtual machine
+#
+# Results:
+#      ssh command into remote machine
+#
+# Side Effects:
+#      Will execute an empty command at the remote machine
 proc ::cluster::unix::remote { vm } {
     set nm [dict get $vm -name]
     log DEBUG "Detecting SSH command into $nm"
-
+    
     # Start looking starting from last lines as newer versions output
     # more when debug is on...
-    foreach l [lreverse [Machine -return -stderr -- -s [storage $vm] --debug ssh $nm echo ""]] {
-	foreach bin [list "/usr/bin/ssh" "ssh"] {
-	    if { [string first $bin $l] >= 0 } {
-		set sshinfo $l
-		set ssh [string last $bin $sshinfo];  # Lookup the string 'ssh': START
-		set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
-		set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
-
-		# Replace options setting arguments to use = to make it easier for
-		# callers.
-		foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
-		    set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
-		}
-
-		log DEBUG "SSH command into $nm is '$cmd'"
-		return $cmd
-	    }
-	}
+    foreach l [lreverse [tooling machine -return -stderr -- -s [storage $vm] --debug ssh $nm echo ""]] {
+        foreach bin [list "/usr/bin/ssh" "ssh"] {
+            if { [string first $bin $l] >= 0 } {
+                set sshinfo $l
+                set ssh [string last $bin $sshinfo];  # Lookup the string 'ssh': START
+                set echo [string last echo $sshinfo]; # Lookup the string 'echo': END
+                set cmd [string trim [string range $sshinfo $ssh [expr {$echo-1}]]]
+                
+                # Replace options setting arguments to use = to make it easier for
+                # callers.
+                foreach { m k v } [regexp -all -inline -- {-o\s+(\w*)\s+(\w*)} $cmd] {
+                    set cmd [string map [list $m "-o ${k}=${v}"] $cmd]
+                }
+                
+                log DEBUG "SSH command into $nm is '$cmd'"
+                return $cmd
+            }
+        }
     }
 }
 
@@ -330,56 +363,56 @@ proc ::cluster::unix::remote { vm } {
 proc ::cluster::unix::id { vm { mode "alpha" } {uname ""}} {
     set nm [dict get $vm -name]
     if { $uname eq "" } {
-	set idinfo [string map [list "=" " "] \
-			[lindex [Machine -return -- -s [storage $vm] ssh $nm id] 0]]
+        set idinfo [string map [list "=" " "] \
+                [lindex [tooling machine -return -- -s [storage $vm] ssh $nm id] 0]]
     } else {
-	set idinfo [string map [list "=" " "] \
-			[lindex [Machine -return -- -s [storage $vm] ssh $nm "id $uname"] 0]]
+        set idinfo [string map [list "=" " "] \
+                [lindex [tooling machine -return -- -s [storage $vm] ssh $nm "id $uname"] 0]]
     }
     
     set response [dict create]
     switch -nocase -glob -- $mode {
-	"alpha*" {
-	    dict for {k v} $idinfo {
-		switch -nocase $k {
-		    uid -
-		    gid {
-			if { [regexp {\((\w+)\)} $v - name] } {
-			    dict set response $k $name
-			}
-		    }
-		    groups {
-			foreach g [split $v ","] {
-			    if { [regexp {\((\w+)\)} $g - name] } {
-				dict lappend response $k $name
-			    }
-			}
-		    }
-		}
-	    }
-	}
-	"numeric*" -
-	"id*" {
-	    dict for {k v} $idinfo {
-		switch -nocase $k {
-		    uid -
-		    gid {
-			if { [regexp {\d+} $v id] } {
-			    dict set response $k $id
-			}
-		    }
-		    groups {
-			foreach g [split $v ","] {
-			    if { [regexp {\d+} $g id] } {
-				dict lappend response $k $id
-			    }
-			}
-		    }
-		}
-	    }
-	}
+        "alpha*" {
+            dict for {k v} $idinfo {
+                switch -nocase $k {
+                    uid -
+                    gid {
+                        if { [regexp {\((\w+)\)} $v - name] } {
+                            dict set response $k $name
+                        }
+                    }
+                    groups {
+                        foreach g [split $v ","] {
+                            if { [regexp {\((\w+)\)} $g - name] } {
+                                dict lappend response $k $name
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "numeric*" -
+        "id*" {
+            dict for {k v} $idinfo {
+                switch -nocase $k {
+                    uid -
+                    gid {
+                        if { [regexp {\d+} $v id] } {
+                            dict set response $k $id
+                        }
+                    }
+                    groups {
+                        foreach g [split $v ","] {
+                            if { [regexp {\d+} $g id] } {
+                                dict lappend response $k $id
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
-
+    
     return $response
 }
 
@@ -409,61 +442,93 @@ proc ::cluster::unix::id { vm { mode "alpha" } {uname ""}} {
 proc ::cluster::unix::mount { vm dev path { uid "" } {type "vboxsf"} {sleep 1} {retries 3}} {
     set nm [dict get $vm -name]
     while { $retries > 0 } {
-	log INFO "Mounting $dev onto ${nm}:${path} (UID:$uid)"
-	foreach cmd [mnt.sh $dev $path $uid $type] {
-	    Machine -- -s [storage $vm] ssh $nm "sudo $cmd"
-	}
-
-	# Test that we managed to mount properly.
-	foreach { dv dst t opts } [mounts $vm] {
-	    if { $dst eq $path && $type eq $t } {
-		set retries 0;    # We'll get off the loop
-		return 1
-	    }
-	}
-	incr retries -1;   # ALWAYS! On purpose...
-	if { $retries > 0 } {
-	    log NOTICE "Could not find $path in mount points on $nm,\
-                        retrying..."
-	    after [expr {int($sleep*1000)}]
-	}
+        log INFO "Mounting $dev onto ${nm}:${path} (UID:$uid)"
+        foreach cmd [mnt.sh $dev $path $uid $type] {
+            tooling machine -- -s [storage $vm] ssh $nm "sudo $cmd"
+        }
+        
+        # Test that we managed to mount properly.
+        foreach { dv dst t opts } [mounts $vm] {
+            if { $dst eq $path && $type eq $t } {
+                set retries 0;    # We'll get off the loop
+                return 1
+            }
+        }
+        incr retries -1;   # ALWAYS! On purpose...
+        if { $retries > 0 } {
+            log NOTICE "Could not find $path in mount points on $nm,\
+                    retrying..."
+            after [expr {int($sleep*1000)}]
+        }
     }
     return 0
 }
 
+# ::cluster::unix::resolve -- DNS resolver
+#
+#      Resolve a hostname to its IP address. This performs resolution at the
+#      client and will try to rely on getent when it exists, otherwise on the
+#      DNS implementation of tcllib.
+#
+# Arguments:
+#      hostname Host name to resolve to an IP address.
+#
+# Results:
+#      Return the IPv4 address of the host.
+#
+# Side Effects:
+#      None.
 proc ::cluster::unix::resolve { hostname } {
     if { [regexp {\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}} $hostname] } {
-	return $hostname
+        return $hostname
     }
     
     # This forces back IPv4 addresses, perhaps not a good idea?
-    if { [catch {Run -return -- getent ahostsv4 $hostname} result] == 0 } {
-	foreach l [Run -return -- getent ahostsv4 $hostname] {
-	    set entries [split $l]
-	    if { [lindex $entries end] eq $hostname } {
-		return [lindex $entries 0]
-	    }
-	}
+    if { [catch {tooling run -return -- getent ahostsv4 $hostname} result] == 0 } {
+        foreach l [tooling run -return -- getent ahostsv4 $hostname] {
+            set entries [split $l]
+            if { [lindex $entries end] eq $hostname } {
+                return [lindex $entries 0]
+            }
+        }
     } elseif { [catch {package require dns} ver] == 0 } {
-	set token [::dns::resolve $hostname]
-	set addr [::dns::address $token]
-	::dns::cleanup $token
-	return $addr
+        set token [::dns::resolve $hostname]
+        set addr [::dns::address $token]
+        ::dns::cleanup $token
+        return $addr
     } else {
-	log ERROR "Cannot resolve $hostname: tried getent and internal resolver"
+        log ERROR "Cannot resolve $hostname: tried getent and internal resolver"
     }
     return ""
 }
 
+
+# ::cluster::unix::mnt.sh -- Mount commands
+#
+#      Return a set of commands to mount an existing device onto a path. These
+#      commands will typically be executed within the remote host.
+#
+# Arguments:
+#      dev      Device to mount
+#      path     Path to mount on (will be created)
+#      uid      User identifier as which to mount (empty to ignore)
+#      type     Type of filesystem, defaults to vboxsf (for virtual box)
+#
+# Results:
+#      List of commands to ensure a successful mounts (these are NOT executed,
+#      this is just a helper procedure to list out these commands)
+#
+# Side Effects:
+#      None.
 proc ::cluster::unix::mnt.sh { dev path { uid "" } { type "vboxsf" } } {
     set commands {}
     if { $uid eq "" } {
-	lappend commands "mkdir -p $path"
-	lappend commands "mount -t $type -v $dev $path"
+        lappend commands "mkdir -p $path"
+        lappend commands "mount -t $type -v $dev $path"
     } else {
-	lappend commands "mkdir -p $path"
-	lappend commands "chown $uid $path"
-	lappend commands "mount -t $type -v -o uid=$uid $dev $path"
+        lappend commands "mkdir -p $path"
+        lappend commands "chown $uid $path"
+        lappend commands "mount -t $type -v -o uid=$uid $dev $path"
     }
     return $commands
 }
@@ -492,22 +557,22 @@ proc ::cluster::unix::ifs { vm } {
     set interfaces {};   # List of interface dictionaries.
     set ifs {};          # List of interface names, for logging.
     set iface ""
-    foreach l [Machine -return -- -s [storage $vm] ssh $nm ifconfig] {
+    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm ifconfig] {
         # The output of ifconfig is formatted so that each new
         # interface is described with a line without leading
         # whitespaces, while extra information for that interface
         # happens on lines starting with whitespaces.  The code below
         # uses this fact to segragate between interfaces.
-	if { [string match -nocase "*Host*not*exist*" $l] } {
-	    break
+        if { [string match -nocase "*Host*not*exist*" $l] } {
+            break
         } elseif { [string index $l 0] ni [list " " "\t"] } {
             if { $iface ne "" && ![string match "v*" $iface] } {
-                  # We skip interfaces which name starts with v (for
+                # We skip interfaces which name starts with v (for
                 # virtual).
                 lappend interfaces [dict create \
-                                        interface $iface \
-                                        inet $inet \
-                                        inet6 $inet6]
+                        interface $iface \
+                        inet $inet \
+                        inet6 $inet6]
                 lappend ifs $iface
             }
             set iface [lindex $l 0];  # Assumes we can form a proper list!
@@ -530,12 +595,12 @@ proc ::cluster::unix::ifs { vm } {
     if { $iface ne "" && ![string match "v*" $iface] } {
         # We skip interfaces which name starts with v (for virtual).
         lappend interfaces [dict create \
-                                interface $iface \
-                                inet $inet \
-                                inet6 $inet6]
+                interface $iface \
+                inet $inet \
+                inet6 $inet6]
         lappend ifs $iface
     }
-
+    
     # Report back
     if { [llength $ifs] > 0 } {
         log INFO "Detected network addresses for [join $ifs {, }]"
@@ -575,18 +640,18 @@ proc ::cluster::unix::ifs { vm } {
 proc ::cluster::unix::DaemonUp { vm daemon {cmd "start"} {force 0} {sleep 1} {retries 5} } {
     set nm [dict get $vm -name]
     while { $retries > 0 } {
-	set pid [DaemonPID $vm $daemon]
-	if { $pid < 0 || [string is true $force] } {
-	    log INFO "Daemon $daemon not running on $nm, trying to $cmd..."
-	    set dctrl [file join ${vars::-daemon} $daemon]
-	    Machine -- -s [storage $vm] ssh $nm "sudo $dctrl $cmd"
+        set pid [DaemonPID $vm $daemon]
+        if { $pid < 0 || [string is true $force] } {
+            log INFO "Daemon $daemon not running on $nm, trying to $cmd..."
+            set dctrl [file join ${vars::-daemon} $daemon]
+            tooling machine -- -s [storage $vm] ssh $nm "sudo $dctrl $cmd"
             after [expr {int($sleep*1000)}]
-	    set force 0;  # Now let's do it the normal way for the next retries
-	} else {
-	    log NOTICE "Daemon $daemon properly running at $nm, pid: $pid"
-	    return 1
-	}
-	incr retries -1
+            set force 0;  # Now let's do it the normal way for the next retries
+        } else {
+            log NOTICE "Daemon $daemon properly running at $nm, pid: $pid"
+            return 1
+        }
+        incr retries -1
     }
     log WARN "Gave up starting daemon $daemon on $nm!"
     return 0
@@ -613,25 +678,25 @@ proc ::cluster::unix::DaemonPID { vm daemon } {
     # Look for pid file in /var/run
     set rundir [string trimright ${vars::-run} "/"]
     set pidfile ""
-    foreach l [Machine -return -- -s [storage $vm] ssh $nm "ls -1 ${rundir}/*.pid"] {
-	if { [string match "${rundir}/${daemon}*" $l] } {
-	    log DEBUG "Found PIDfile for $daemon at $l"
-	    set pidfile $l
-	}
+    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm "ls -1 ${rundir}/*.pid"] {
+        if { [string match "${rundir}/${daemon}*" $l] } {
+            log DEBUG "Found PIDfile for $daemon at $l"
+            set pidfile $l
+        }
     }
-
+    
     # If we have a PID file, make sure there is a process that is
     # running at that PID (should we check it's really the daemon?)
     if { $pidfile ne "" } {
-	set dpid [lindex [Machine -return -- -s [storage $vm] ssh $nm "cat $pidfile"] 0]
-	log DEBUG "Checking that there is a running process with id: $dpid"
-	foreach {pid cmd args} [ps $vm] {
-	    if { $pid == $dpid } {
-		return $pid
-	    }
-	}
+        set dpid [lindex [tooling machine -return -- -s [storage $vm] ssh $nm "cat $pidfile"] 0]
+        log DEBUG "Checking that there is a running process with id: $dpid"
+        foreach {pid cmd args} [ps $vm] {
+            if { $pid == $dpid } {
+                return $pid
+            }
+        }
     }
-
+    
     return -1
 }
 
@@ -705,7 +770,7 @@ proc ::cluster::unix::InterfaceLine { l } {
     if { $v ne "" } {
         dict set dict $k $v
     }
-
+    
     # Done!
     return $dict
 }

@@ -10,6 +10,8 @@
 ##
 ##################
 
+package require cluster::tooling
+
 namespace eval ::cluster::swarmmode {
     # Encapsulates variables global to this namespace under their own
     # namespace, an idea originating from http://wiki.tcl.tk/1489.
@@ -27,8 +29,7 @@ namespace eval ::cluster::swarmmode {
     namespace export {[a-z]*}
     namespace path [namespace parent]
     namespace ensemble create -command ::swarmmode
-    namespace import [namespace parent]::Machine \
-                        [namespace parent]::Machines \
+    namespace import [namespace parent]::Machines \
                         [namespace parent]::IsRunning \
                         [namespace parent]::CacheFile \
                         [namespace parent]::ListParser
@@ -146,7 +147,7 @@ proc ::cluster::swarmmode::join { vm masters } {
             } else {
                 # Get the swarm address to use for the manager
                 set mnm [dict get $mgr -name]
-                set addr [Machine -return -- \
+                set addr [tooling machine -return -- \
                             -s [storage $vm] ssh $mnm \
                                 "docker node inspect --format '{{ .ManagerStatus.Addr }}' self"]
                 set addr [string trim $addr]
@@ -165,11 +166,11 @@ proc ::cluster::swarmmode::join { vm masters } {
                     }
                     
                     # Join and check result
-                    set res [Machine -return -- -s [storage $vm] ssh $nm $cmd]
+                    set res [tooling machine -return -- -s [storage $vm] ssh $nm $cmd]
                     if { [string match "*swarm*${mode}*" $res] } {
                         # Ask manager about whole swarm state and find out the
                         # identifier of the newly created node.
-                        set state [Machine -return -- -s [storage $vm] ssh $mnm "docker node ls"]
+                        set state [tooling machine -return -- -s [storage $vm] ssh $mnm "docker node ls"]
                         foreach m [ListParser $state [list "MANAGER STATUS" "MANAGER_STATUS"]] {
                             if { [dict exists $m id] && [dict exists $m hostname] } {
                                 if { [dict get $m hostname] eq $nm } {
@@ -216,16 +217,16 @@ proc ::cluster::swarmmode::leave { vm } {
         "manager" {
             # Demote the manager from the swarm so it can gracefully handover state
             # to other managers.
-            Machine -- -s [storage $vm] ssh $nm "docker node demote $nm"
-            set response [Machine -return -stderr \
+            tooling machine -- -s [storage $vm] ssh $nm "docker node demote $nm"
+            set response [tooling machine -return -stderr \
                             -- -s [storage $vm] ssh $nm "docker swarm leave"]
             if { [string match "*`--force`*" $response] } {
                 log NOTICE "Forcing node $nm out of swarm!"
-                Machine -- -s [storage $vm] ssh $nm "docker swarm leave --force"
+                tooling machine -- -s [storage $vm] ssh $nm "docker swarm leave --force"
             }
         }
         "worker" {
-            Machine -- -s [storage $vm] ssh $nm "docker swarm leave"        
+            tooling machine -- -s [storage $vm] ssh $nm "docker swarm leave"        
         }
     }
 }
@@ -267,7 +268,7 @@ proc ::cluster::swarmmode::network { cmd net masters } {
                         }
                     }
                     lappend cmd [dict get $net -name]
-                    set id [Machine -return -- -s [storage $mgr] ssh $nm $cmd]
+                    set id [tooling machine -return -- -s [storage $mgr] ssh $nm $cmd]
                     log NOTICE "Created swarm-wide network $id"
                 }
                 return $id
@@ -284,7 +285,7 @@ proc ::cluster::swarmmode::network { cmd net masters } {
             set mgr [PickManager $managers]
             if { [dict exists $mgr -name] } {
                 set nm [dict get $mgr -name]
-                Machine -- -s [storage $mgr] ssh $nm "docker network rm $net"
+                tooling machine -- -s [storage $mgr] ssh $nm "docker network rm $net"
             }
         }
     }
@@ -320,7 +321,7 @@ proc ::cluster::swarmmode::Init { vm } {
     
         set cmd [list docker swarm init]
         Options cmd init $vm
-        set res [Machine -return -- -s [storage $vm] ssh $nm $cmd]
+        set res [tooling machine -return -- -s [storage $vm] ssh $nm $cmd]
         if { [regexp {.*\(([a-z0-9]+)\).*manager.*} $res mtch id] } {
             log NOTICE "Initialised machine $nm as node $id in swarm"
 
@@ -356,7 +357,7 @@ proc ::cluster::swarmmode::Init { vm } {
 #	None
 proc ::cluster::swarmmode::NetworkID { mgr name } {
     set nm [dict get $mgr -name]
-    set networks [Machine -return -- -s [storage $mgr] ssh $nm "docker network ls --no-trunc=true"]
+    set networks [tooling machine -return -- -s [storage $mgr] ssh $nm "docker network ls --no-trunc=true"]
     foreach n [ListParser $networks [list "NETWORK ID" NETWORK_ID]] {
         if { [dict exists $n name] && [dict get $n name] eq $name } {
             return [dict get $n network_id]
@@ -574,7 +575,7 @@ proc ::cluster::swarmmode::TokenCache { vm } {
 #       None
 proc ::cluster::swarmmode::TokenGet { vm mode } {
     set nm [dict get $vm -name]    
-    set response [Machine -return -stderr -- \
+    set response [tooling machine -return -stderr -- \
             -s [storage $vm] ssh $nm "docker swarm join-token -q $mode"]
     if { [string match -nocase "*not*swarm manager*" $response] } {
         log WARN "Machine $nm is not a swarm manager!"

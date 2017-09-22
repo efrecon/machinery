@@ -10,6 +10,7 @@
 ##################
 
 package require cluster::swarm
+package require cluster::tooling
 
 namespace eval ::api::cli {
     namespace eval vars {
@@ -248,8 +249,11 @@ proc ::api::cli::globals { appname argv_ } {
     
     # Pass arguments from the command-line as the defaults for the cluster
     # module.
-    foreach k [list -machine -docker -compose -verbose -cache -caching -ssh -storage] {
+    foreach k [list -verbose -cache -caching -ssh -storage] {
         cluster defaults $k [set vars::$k]
+    }
+    foreach k [list -machine -docker -compose] {
+        tooling defaults $k [set vars::$k]
     }
     
     if { ${vars::-dns} ne "" } {
@@ -556,7 +560,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "token" {
-            cluster runtime exit
+            tooling runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Possibly generate and print out the swarm token for this cluster.  Tokens are cached on disk in a hidden file for reuse. Use the -force option to force the generation of a new token if necessary." \
@@ -568,7 +572,7 @@ proc ::api::cli::command { cmd args } {
         }
         "start" -
         "up" {
-            cluster runtime exit
+            tooling runtime exit
             # Start up one or several machines (or the whole cluster if no
             # arguments), the machines will be created if they did not
             # exists
@@ -593,7 +597,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "swarm" {
-            cluster runtime exit
+            tooling runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "When called with no arguments, just print out the cluster info.  When called with arguments, these should be YAML file ready for compose, or YAML files containing indirections to YAML project files, as in the main cluster YAML description syntax." \
@@ -651,7 +655,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "ps" {
-            cluster runtime exit
+            tooling runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "When called with no arguments, this will request the swarm master for a list of components.  When called with arguments, these should be the names of virtual machines and the list of components for each of these machines will be printed out.   Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
@@ -668,7 +672,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "ls" {
-            cluster runtime exit
+            tooling runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "List current machines in cluster and their state" \
@@ -722,7 +726,7 @@ proc ::api::cli::command { cmd args } {
             Tabulate 7 $state
         }
         "reinit" {
-            cluster runtime exit
+            tooling runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Reinitialise one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
@@ -742,7 +746,7 @@ proc ::api::cli::command { cmd args } {
         "down" -
         "stop" -
         "halt" {
-            cluster runtime exit
+            tooling runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Bring down one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
@@ -757,7 +761,7 @@ proc ::api::cli::command { cmd args } {
             ::cluster::swarm::recapture $cluster
         }
         "restart" {
-            cluster runtime exit
+            tooling runtime exit
             # Halt one or several machines (or the whole cluster if no
             # arguments)
             if { [cluster getopt args -help] } {
@@ -773,7 +777,7 @@ proc ::api::cli::command { cmd args } {
         }
         "rm" -
         "destroy" {
-            cluster runtime exit
+            tooling runtime exit
             # Destroy one or several machines (or the whole cluster if no
             # arguments).  The machines will be halted before removal.
             if { [cluster getopt args -help] } {
@@ -788,7 +792,7 @@ proc ::api::cli::command { cmd args } {
             ::cluster::swarm::recapture $cluster
         }
         "sync" {
-            cluster runtime exit
+            tooling runtime exit
             # Destroy one or several machines (or the whole cluster if no
             # arguments).  The machines will be halted before removal.
             if { [cluster getopt args -help] } {
@@ -804,7 +808,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "env" {
-            cluster runtime exit
+            tooling runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Print out exporting commands to get (discovery) environment of one or several machines (or the whole cluster if no arguments is given).  Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
@@ -815,7 +819,7 @@ proc ::api::cli::command { cmd args } {
             cluster env $cluster [cluster getopt args -force] stdout
         }
         "ssh" {
-            cluster runtime exit
+            tooling runtime exit
             # Execute one command in a running virtual machine.  This is
             # mainly an alias to docker-machine ssh.
             if { [cluster getopt args -help] } {
@@ -834,7 +838,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "server" {
-            cluster runtime exit
+            tooling runtime exit
             if { [cluster getopt args -help] } {
                 chelp $cmd \
                         "Start a web server providing a REST API to operate on the cluster." \
@@ -856,7 +860,7 @@ proc ::api::cli::command { cmd args } {
             vwait forever;   # Wait forever!
         }
         "search" {
-            cluster runtime exit
+            tooling runtime exit
             # Search for components, arguments are glob-style patterns
             # to match against container names.
             if { [cluster getopt args -help] } {
@@ -881,7 +885,7 @@ proc ::api::cli::command { cmd args } {
             }
         }
         "forall" {
-            cluster runtime exit
+            tooling runtime exit
             # Execute docker commands, first argument is glob-style
             # pattern to match against component name, second is
             # docker command to execute, remaining arguments are
@@ -912,7 +916,7 @@ proc ::api::cli::command { cmd args } {
                 incr idx
                 set cargs [lrange $args $idx end]
             } else {
-                if { [lsearch [cluster commands docker] [lindex $args 0]] >= 0 } {
+                if { [lsearch [tooling commands docker] [lindex $args 0]] >= 0 } {
                     set ptn ""
                     set cmd [lindex $args 0]
                     set cargs [lrange $args 1 end]
