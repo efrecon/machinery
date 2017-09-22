@@ -83,8 +83,8 @@ namespace eval ::cluster {
         variable -running   {running timeout}
         # Cluster state caching retention (in ms, negative for off)
         variable -retention 10000
-        # Defaults for networks
-        variable -networks  {-driver overlay -attachable true}
+        # Defaults for networks (see: https://github.com/moby/moby/issues/32957)
+        variable -networks  {-driver overlay -attachable true -scope swarm}
         # Supported sharing types.
         variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
