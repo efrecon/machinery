@@ -92,6 +92,15 @@ proc ::cluster::vcompare::extract { vline } {
     return ""
 }
 
+
+
+####################################################################
+#
+# Procedures below are internal to the implementation, they shouldn't
+# be changed unless you wish to help...
+#
+####################################################################
+
 proc ::cluster::vcompare::Equalise { vernum {depth -1}} {
     if { $depth < 0 } {
         set depth ${vars::-depth}

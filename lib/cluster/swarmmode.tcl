@@ -31,8 +31,7 @@ namespace eval ::cluster::swarmmode {
     namespace ensemble create -command ::swarmmode
     namespace import [namespace parent]::Machines \
                         [namespace parent]::IsRunning \
-                        [namespace parent]::CacheFile \
-                        [namespace parent]::ListParser
+                        [namespace parent]::CacheFile
 }
 
 
@@ -171,7 +170,7 @@ proc ::cluster::swarmmode::join { vm masters } {
                         # Ask manager about whole swarm state and find out the
                         # identifier of the newly created node.
                         set state [tooling machine -return -- -s [storage $vm] ssh $mnm "docker node ls"]
-                        foreach m [ListParser $state [list "MANAGER STATUS" "MANAGER_STATUS"]] {
+                        foreach m [tooling parser $state [list "MANAGER STATUS" "MANAGER_STATUS"]] {
                             if { [dict exists $m id] && [dict exists $m hostname] } {
                                 if { [dict get $m hostname] eq $nm } {
                                     set id [string trim [dict get $m id] " *"]
@@ -358,7 +357,7 @@ proc ::cluster::swarmmode::Init { vm } {
 proc ::cluster::swarmmode::NetworkID { mgr name } {
     set nm [dict get $mgr -name]
     set networks [tooling machine -return -- -s [storage $mgr] ssh $nm "docker network ls --no-trunc=true"]
-    foreach n [ListParser $networks [list "NETWORK ID" NETWORK_ID]] {
+    foreach n [tooling parser $networks [list "NETWORK ID" NETWORK_ID]] {
         if { [dict exists $n name] && [dict get $n name] eq $name } {
             return [dict get $n network_id]
         }

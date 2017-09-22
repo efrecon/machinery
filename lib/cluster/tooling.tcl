@@ -416,6 +416,60 @@ proc ::cluster::tooling::options { lines } {
     return $cmdopts    
 }
 
+
+proc ::cluster::tooling::parser { state { hdrfix {}} } {
+    set content {};   # The list of dictionaries we will return
+    
+    set cols [lindex $state 0]
+    if { [llength $hdrfix] > 0 } {
+        set cols [string map $hdrfix $cols]
+    }
+    
+    # Arrange for indices to contain the character index at which each
+    # column of the output starts (in same order as the list of keys
+    # above).
+    set indices {}
+    foreach c $cols {
+        lappend indices [string first $c $cols]
+    }
+    
+    # Now loop through all lines of the output, i.e. the complete
+    # state of the cluster.
+    foreach m [lrange $state 1 end] {
+        # Isolate the content of each keys, respecting the column
+        # alignment found in <indices> and the order of the columns.
+        for {set c 0} {$c<[llength $cols]} {incr c} {
+            set k [lindex $cols $c];   # Extract the key
+            # Extract its value, i.e. the characters between where the
+            # key started in the header up to the character before
+            # where the next key started in the header.
+            if { $c < [expr [llength $cols]-1] } {
+                set end [lindex $indices [expr {$c+1}]]
+                incr end -1
+            } else {
+                set end "end"
+            }
+            # The value is in between those ranges, trim to get rid of
+            # trailing spaces that had been added for a nice output.
+            set v [string range $m [lindex $indices $c] $end]
+            dict set nfo [string trim [string tolower $k]] [string trim $v]
+        }
+        lappend content $nfo
+    }
+    
+    return $content
+}
+
+
+
+####################################################################
+#
+# Procedures below are internal to the implementation, they shouldn't
+# be changed unless you wish to help...
+#
+####################################################################
+
+
 # ::cluster::tooling::POpen4 -- Pipe open
 #
 #       This procedure executes an external command and arranges to

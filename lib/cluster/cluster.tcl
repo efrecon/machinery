@@ -236,13 +236,13 @@ proc ::cluster::getopt {_argv name {_var ""} {dft ""}} {
 proc ::cluster::log { lvl msg } {
     # If we should output (i.e. level of message is below the global
     # module level), pretty print and output.
-    if { [Log? $lvl] } {
+    if { [Log? $lvl l] } {
         set toTTY [dict exists [fconfigure ${vars::-log}] -mode]
         # Output the whole line.
         if { $toTTY } {
-            puts ${vars::-log} [LogTerminal $lvl $msg]
+            puts ${vars::-log} [LogTerminal $l $msg]
         } else {
-            puts ${vars::-log} [LogStandard $lvl $msg]
+            puts ${vars::-log} [LogStandard $l $msg]
         }
     }
 }
@@ -288,7 +288,7 @@ proc ::cluster::ls { yaml {machines *} { force 0 } } {
     if { $capture } {
         log NOTICE "Capturing current overview of cluster"
         set state [tooling machine -return -- -s [StorageDir $yaml] ls]
-        dict set vars::cluster cluster [ListParser $state]
+        dict set vars::cluster cluster [tooling parser $state]
         dict set vars::cluster last $now
     }
     
@@ -615,7 +615,7 @@ proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
         tooling docker -raw -- ps
     } else {
         set state [tooling docker -return -- ps -a]
-        return [ListParser $state [list "CONTAINER ID" "CONTAINER_ID"]]
+        return [tooling parser $state [list "CONTAINER ID" "CONTAINER_ID"]]
     }
 }
 
@@ -1946,7 +1946,7 @@ proc ::cluster::LogLevel { lvl } {
 }
 
 
-proc ::cluster::Log? { { lvl "" } } {
+proc ::cluster::Log? { { lvl "" } { intlvl_ ""} } {
     # Convert current module level from string to integer.
     set current [LogLevel ${vars::-verbose}]
     
@@ -1954,9 +1954,12 @@ proc ::cluster::Log? { { lvl "" } } {
     if { $lvl eq "" } {
         return $current
     } else {
+        if { $intlvl_ ne "" } {
+            upvar $intlvl_ intlvl
+        }
         # Convert incoming level from string to integer.
-        set lvl [LogLevel $lvl]
-        return [expr {$current >= $lvl}]
+        set intlvl [LogLevel $lvl]
+        return [expr {$current >= $intlvl}]
     }
     return -1
 }
@@ -2696,50 +2699,6 @@ proc ::cluster::Shares { spec {origin ""} {type ""}} {
 }
 
 
-proc ::cluster::ListParser { state { hdrfix {}} } {
-    set content {};   # The list of dictionaries we will return
-    
-    set cols [lindex $state 0]
-    if { [llength $hdrfix] > 0 } {
-        set cols [string map $hdrfix $cols]
-    }
-    
-    # Arrange for indices to contain the character index at which each
-    # column of the output starts (in same order as the list of keys
-    # above).
-    set indices {}
-    foreach c $cols {
-        lappend indices [string first $c $cols]
-    }
-    
-    # Now loop through all lines of the output, i.e. the complete
-    # state of the cluster.
-    foreach m [lrange $state 1 end] {
-        # Isolate the content of each keys, respecting the column
-        # alignment found in <indices> and the order of the columns.
-        for {set c 0} {$c<[llength $cols]} {incr c} {
-            set k [lindex $cols $c];   # Extract the key
-            # Extract its value, i.e. the characters between where the
-            # key started in the header up to the character before
-            # where the next key started in the header.
-            if { $c < [expr [llength $cols]-1] } {
-                set end [lindex $indices [expr {$c+1}]]
-                incr end -1
-            } else {
-                set end "end"
-            }
-            # The value is in between those ranges, trim to get rid of
-            # trailing spaces that had been added for a nice output.
-            set v [string range $m [lindex $indices $c] $end]
-            dict set nfo [string trim [string tolower $k]] [string trim $v]
-        }
-        lappend content $nfo
-    }
-    
-    return $content
-}
-
-
 proc ::cluster::IsRunning { vm { force 0 } } {
     set nfo [lindex [ls [storage $vm] [dict get $vm -name] $force] 0]
     if { [dict exists $nfo state] } {
@@ -2958,7 +2917,7 @@ proc ::cluster::Discovery { vm } {
 #       omit the timestamps).
 #
 # Arguments:
-#        lvl        Log level (an integer)
+#        lvl     Log level (an integer)
 #        msg     Log message
 #
 # Results:
@@ -3589,7 +3548,7 @@ proc ::cluster::DefaultMachine {} {
     # default machine for caching if it was.
     if { $possible ne "" } {
         set state [tooling machine -return -- ls]
-        foreach nfo [ListParser $state] {
+        foreach nfo [tooling parser $state] {
             # Add only machines which name matches the incoming pattern.
             if { [dict exists $nfo name] \
                         && [dict get $nfo name] eq "default" } {
