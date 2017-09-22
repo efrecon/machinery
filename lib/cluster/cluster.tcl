@@ -131,14 +131,6 @@ namespace eval ::cluster {
     namespace ensemble create
 }
 
-## TODO/Ideas
-#
-# Start using the TRACE level of verbosity and migrate some of the
-# DEBUG to trace.  When in TRACE, we should force debug on docker and
-# its friends, not when in debug. That would keep debug to what
-# happens in the program itself.
-#
-
 
 
 # ::cluster::defaults -- Set/get default parameters
