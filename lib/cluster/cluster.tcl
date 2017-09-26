@@ -811,24 +811,46 @@ proc ::cluster::mcopy { vm { fspecs {}} } {
     
     set nm [dict get $vm -name]
     foreach fspec $fspecs {
-        lassign [split $fspec ":"] src dst hint
-        set src [AbsolutePath $vm $src]
-        if { [file exists $src] } {
-            if { $dst eq "" } {
-                set dst $src
-            }
-            # Create directory at target
-            tooling machine -- -s [storage $vm] ssh $nm mkdir -p [file dirname $dst]
-            # Copy file(s)
+        # Transform old-style, colon separated format into new-style dictionary
+        # file copy specification.
+        if { [string first ":" $fspec] >= 0 } {
+            lassign [split $fspec ":"] src dst hint
+            set cpy [dict create source $src destination $dst]
             if { [lsearch -nocase [split $hint ","] "norecurse"] >= 0 } {
-                log INFO "Copying $src to ${nm}:$dst"
-                SCopy $vm $src $dst 0
+                dict set cpy recurse off
             } else {
-                log INFO "Copying $src to ${nm}:$dst recursively"
-                SCopy $vm $src $dst 1
+                dict set cpy recurse auto
             }
         } else {
-            log WARN "Source path $src does not exist!"
+            set cpy $fspec
+        }
+        
+        # When here cpy is a variable that host a dictionary in the new style
+        # specification able to handle more copying options.
+        if { [dict exists $cpy source] && [dict get $cpy source] ne "" } {
+            set src [AbsolutePath $vm [dict get $cpy source]]
+            dict unset cpy source;   # Remove source from dict, mandatory for SCopy below
+            if { [file exists $src] } {
+                if { [dict exists $cpy destination] && [dict get $cpy destination] ne "" } {
+                    set dst [dict get $cpy destination]
+                    dict unset cpy destination;  # Same as above for source!
+                } else {
+                    log DEBUG "Using source $src as the destination for copy"
+                    set dst $src
+                }
+                
+                # Once here we src and dst hold the source and destination paths
+                # and cpy is a dictionary full of options ready to further
+                # specify the copy operation. We have taken care of removing the
+                # keys named source and destination from the dictionary in the
+                # analysis process above. We pass all this to SCopy which will
+                # perform the real job.
+                SCopy $vm $src $dst {*}$cpy
+            } else {
+                log WARN "Source path $src does not exist!"
+            }
+        } else {
+            log WARN "You need at least to specify a non-empty source!"
         }
     }
 }
@@ -957,7 +979,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
-    SCopy $vm $fname
+    SCopy $vm $fname ""
     tooling machine -- -s [storage $vm] ssh $nm sudo mv $fname ${vars::-profile}
     
     # Cleanup and restart machine to make sure the labels get live.
@@ -1207,7 +1229,7 @@ proc ::cluster::shares { vm { shares {}} } {
                 # executable and install it.
                 log INFO "Persisting shares at reboot through\
                         ${vars::-bootlocal}"
-                SCopy $vm $fname
+                SCopy $vm $fname ""
                 tooling machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
                 tooling machine -- -s [storage $vm] ssh $nm "sudo mv $fname ${vars::-bootlocal}"
             }
@@ -2781,7 +2803,7 @@ proc ::cluster::Exec { vm args } {
         if { $cmd ne "" } {
             if { $remotely } {
                 set dst [Temporary [file join /tmp [file tail $fpath]]]
-                SCopy $vm $cmd $dst 0
+                SCopy $vm $cmd $dst recurse off
                 log NOTICE "Executing $fpath remotely (args: $cargs)"
                 ssh $vm chmod a+x $dst
                 ssh $vm $dst {*}$cargs
@@ -3235,6 +3257,29 @@ proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
 }
 
 
+# ::cluster::DGet -- get or default from dictionary
+#
+#       Get the value of a key from a dictionary, returning a default value if
+#       the key does not exist in the dictionary.
+#
+# Arguments:
+#       d       Dictionary to get from
+#       key     Key in dictionary to query
+#       default	Default value to return when key does not exist
+#
+# Results:
+#       Value of key in dictionary, or default value if it does not exist.
+#
+# Side Effects:
+#       Copy the file using scp
+proc ::cluster::DGet { d key { default "" } } {
+    if { [dict exists $d $key] } {
+        return [dict get $d $key]
+    }
+    return $default
+}
+
+
 # ::cluster::SCopy -- scp to machine
 #
 #       Copy a local file to a machine using scp.  This procedure is
@@ -3242,21 +3287,48 @@ proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
 #       and under.
 #
 # Arguments:
-#	vm	Virtual machine description
-#	s_fname	Path to source file
-#	d_fname	Path to destination, empty for same as source.
+#       vm      Virtual machine description
+#       s_fname	Path to source file
+#       d_fname	Path to destination, empty for same as source.
 #
 # Results:
 #       None.
 #
 # Side Effects:
 #       Copy the file using scp
-proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
+proc ::cluster::SCopy { vm s_fname d_fname args } {
     set nm [dict get $vm -name]
     if { $d_fname eq "" } {
         set d_fname $s_fname
     }
     
+    set elevation ""
+    if { [DGet $args sudo off] } {
+        set elevation sudo
+    }
+    
+    # Create directory where to receive data.
+    if { [file isdirectory $s_fname] } {
+        tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p $d_fname            
+    } else {
+        # Use formatting of destination to guess if it is a directory or not...
+        if { [string index $d_fname end] eq "/" } {
+            tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p $d_fname
+        } else {
+            tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p [file dirname $d_fname]
+        }
+    }
+
+    # Save real destination in a variable and generate a temporary directory
+    # to hold the content of the file(s) that we will copy. Create the directory
+    # at the remote host!
+    if { $elevation eq "sudo" } {        
+        set d_real $d_fname
+        set d_fname [string trimright [Temporary /tmp/scp] /]/
+        log INFO "Performing copy through temporary directory $d_fname"
+        tooling machine -- -s [storage $vm] ssh $nm mkdir -p $d_fname
+    }
+
     if { [vcompare ge [tooling version machine] 0.3] } {
         set storage [storage $vm]
         # On windows we need to trick the underlying scp of docker-machine,
@@ -3290,14 +3362,60 @@ proc ::cluster::SCopy { vm s_fname {d_fname ""} {recurse 1}} {
         } else {
             set src $s_fname
         }
-        if { [string is true $recurse] } {
-            tooling machine -stderr -- -s $storage scp -r $src ${nm}:${d_fname}
-        } else {
-            tooling machine -stderr -- -s $storage scp $src ${nm}:${d_fname}
+
+        # Construct options to scp command and call it.
+        set opts [list]
+
+        # Recursion is auto or a boolean
+        set recursion [DGet $args recurse auto]
+        if { $recursion eq "auto" } {
+            set recursion [file isdirectory $src]
+        }
+        if { $recursion } {
+            lappend opts -r
+        }
+        
+        # Delta for rsync-helped copy
+        if { [DGet $args delta off] } {
+            lappend opts -d
+        }
+        
+        # Now perform copy
+        tooling machine -stderr -- -s $storage scp {*}$opts $src ${nm}:${d_fname}
+        
+        # And perform past-copy operations in order to be able to operate on
+        # ownership of file(s) or access modes.
+        set opts [list]
+        if { $recursion || $elevation eq "sudo" } {
+            set opts [list -R]
+        }
+
+        # chmod        
+        set mode [DGet $args mode]
+        if { $mode ne "" } {
+            tooling machine -stderr -- -s $storage ssh $nm chmod {*}$opts $mode $d_fname
+        }
+        
+        # chown
+        set owner [DGet $args owner]
+        if { $owner ne "" } {
+            tooling machine -stderr -- -s $storage ssh $nm chown {*}$opts $owner $d_fname
+        }
+        
+        # chgrp
+        set group [DGet $args group]
+        if { $group ne "" } {
+            tooling machine -stderr -- -s $storage ssh $nm chgrp {*}$opts $group $d_fname
         }
     } else {
         unix defaults -ssh [SCommand $vm]
         unix scp $vm $s_fname $d_fname
+    }
+    
+    if { $elevation eq "sudo" } {
+        log INFO "Moving file(s) from $d_fname to $d_real"
+        tooling machine -stderr -- -s $storage ssh $nm {*}$elevation \
+            mv -f [file join $d_fname [file tail $s_fname]] $d_real && rm -rf $d_fname
     }
 }
 
