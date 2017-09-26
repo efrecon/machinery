@@ -2754,20 +2754,10 @@ proc ::cluster::Exec { vm args } {
             set cargs [dict get $exe args]
         }
         
-        set remotely 0
-        if { [dict exists $exe remote] } {
-            set remotely [string is true [dict get $exe remote]]
-        }
-        
-        set copy 1
-        if { [dict exists $exe copy] } {
-            set copy [string is true [dict get $exe copy]]
-        }
-        
-        set keep 0
-        if { [dict exists $exe keep] } {
-            set keep [string is true [dict get $exe keep]]
-        }
+        set remotely [DGet $exe remote 0]
+        set copy [DGet $exe copy 1]
+        set keep [DGet $exe keep 0]
+        set sudo [DGet $exe sudo 0]
         
         # Resolve using initial location of YAML description file
         set cmd ""
@@ -2803,10 +2793,13 @@ proc ::cluster::Exec { vm args } {
         if { $cmd ne "" } {
             if { $remotely } {
                 set dst [Temporary [file join /tmp [file tail $fpath]]]
-                SCopy $vm $cmd $dst recurse off
+                SCopy $vm $cmd $dst recurse off mode a+x
                 log NOTICE "Executing $fpath remotely (args: $cargs)"
-                ssh $vm chmod a+x $dst
-                ssh $vm $dst {*}$cargs
+                if { $sudo } {
+                    ssh $vm sudo $dst {*}$cargs
+                } else {
+                    ssh $vm $dst {*}$cargs
+                }
                 if { !$keep } {
                     ssh $vm /bin/rm -f $dst
                 }
