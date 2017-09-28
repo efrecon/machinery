@@ -10,15 +10,46 @@ set dirname [file dirname [file normalize [info script]]]
 set kitdir [file join $dirname kits]
 set bindir [file join $dirname bin]
 set dstdir [file join $dirname distro]
+set rootdir [file join $dirname ..]
 
-lappend auto_path [file join $dirname .. lib]
+lappend auto_path [file join $rootdir lib]
 package require cluster;    # So we can call Run...
 cluster defaults -verbose INFO
+
+# Quick options parsing, accepting several times -target
+set targets [list]
+for { set i 0 } { $i < [llength $argv] } { incr i } {
+    set opt [lindex $argv $i]
+    switch -glob -- $opt {
+        "-t*" {
+            incr i
+            lappend targets [lindex $argv $i]
+        }
+        "-d*" {
+            incr i
+            cluster defaults -verbose [lindex $argv $i]
+        }
+        "--" {
+            incr i
+            set argv [lrange $argv $i end]
+            break
+        }
+        default {
+            set argv [lrange $argv $i end]
+            break
+        }
+    }
+}
+if { ![llength $targets] } {
+    set targets [list "machinery" "baclin"]
+}
+cluster log NOTICE "Building targets: $targets"
 
 # Build for all platforms
 if { [llength $argv] == 0 } {
     set argv [glob -directory $bindir -nocomplain -tails -- *]
 }
+cluster log NOTICE "Building for platforms: $argv"
 
 # The missing procedure of the http package
 proc ::http::geturl_followRedirects {url args} {
@@ -42,10 +73,32 @@ proc ::http::geturl_followRedirects {url args} {
 # Arrange for https to work properly
 ::http::register https 443 [list ::tls::socket -tls1 1]
 
-# Run machinery and ask it for its current version number.
-cluster log NOTICE "Getting version"
-set version [lindex [::cluster::Run -return -- [info nameofexecutable] [file join $dirname .. machinery] version] 0]
 
+# Protect wrapping through temporary directory
+set origdir [pwd]
+set wrapdir [file normalize [file join $origdir wrapper-[pid]-[expr {int(rand()*1000)}]]]
+cluster log NOTICE "Wrapping inside $wrapdir"
+file mkdir $wrapdir
+cd $wrapdir
+
+proc cleanup { { target "" } } {
+    cd $::origdir
+
+    set toremove [list]
+    if { [info exists ::xdir] } { lappend toremove $::xdir }
+    if { [info exists ::tcllib_path] } { lappend toremove $::tcllib_path }
+    if { $target ne "" } {
+        lappend toremove ${target}.vfs ${target}.kit
+    }
+    lappend toremove $::wrapdir
+
+    foreach fname $toremove {
+        if { [file exists $fname] } {
+            file delete -force -- $fname
+        }
+    }
+}
+    
 # Get the tcllib, this is a complete overkill, but is generic and
 # might help us in the future.  We get it from the github mirror as
 # the main fossil source is protected by a captcha.
@@ -64,70 +117,102 @@ if { [::http::ncode $tok] == 200 } {
     close $fd
 } else {
     cluster log ERROR "Could not download from $url!"
+    cleanup
     exit
 }
 ::http::cleanup $tok
 
-# Start creating an application directory structure using qwrap (from
-# sdx).
-cluster log NOTICE "Creating skeleton and filling VFS"
-set tclkit [file join $bindir [::platform::generic] tclkit]
-set sdx [file join $kitdir sdx.kit]
-::cluster::Run $tclkit $sdx qwrap ../machinery
-::cluster::Run $tclkit $sdx unwrap machinery.kit
-foreach fname [glob -directory [file join $dirname .. lib] -nocomplain -- *] {
-    set r_fname [file dirname [file normalize ${fname}/___]]
-    cluster log DEBUG "Copying $r_fname -> machinery.vfs/lib"
-    file copy -force -- $r_fname machinery.vfs/lib
-}
-
-# Install the modules of tcllib into the lib directory of the VFS
-# directory.  We really could cleanup as we only need yaml and cmdline
-# really...
+# Extract the content of tcllib to disk for a while
 cluster log NOTICE "Extracting tcllib"
-::cluster::Run -- tar zxf $tcllib_path
+tooling run -- tar zxf $tcllib_path
 set xdir [lindex [glob -nocomplain -- *tcllib*$gver] 0]
 if { $xdir eq "" } {
     cluster log ERROR "Could not find where tcllib was extracted!"
-    file delete -force -- $tcllib_path
-    file delete -force -- machinery.vfs
-    file delete -force -- machinery.kit
+    cleanup
     exit
-} else {
+}
+
+foreach target $targets {
+    # Handle versioning for some of the targets
+    if { $target eq "machinery" } {
+        # Run machinery and ask it for its current version number.
+        cluster log NOTICE "Getting version"
+        set version [lindex [tooling run -return -- [info nameofexecutable] [file join $dirname .. $target] version] 0]
+    } else {
+        set version ""
+    }
+    
+    # Start creating an application directory structure using qwrap (from
+    # sdx).
+    cluster log NOTICE "Creating skeleton and filling VFS"
+    set tclkit [file join $bindir [::platform::generic] tclkit]
+    set sdx [file join $kitdir sdx.kit]
+    tooling run $tclkit $sdx qwrap [file join $rootdir $target]
+    tooling run $tclkit $sdx unwrap ${target}.kit
+    
+    # Install the modules of tcllib into the lib directory of the VFS
+    # directory.
     cluster log NOTICE "Installing tcllib into VFS"
     set installer [file join $xdir installer.tcl]
-    ::cluster::Run -- [info nameofexecutable] $installer -no-html -no-nroff -no-examples \
-        -no-gui -no-apps -no-wait -pkg-path machinery.vfs/lib
+    tooling run -- [info nameofexecutable] $installer -no-html -no-nroff -no-examples \
+        -no-gui -no-apps -no-wait -pkg-path ${target}.vfs/lib
+    foreach subdir [glob -directory ${target}.vfs/lib -types d -nocomplain -tails *] {
+        set match 0
+        foreach ptn [list *${target}* yaml json cmdline] {
+            if { [string match $ptn $subdir] } {
+                set match 1
+                break
+            }
+        }
+        if { ! $match } {
+            cluster log DEBUG "Cleaning away directory $subdir"
+            file delete -force -- [file join ${target}.vfs lib $subdir]
+        }
+    }
+    
+    # Install application libraries into VFS    
+    foreach fname [glob -directory [file join $rootdir lib] -nocomplain -- *] {
+        set r_fname [file dirname [file normalize ${fname}/___]]
+        cluster log DEBUG "Copying $r_fname -> ${target}.vfs/lib"
+        file copy -force -- $r_fname ${target}.vfs/lib
+    }
+    
+    # And now, for each of the platforms requested at the command line,
+    # build a platform dependent binary out of the kit.
+    foreach platform $argv {
+        set binkit [file join $bindir $platform tclkit]
+        if { [file exists $binkit] } {
+            cluster log INFO "Final wrapping of binary for $platform"
+            tooling run $tclkit $sdx wrap ${target}.kit
+            # Copy runtime to temporary because won't work if same as the
+            # one we are starting from.
+            set tmpkit [file join $wrapdir [file tail ${binkit}].temp]
+            cluster log DEBUG "Creating temporary kit for final wrapping: $tmpkit"
+            file copy $binkit $tmpkit
+            tooling run $tclkit $sdx wrap ${target} -runtime $tmpkit
+            file delete -force -- $tmpkit
+        } else {
+            cluster log ERROR "Cannot build for $platform, no main kit available"
+        }
+        
+        # Move created binary to directory for official distributions
+        if { $version eq "" } {
+            set dstbin ${target}-$platform
+        } else {
+            set dstbin ${target}-$version-$platform            
+        }
+        if { [string match -nocase "win*" $platform] } {
+            file rename -force -- ${target} [file join $dstdir $dstbin].exe
+        } else {
+            file rename -force -- ${target} [file join $dstdir $dstbin]
+            file attributes [file join $dstdir $dstbin] -permissions a+x
+        }
+    }
+    
+    # Big cleanup
+    file delete -force -- ${target}.vfs
+    file delete -force -- ${target}.kit
+    file delete -force -- ${target}.bat
 }
 
-# And now, for each of the platforms requested at the command line,
-# build a platform dependent binary out of the kit.
-foreach platform $argv {
-    set binkit [file join $bindir $platform tclkit]
-    if { [file exists $binkit] } {
-	cluster log INFO "Final wrapping of binary for $platform"
-	::cluster::Run $tclkit $sdx wrap machinery.kit
-	# Copy runtime to temporary because won't work if same as the
-	# one we are starting from.
-	cluster log DEBUG "Creating temporary kit for final wrapping: ${binkit}.temp"
-	file copy $binkit ${binkit}.temp
-	::cluster::Run $tclkit $sdx wrap machinery -runtime ${binkit}.temp
-	file delete -force -- ${binkit}.temp
-    } else {
-	cluster log ERROR "Cannot build for $platform, no main kit available"
-    }
-    if { [string match -nocase "win*" $platform] } {
-        file rename -force -- machinery \
-            [file join $dstdir machinery-$version-$platform].exe
-    } else {
-        file rename -force -- machinery \
-            [file join $dstdir machinery-$version-$platform]
-    }
-}
-
-# Big cleanup
-file delete -force -- $tcllib_path
-file delete -force -- $xdir
-file delete -force -- machinery.vfs
-file delete -force -- machinery.kit
-file delete -force -- machinery.bat
+cleanup
