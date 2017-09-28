@@ -31,15 +31,14 @@ for { set i 0 } { $i < [llength $argv] } { incr i } {
         }
         "--" {
             incr i
-            set argv [lrange $argv $i end]
             break
         }
         default {
-            set argv [lrange $argv $i end]
             break
         }
     }
 }
+set argv [lrange $argv $i end]
 if { ![llength $targets] } {
     set targets [list "machinery" "baclin"]
 }
