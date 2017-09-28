@@ -1,0 +1,47 @@
+#! /usr/bin/env tclsh
+
+##################
+## Module Name     --  baclin.tcl
+## Original Author --  Emmanuel Frecon - emmanuel@sics.se
+## Description:
+##
+##    Basic Docker Compose Lineariser
+##
+##################
+
+package require Tcl 8.6;    # The cluster module requires chan pipe
+
+
+# Arrange to access all libraries under lib sub-directory.  There is
+# only one, but we want to be sure to be able to expand if necessary.
+set resolvedArgv0 [file dirname [file normalize $argv0/___]];  # Trick to resolve last symlink
+set dirname [file dirname [file normalize $resolvedArgv0]]
+set appname [file rootname [file tail $resolvedArgv0]]
+lappend auto_path [file join $dirname lib]
+package require cluster::extend;
+
+#package require proctrace
+#proctrace init -allowed ::cluster*
+
+
+set in stdin
+set out stdout
+set dir [pwd]
+if { [llength argv] } {
+    lassign $argv in_fname out_fname
+    if { $in_fname ne "" && $in_fname ne "-" } {
+        set in [open $in_fname]
+        set dir [file dirname $in_fname]
+    }
+    if { $out_fname ne "" && $out_fname ne "-" } {
+        set in [open $out_fname w]
+    }
+}
+
+puts $out [extend linearise [read $in] $dir]
+if { ![string match std* $in] } {
+    close $in
+}
+if { ![string match std* $out] } {
+    close $out
+}

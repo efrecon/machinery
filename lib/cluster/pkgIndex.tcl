@@ -16,4 +16,5 @@ package ifneeded cluster::virtualbox 0.1 [list source [file join $dir virtualbox
 package ifneeded cluster::unix 0.3 [list source [file join $dir unix.tcl]]
 package ifneeded cluster::environment 0.2 [list source [file join $dir environment.tcl]]
 package ifneeded cluster::tooling 0.2 [list source [file join $dir tooling.tcl]]
+package ifneeded cluster::extend 0.1 [list source [file join $dir extend.tcl]]
 package ifneeded proctrace 0.2 [list source [file join $dir proctrace.tcl]]
