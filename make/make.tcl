@@ -17,7 +17,7 @@ package require cluster;    # So we can call Run...
 cluster defaults -verbose INFO
 
 # Quick options parsing, accepting several times -target
-set targets [list]
+set targets [list]; set version ""
 for { set i 0 } { $i < [llength $argv] } { incr i } {
     set opt [lindex $argv $i]
     switch -glob -- $opt {
@@ -28,6 +28,10 @@ for { set i 0 } { $i < [llength $argv] } { incr i } {
         "-d*" {
             incr i
             cluster defaults -verbose [lindex $argv $i]
+        }
+        "-v*" {
+            incr i
+            set version [lindex $argv $i]
         }
         "--" {
             incr i
@@ -133,12 +137,10 @@ if { $xdir eq "" } {
 
 foreach target $targets {
     # Handle versioning for some of the targets
-    if { $target eq "machinery" } {
+    if { $version eq "" && $target eq "machinery" } {
         # Run machinery and ask it for its current version number.
         cluster log NOTICE "Getting version"
         set version [lindex [tooling run -return -- [info nameofexecutable] [file join $dirname .. $target] version] 0]
-    } else {
-        set version ""
     }
     
     # Start creating an application directory structure using qwrap (from
