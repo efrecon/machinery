@@ -48,6 +48,7 @@ namespace eval ::api::cli {
             env     "Export environment variables for discovery"
             reinit  "Rerun finalisation stages on machine(s), specify via -step"
             swarm   "Lifecycle management of components via swarm"
+            stack   "Stack lifecycle for new swarm mode"
             sync    "One shot synchronisation of rsync shares"
             forall  "Execute docker command on all matching containers"
             search  "Search for matching containers"
@@ -565,7 +566,7 @@ proc ::api::cli::command { cmd args } {
                 chelp $cmd \
                         "Possibly generate and print out the swarm token for this cluster.  Tokens are cached on disk in a hidden file for reuse. Use the -force option to force the generation of a new token if necessary." \
                         {   -help "Print this help"
-                -force "For regeneration of a new token" }
+                            -force "For regeneration of a new token" }
             }
             set cluster [init]
             puts stdout [token [cluster getopt args -force]]
@@ -594,6 +595,22 @@ proc ::api::cli::command { cmd args } {
             }
             if { [string match -nocase "docker*swarm" [dict get $cluster -options -clustering]] } {
                 ::cluster::swarm::recapture $cluster
+            }
+        }
+        "stack" {
+            tooling runtime exit
+            
+            if { [cluster getopt args -help] } {
+                chelp $cmd \
+                        "Bring up/down stacks and status introspection of services for new swarm mode. This brings support for 'extends' in compose v3+ format. All commands are passed further to docker stack at one of the managers." \
+                        { -help "Print his help" }
+            }
+            set cluster [init]
+            if { [string match -nocase "swarm*mode" [dict get $cluster -options -clustering]] } {
+                set masters [swarmmode masters $cluster]
+                swarmmode stack $masters {*}$args
+            } else {
+                log WARN "$cmd can only be used with new Swarm mode"
             }
         }
         "swarm" {

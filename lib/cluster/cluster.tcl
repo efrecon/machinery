@@ -477,7 +477,7 @@ proc ::cluster::create { vm token masters networks} {
             if { [swarmmode mode $vm] eq "manager" && [llength $networks] } {
                 log INFO "Creating swarm-wide networks"
                 foreach net $networks {
-                    swarmmode network create $net $masters
+                    swarmmode network $masters create $net
                 }
             }
 

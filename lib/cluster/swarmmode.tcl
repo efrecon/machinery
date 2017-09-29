@@ -11,6 +11,7 @@
 ##################
 
 package require cluster::tooling
+package require cluster::extend
 
 namespace eval ::cluster::swarmmode {
     # Encapsulates variables global to this namespace under their own
@@ -31,7 +32,8 @@ namespace eval ::cluster::swarmmode {
     namespace ensemble create -command ::swarmmode
     namespace import [namespace parent]::Machines \
                         [namespace parent]::IsRunning \
-                        [namespace parent]::CacheFile
+                        [namespace parent]::CacheFile \
+                        [namespace parent]::AbsolutePath
 }
 
 
@@ -249,14 +251,15 @@ proc ::cluster::swarmmode::leave { vm } {
 #
 # Side Effects:
 #	None
-proc ::cluster::swarmmode::network { cmd net masters } {
-    switch -nocase -- $cmd {
-        "up" -
-        "create" {
-            set managers [Managers $masters]
-            set mgr [PickManager $managers]
-            if { [dict exists $mgr -name] } {
-                set nm [dict get $mgr -name]
+proc ::cluster::swarmmode::network { masters cmd net } {
+    # Pick a manager to use for network operations
+    set managers [Managers $masters]
+    set mgr [PickManager $managers]
+    if { [dict exists $mgr -name] } {
+        set nm [dict get $mgr -name]
+        switch -nocase -- $cmd {
+            "up" -
+            "create" {
                 set id [NetworkID $mgr [dict get $net -name]]
                 if { $id eq "" } {
                     # Construct network creation command out of network definition
@@ -271,24 +274,78 @@ proc ::cluster::swarmmode::network { cmd net masters } {
                     log NOTICE "Created swarm-wide network $id"
                 }
                 return $id
-            } else {
-                log WARN "No running manager to pick"
             }
-        }
-        "destroy" -
-        "delete" -
-        "rm" -
-        "remove" -
-        "down" {
-            set managers [Managers $masters]
-            set mgr [PickManager $managers]
-            if { [dict exists $mgr -name] } {
-                set nm [dict get $mgr -name]
+            "destroy" -
+            "delete" -
+            "rm" -
+            "remove" -
+            "down" {
                 tooling machine -- -s [storage $mgr] ssh $nm "docker network rm $net"
             }
         }
+    } else {
+        log WARN "No running manager to pick for network operation: $cmd"
     }
+
     return 0
+}
+
+
+proc ::cluster::swarmmode::stack { masters cmd args } {
+    # Pick a manager to use for stack operations
+    set managers [Managers $masters]
+    set mgr [PickManager $managers]
+    if { [dict exists $mgr -name] } {
+        set nm [dict get $mgr -name]
+        switch -nocase -- $cmd {
+            "up" -
+            "deploy" {
+                set fname ""
+                if { ![getopt args -c fname] } {
+                    getopt args --compose-file fname
+                }
+                
+                if { $fname ne "" } {
+                    # Resolve file to absolute location
+                    set c_fname [AbsolutePath $mgr $fname]
+                    
+                    if { [catch {open $c_fname} fd] } {
+                        log WARN "Cannot open stack description file: $fd"
+                    } else {
+                        set tmp_fname [Temporary [file join [TempDir] [file rootname [file tail $c_fname]].yml]]
+                        log INFO "Linearising content into $tmp_fname"
+                        
+                        set yaml [extend linearise [read $fd] [file dirname $c_fname]]
+                        close $fd
+                        
+                        if { [catch {open $tmp_fname w} ofd] } {
+                            log WARN "Cannot create temporary file for linearised content: $fd"
+                        } else {
+                            puts $ofd $yaml
+                            close $ofd
+                            
+                            log NOTICE "Deploying stack [lindex $args end]"
+                            tooling machine -stderr -- -s [storage $mgr] scp $tmp_fname ${nm}:$tmp_fname
+                            tooling machine -- -s [storage $mgr] ssh $nm \
+                                    docker stack deploy --compose-file $tmp_fname {*}$args
+                            tooling machine -stderr -- -s [storage $mgr] ssh $nm rm -f $tmp_fname
+                            file delete -force -- $tmp_fname
+                        }
+                    }
+                }
+            }
+            "remove" -
+            "down" -
+            "rm" -
+            "services" -
+            "ps" {
+                tooling machine -- -s [storage $mgr] ssh $nm \
+                        docker stack $cmd {*}$args                
+            }
+        }
+    } else {
+        log WARN "No running manager to pick for network operation: $cmd"
+    }    
 }
 
 
