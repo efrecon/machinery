@@ -1,10 +1,16 @@
 # Creating binaries
 
+## Introduction
+
 This directory contains all the necessary files to generate self-contained
 binaries that will can be installed on any system, without any dependency on a
-local Tcl installation.  Running the main script as follows will create binaries
-for each of the currently supported platform, with a snapshot of the current
-code and at the version reported by the main `machinery` script:
+local Tcl installation.
+
+## Usage
+
+Running the main script as follows will create binaries for each of the
+currently supported platform, with a snapshot of the current code and at the
+version reported by the main `machinery` script:
 
     make.tcl
 
@@ -12,6 +18,33 @@ The script can also take arguments, which are the names of the platforms to
 build for, e.g.:
 
     make.tcl linux-x86_64
+    
+In addition to these arguments, the script accepts a number of options. All
+these options can be shortened to their minimal subset, i.e. `-version` can be
+shortened to `-v`:
+
+* `-target name` can occur several times and `name` is the name of the two
+  binaries that can be generated, namely `baclin` and `machinery`.
+
+* `-debug level` can be used to specify the debug level, which defaults to
+  `INFO` and is enough for most purposes.
+  
+* `-version vernum` can be used to specify a version number for the generation
+  of tools that do not have official version numbers. When creating binaries for
+  `machinery`, the tool itself is run with the `version` command to query the
+  current version. `baclin` does not have this same support, so `-version` can
+  be used to manually produce versions.
+  
+* `--` can be used to specify the end of the options and the beginning of the
+  arguments, but this is usually not necessary.
+  
+As a summary, to generate version 0.1 of baclin for Windows 32bits, you could
+run the following command, even from a linux host:
+
+    make.tcl -t baclin -v 0.1 win32-ix86
+
+  
+## Internals
 
 The whole binary creation process is made possible through these
 [basekits](http://kitcreator.rkeene.org/kitcreator) and the
