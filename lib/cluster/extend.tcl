@@ -74,6 +74,11 @@ proc ::cluster::extend::linearise { yaml { dir "." } } {
     foreach trim ${vars::-trim} {
         set yaml [string trim $yaml $trim]
     }
+
+    foreach translation [list \
+                            "s/version:\\s*(\[0-9.\]+)/\"\\1\"/g1"] {
+        set yaml [Sed $translation $yaml]
+    }
     
     return $yaml
 }
@@ -226,6 +231,52 @@ proc ::cluster::extend::Services { dir hdl } {
         }
     }
     return $all_services
+}
+
+
+proc ::cluster::extend::Sed {script input} {
+    set sep [string index $script 1]
+    foreach {cmd from to flag} [::split $script $sep] break
+    switch -- $cmd {
+        "s" {
+            set cmd regsub
+            if {[string first "g" $flag]>=0} {
+                lappend cmd -all
+            }
+            if {[string first "i" [string tolower $flag]]>=0} {
+                lappend cmd -nocase
+            }
+            set idx [regsub -all -- {[a-zA-Z]} $flag ""]
+            if { [string is integer -strict $idx] } {
+                set cmd [lreplace $cmd 0 0 regexp]
+                lappend cmd -inline -indices -all -- $from $input
+                set res [eval $cmd]
+                set which [lindex $res $idx]
+                # Create map for replacement of all subgroups, if necessary.
+                for {set i 1} {$i<[llength $res]} { incr i} {
+                    foreach {b e} [lindex $res $i] break
+                    lappend map "\\$i" [string range $input $b $e]
+                }
+                return [string replace $input [lindex $which 0] [lindex $which 1] [string map $map $to]]
+            }
+            # Most generic case
+            lappend cmd -- $from $input $to
+            return [eval $cmd]
+        }
+        "e" {
+            set cmd regexp
+            if { $to eq "" } { set to 0 }
+            if {![string is integer -strict $to]} {
+                return -error code "No proper group identifier specified for extraction"
+            }
+            lappend cmd -inline -- $from $input
+            return [lindex [eval $cmd] $to]
+        }
+        "y" {
+            return [string map [list $from $to] $input]
+        }
+    }
+    return -code error "not yet implemented"
 }
 
 
