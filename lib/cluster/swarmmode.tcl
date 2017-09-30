@@ -212,7 +212,7 @@ proc ::cluster::swarmmode::join { vm masters } {
 #
 # Side Effects:
 #	None
-proc ::cluster::swarmmode::leave { vm } {
+proc ::cluster::swarmmode::leave { vm masters } {
     set nm [dict get $vm -name]    
     switch -- [mode $vm] {
         "manager" {
