@@ -70,7 +70,7 @@ services:
 Running `baclin` on the main file would lead to the following content:
 
 ````
-version: 3
+version: "3"
 services:
   web:
     labels:
@@ -107,4 +107,4 @@ services:
 Binaries, automatically generated using [make.tcl][4] ar available [here][5].
 
   [4]: https://github.com/efrecon/machinery/blob/master/make/make.tcl
-  [5]: https://bintray.com/efrecon/baclin/baclin/0.1#files
+  [5]: https://bintray.com/efrecon/baclin/baclin/0.2#files
