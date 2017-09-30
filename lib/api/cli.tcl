@@ -583,15 +583,12 @@ proc ::api::cli::command { cmd args } {
                         { -help "Print this help" }
             }
             set cluster [init]
-            set token ""; set masters [list]
+            set token "" 
             if { [string match -nocase "docker*swarm" [dict get $cluster -options -clustering]] } {
                 set token [token]
             }
-            if { [string match -nocase "swarm*mode" [dict get $cluster -options -clustering]] } {
-                set masters [swarmmode masters $cluster]
-            }
             foreach vm [machines $cluster $args] {
-                up $vm $token $masters [dict get $cluster -networks]
+                up $vm $token [Masters $cluster] [dict get $cluster -networks]
             }
             if { [string match -nocase "docker*swarm" [dict get $cluster -options -clustering]] } {
                 ::cluster::swarm::recapture $cluster
@@ -605,9 +602,8 @@ proc ::api::cli::command { cmd args } {
                         "Bring up/down stacks and status introspection of services for new swarm mode. This brings support for 'extends' in compose v3+ format. All commands are passed further to docker stack at one of the managers." \
                         { -help "Print his help" }
             }
-            set cluster [init]
-            if { [string match -nocase "swarm*mode" [dict get $cluster -options -clustering]] } {
-                set masters [swarmmode masters $cluster]
+            set masters [Masters [init]]
+            if { [llength $masters] } {
                 swarmmode stack $masters {*}$args
             } else {
                 log WARN "$cmd can only be used with new Swarm mode"
@@ -772,8 +768,9 @@ proc ::api::cli::command { cmd args } {
             # Halt one or several machines (or the whole cluster if no
             # arguments)
             set cluster [init]
+            set masters [Masters $cluster]
             foreach vm [machines $cluster $args] {
-                cluster halt $vm
+                cluster halt $vm $masters
             }
             ::cluster::swarm::recapture $cluster
         }
@@ -787,6 +784,7 @@ proc ::api::cli::command { cmd args } {
                         { -help "Print this help" }
             }
             set cluster [init]
+            set masters [Masters $cluster]
             foreach vm [machines $cluster $args] {
                 cluster halt $vm
                 cluster start $vm
@@ -803,8 +801,9 @@ proc ::api::cli::command { cmd args } {
                         { -help "Print this help" }
             }
             set cluster [init]
+            set masters [Masters $cluster]
             foreach vm [machines $cluster $args] {
-                cluster destroy $vm
+                cluster destroy $vm $masters
             }
             ::cluster::swarm::recapture $cluster
         }
@@ -1104,6 +1103,13 @@ proc ::api::cli::Justify {text {width 72}} {
     return $result$text
 }
 
+
+proc ::api::cli::Masters { cluster }  {
+    set masters [list]
+    if { [string match -nocase "swarm*mode" [dict get $cluster -options -clustering]] } {
+        set masters [swarmmode masters $cluster]
+    }
+    return $masters    
+}
+
 package provide api::cli 0.2
-
-

@@ -1356,10 +1356,10 @@ proc ::cluster::sync { vm {op get} {shares {}} } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::halt { vm } {
+proc ::cluster::halt { vm {masters {}} } {
     # Gracefully leave cluster
     if { [swarmmode mode $vm] ne "" } {
-        swarmmode leave $vm
+        swarmmode leave $vm $masters
     }
     
     # Start by getting back all changes that might have occured on the
@@ -1593,8 +1593,8 @@ proc ::cluster::pull { vm {images {}} } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::destroy { vm } {
-    halt $vm
+proc ::cluster::destroy { vm {masters {}}} {
+    halt $vm $masters
     set nm [dict get $vm -name]
     if { [dict exists $vm state] } {
         log NOTICE "Removing machine $nm..."
@@ -1723,15 +1723,19 @@ proc ::cluster::parse { fname args } {
     # YAML root in the old version 1.0 format (the default) or under the key
     # called machines in the newer format
     set machines [list]; set networks [list]
-    set options {
-        -clustering "docker swarm"
-    }
     if { [vcompare ge $version 1.0] && [vcompare lt $version 2.0] } {
         # Isolate machines that are not named "version", this introduces a
         # backward compatibility!
+        set options {
+            -clustering "docker swarm"
+        }
         set machines [dict filter $d script {k v} \
                         { expr {![string equal $k "version"]}}]
     } elseif { [vcompare ge $version 2.0] } {
+        # Default to new swarm mode with the new version file format!
+        set options {
+            -clustering "swarm mode"
+        }
         # Get list of external networks to create
         if { [dict exists $d networks] } {
             set opts [tooling options [tooling docker -return -- network create --help]]
@@ -1773,7 +1777,7 @@ proc ::cluster::parse { fname args } {
         if { [dict exists $d options] } {
             # Initialise options with good defaults
             set opts [dict get $d options]
-            foreach {o d} {clustering "docker swarm"} {
+            foreach {o d} {clustering "swarm mode"} {
                 if { [dict exists $opts [string trimleft $o -]] } {
                     dict set options -[string trimleft $o -] \
                         [dict get $opts [string trimleft $o -]]
@@ -2215,6 +2219,10 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
                 tooling machine -- -s [storage $vm] upgrade $nm
             }
         }
+    }
+    
+    if { [llength $masters] } {
+        swarmmode join $vm $masters
     }
             
     return [dict get $vm -name]
