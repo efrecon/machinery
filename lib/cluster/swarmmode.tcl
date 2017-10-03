@@ -12,6 +12,7 @@
 
 package require cluster::tooling
 package require cluster::extend
+package require huddle;           # To parse and operate on stack files
 
 namespace eval ::cluster::swarmmode {
     # Encapsulates variables global to this namespace under their own
@@ -33,7 +34,9 @@ namespace eval ::cluster::swarmmode {
     namespace import [namespace parent]::Machines \
                         [namespace parent]::IsRunning \
                         [namespace parent]::CacheFile \
-                        [namespace parent]::AbsolutePath
+                        [namespace parent]::AbsolutePath \
+                        [namespace parent]::Temporary \
+                        [namespace parent]::TempDir
 }
 
 
@@ -312,23 +315,77 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                     if { [catch {open $c_fname} fd] } {
                         log WARN "Cannot open stack description file: $fd"
                     } else {
-                        set tmp_fname [Temporary [file join [TempDir] [file rootname [file tail $c_fname]].yml]]
-                        log INFO "Linearising content into $tmp_fname"
+                        # Prepare a directory for (temporary) storage of related
+                        # files at the manager. We use the name of the directory
+                        # holding the compose file together with the name of the
+                        # compose file to make this something we can easily
+                        # understand and debug in.
+                        set dirbase [file tail [file dirname $c_fname]]-[file rootname [file tail $c_fname]]
+                        set tmp_dirname [Temporary [file join [TempDir] $dirbase]]
+                        log INFO "Temporarily copying all files included by $c_fname to $nm in $tmp_dirname"
+                        tooling machine -stderr -- -s [storage $mgr] ssh $nm mkdir -p $tmp_dirname
                         
-                        set yaml [extend linearise [read $fd] [file dirname $c_fname]]
+                        # Linearise content of compose file into a huddle
+                        # representation that does not contain any 'extends'
+                        # references (this is what our friend-tool baclin does)
+                        set hdl [extend linearise2huddle [read $fd] [file dirname $c_fname]]
                         close $fd
                         
+                        # Now detects all files that are pointed at by the
+                        # compose file and collect then so we will be copying
+                        # them.
+                        set copies [list]
+                        set services [huddle get $hdl "services"]
+                        foreach name [huddle keys $services] {
+                            set service [huddle get $services $name]
+                            foreach k [huddle keys $service] {
+                                switch -- $k {
+                                    "env_file" {
+                                        set v [huddle get $service $k]
+                                        if { [string match "str*" [huddle type $v]] } {
+                                            set fname [huddle get_stripped $service $k]
+                                            set dst_fname [SCopy $mgr [file dirname $c_fname] $fname $tmp_dirname]
+                                            huddle set service $k $dst_fname
+                                        } else {
+                                            # Empty v (which will keep its type)
+                                            while {[huddle llength $v]} {
+                                                huddle remove $v 0
+                                            }
+                                            # Copy files to destination and
+                                            # account for location in v
+                                            # again.
+                                            foreach fname [huddle get stripped $service $k] {
+                                                huddle append v [SCopy $mgr [file dirname $c_fname] $fname $tmp_dirname]
+                                            }
+                                            # Set back into service.
+                                            huddle set service $k $v
+                                        }
+                                    }
+                                }
+                            }
+                            huddle set services $name $service
+                        }
+                        huddle set hdl services $services
+                        Inline $mgr hdl "configs" [file dirname $c_fname] $fname $tmp_dirname
+                        Inline $mgr hdl "secrets" [file dirname $c_fname] $fname $tmp_dirname
+
+                        # Now create local temporary file to host manipulated
+                        # content in and copy it to the remote host.
+                        set tmp_fname [Temporary [file join [TempDir] [file rootname [file tail $c_fname]].yml]]
+                        log INFO "Linearising content into $tmp_fname"                        
+                        set yaml [extend huddle2yaml $hdl]                        
                         if { [catch {open $tmp_fname w} ofd] } {
                             log WARN "Cannot create temporary file for linearised content: $fd"
                         } else {
                             puts $ofd $yaml
                             close $ofd
                             
-                            log NOTICE "Deploying stack [lindex $args end]"
-                            tooling machine -stderr -- -s [storage $mgr] scp $tmp_fname ${nm}:$tmp_fname
+                            log NOTICE "Deploying stack [lindex $args end] from files at $tmp_dirname"
+                            set dst_fname [file join $tmp_dirname [file tail $tmp_fname]]
+                            tooling machine -stderr -- -s [storage $mgr] scp $tmp_fname ${nm}:$dst_fname
                             tooling machine -- -s [storage $mgr] ssh $nm \
-                                    docker stack deploy --compose-file $tmp_fname {*}$args
-                            tooling machine -stderr -- -s [storage $mgr] ssh $nm rm -f $tmp_fname
+                                    docker stack deploy --compose-file $dst_fname {*}$args
+                            tooling machine -stderr -- -s [storage $mgr] ssh $nm rm -rf $tmp_dirname
                             file delete -force -- $tmp_fname
                         }
                     }
@@ -356,6 +413,43 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
 # be changed unless you wish to help...
 #
 ####################################################################
+
+
+proc ::cluster::swarmmode::Inline { mgr hdl_ mainkey dir fname tmp_dirname { subkey "file" } } {
+    upvar $hdl_ hdl
+
+    if { $mainkey in [huddle keys $hdl] } {
+        set configs [huddle get $hdl $mainkey]
+        foreach name [huddle keys $configs] {
+            set config [huddle get $configs $name]
+            if { "$subkey" in [huddle keys $config] } {
+                set v [huddle get $config $subkey]
+                set fname [huddle get_stripped $config $subkey]
+                set dst_fname [SCopy $mgr $dir $fname $tmp_dirname]
+                set config [string map [list [huddle get_stripped $config $subkey] $dst_fname] $config]
+                #huddle set config $subkey $dst_fname
+            }
+            huddle set configs $name $config
+        }
+        huddle set hdl $mainkey $configs
+    } else {
+        log DEBUG "No key $mainkey found, but this is ok!"
+    }
+}
+
+
+proc ::cluster::swarmmode::SCopy { mgr dir fname tmp_dirname } {
+    set nm [dict get $mgr -name]
+    set src_fname [file join $dir $fname]
+    if { [file exists $src_fname] } {
+        set dst_fname [Temporary [file join $tmp_dirname [file rootname [file tail $fname]]]]
+        tooling machine -stderr -- -s [storage $mgr] scp $src_fname ${nm}:$dst_fname
+        return $dst_fname
+    } else {
+        log WARN "Cannot access file at $src_fname!"
+    }
+    return ""    
+}
 
 
 # ::cluster::swarmmode::Init -- Initialise first node of swarm

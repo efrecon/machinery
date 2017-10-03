@@ -12,6 +12,9 @@ namespace eval ::cluster::extend {
     namespace eval vars {
         # List of endings to trim away, in order from reconstructed YAML
         variable -trim        {- " \f\v\r\t\n"}
+        # Indenting and wordwrapping options
+        variable -indent      2
+        variable -wordwrap    1024
     }
     # Export all lower case procedure, arrange to be able to access
     # commands from the parent (cluster) namespace from here and
@@ -41,6 +44,11 @@ namespace eval ::cluster::extend {
 # Side Effects:
 #       None.
 proc ::cluster::extend::linearise { yaml { dir "." } } {
+    return [huddle2yaml [linearise2huddle $yaml $dir]]
+}
+
+
+proc ::cluster::extend::linearise2huddle { yaml { dir "." } } {
     if { $dir eq "" } {
         set dir [pwd]
     }
@@ -69,8 +77,13 @@ proc ::cluster::extend::linearise { yaml { dir "." } } {
         set output [Services $dir $hdl]
     }
     
+    return $output
+}
+
+
+proc ::cluster::extend::huddle2yaml { output } {
     # Trim for improved readability of the result
-    set yaml [::yaml::huddle2yaml $output]
+    set yaml [::yaml::huddle2yaml $output ${vars::-indent} ${vars::-wordwrap}]
     foreach trim ${vars::-trim} {
         set yaml [string trim $yaml $trim]
     }
