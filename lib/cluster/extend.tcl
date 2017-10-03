@@ -75,6 +75,9 @@ proc ::cluster::extend::linearise { yaml { dir "." } } {
         set yaml [string trim $yaml $trim]
     }
 
+    # Performs a number of textual translations on the output. At present, this
+    # simply forces the version number to be represented as a string as docker
+    # stack deploy is peaky about that very type.
     foreach translation [list \
                             "s/version:\\s*(\[0-9.\]+)/\"\\1\"/g1"] {
         set yaml [Sed $translation $yaml]
@@ -84,20 +87,35 @@ proc ::cluster::extend::linearise { yaml { dir "." } } {
 }
 
 
+# ::cluster::extend::Service -- Look for a service
+#
+#      Look for the description of a given services within a list of service and
+#      return it.
+#
+# Arguments:
+#      services List of services
+#      srv      Name of service to look for
+#
+# Results:
+#      Return the service description, or an empty dict
+#
+# Side Effects:
+#      None.
 proc ::cluster::extend::Service { services srv } {
     foreach s [huddle keys $services] {
         if { $s eq $srv } {
             return [huddle get $services $s]
         }
     }
-    return {}
+    return [dict create]
 }
 
 
-# This is an ugly (and rather unprecise) fix. Starting with later updates, the
-# huddle2yaml implementation is broken as it does not properly supports its own
-# types. The following fixes it in a rather ugly way, until this has made its
-# way into the official implementation in tcllib.
+# This is an ugly (and rather unprecise when it comes to version numbers) fix.
+# Starting with later updates, the huddle2yaml implementation is broken as it
+# does not properly supports its own types. The following fixes it in a rather
+# ugly way, until this has made its way into the official implementation in
+# tcllib.
 if { [vcompare gt [package provide yaml] 0.3.7] } {
     proc ::yaml::_imp_huddle2yaml {data {offset ""}} {
         set nextoff "$offset[string repeat { } $yaml::_dumpIndent]"
@@ -137,6 +155,71 @@ if { [vcompare gt [package provide yaml] 0.3.7] } {
     }
 }
 
+
+proc ::cluster::extend::Combine { n_descr_ descr {allow {*}} {deny {}} } {
+    upvar $n_descr_ n_descr
+    
+    foreach k [huddle keys $descr] {
+        
+        # Decide if the content of this key should be merged or not
+        set allow 0
+        foreach ptn $allow {
+            if { [string match $ptn $k] } {
+                set allow 1; break
+            }
+        }
+        if { $allow } {
+            foreach ptn $deny {
+                if { [string match $ptn $k] } {
+                    set allow 0; break
+                }                
+            }
+        }
+        
+        if { $allow } {
+            set v [huddle get $descr $k]
+            if { $k in [huddle keys $n_descr] } {
+                switch [huddle type $v] {
+                    "mapping" -
+                    "dict" {
+                        huddle set n_descr \
+                            $k [huddle combine [huddle get $n_descr $k] $v]
+                    }
+                    "sequence" -
+                    "list" {
+                        huddle set n_descr \
+                            $k [huddle combine [huddle get $n_descr $k] $v]
+                    }
+                    default {
+                        huddle set n_descr $k $v
+                    }
+                }
+            } else {
+                huddle set n_descr $k $v
+            }
+        }
+    }
+}
+
+
+# ::cluster::extend::Services -- Linarise services
+#
+#      Given a huddle representation of services (originating from a given
+#      directory context), this procedure will replace all occurences of
+#      services that contain an 'extends' directive with the description that
+#      originates from the service pointed at by extend. This implementation is
+#      aware both of extending within files, but also when referencing to
+#      external files and will recurse as necessary
+#
+# Arguments:
+#      dir      Context dictionary where the description is coming from
+#      hdl      Huddle representation of the list of services.
+#
+# Results:
+#      A linearised list of services.
+#
+# Side Effects:
+#      None.
 proc ::cluster::extend::Services { dir hdl } {
     # Access services (do this is in version dependent manner so we can support
     # the old v 1. file format and the new ones.
@@ -196,30 +279,7 @@ proc ::cluster::extend::Services { dir hdl } {
             # we have linearised above. We cannot simply copy into, since that
             # would loose value from the extended object, instead we arrange to
             # combine for composed-objects such as lists or dictionaries.
-            foreach k [huddle keys $descr] {
-                if { $k ne "extends" } {
-                    set v [huddle get $descr $k]
-                    if { $k in [huddle keys $n_descr] } {
-                        switch [huddle type $v] {
-                            "mapping" -
-                            "dict" {
-                                huddle set n_descr \
-                                    $k [huddle combine [huddle get $n_descr $k] $v]
-                            }
-                            "sequence" -
-                            "list" {
-                                huddle set n_descr \
-                                    $k [huddle combine [huddle get $n_descr $k] $v]
-                            }
-                            default {
-                                huddle set n_descr $k $v
-                            }
-                        }
-                    } else {
-                        huddle set n_descr $k $v
-                    }
-                }
-            }
+            Combine n_descr $descr [list *] [list "extends"]
             
 
             # Add this service to the list of linearised services.
@@ -234,6 +294,20 @@ proc ::cluster::extend::Services { dir hdl } {
 }
 
 
+# ::cluster::extend::Sed -- Mini-sed implementation
+#
+#      This is a minimal sed implementation that has been lifted up from toclbox
+#      and also implements use of \1, \2, etc. in subgroups replacements.
+#
+# Arguments:
+#      script   sed-like script. Not all syntax is supported!
+#      input    Text to perform sed operations on.
+#
+# Results:
+#      Return the result of the sed-like mini-language operation on the input.
+#
+# Side Effects:
+#      None.
 proc ::cluster::extend::Sed {script input} {
     set sep [string index $script 1]
     foreach {cmd from to flag} [::split $script $sep] break
