@@ -48,6 +48,25 @@ proc ::cluster::extend::linearise { yaml { dir "." } } {
 }
 
 
+# ::cluster::extend::linearise2huddle -- Linearise away 'extends' to huddle
+#
+#       Linearise YAML so it does not contain 'extends' instructions. Each
+#       occurence of 'extends' will be resolved recursively and inserted into
+#       the service description. This procedure returns the internal huddle
+#       representation of the linearised result so that it can be process
+#       further.
+#
+# Arguments:
+#       yaml	Textual YAML content, as read from a file, for example
+#       dir	    Original directory context where the content is coming from (empty==pwd)
+#
+# Results:
+#       Return a huddle tree representation, where all references to other
+#       services (pointed at by 'extends') have been recursively replaced by
+#       their content.
+#
+# Side Effects:
+#       None.
 proc ::cluster::extend::linearise2huddle { yaml { dir "." } } {
     if { $dir eq "" } {
         set dir [pwd]
@@ -81,9 +100,24 @@ proc ::cluster::extend::linearise2huddle { yaml { dir "." } } {
 }
 
 
-proc ::cluster::extend::huddle2yaml { output } {
+# ::cluster::extend::huddle2yaml -- Convert back to YAML
+#
+#       Convert back the huddle representation of a YAML file to YAML content.
+#       This performs a number of cleanup and transformations to make docker
+#       stack deploy happy with the input.
+#
+# Arguments:
+#       hdl 	Huddle representation of YAML content
+#
+# Results:
+#       Return YAML content ready to be given away to docker stack deploy or
+#       docker-compose.
+#
+# Side Effects:
+#       None.
+proc ::cluster::extend::huddle2yaml { hdl } {
     # Trim for improved readability of the result
-    set yaml [::yaml::huddle2yaml $output ${vars::-indent} ${vars::-wordwrap}]
+    set yaml [::yaml::huddle2yaml $hdl ${vars::-indent} ${vars::-wordwrap}]
     foreach trim ${vars::-trim} {
         set yaml [string trim $yaml $trim]
     }
@@ -169,10 +203,27 @@ if { [vcompare gt [package provide yaml] 0.3.7] } {
 }
 
 
-proc ::cluster::extend::Combine { n_descr_ descr {allow {*}} {deny {}} } {
-    upvar $n_descr_ n_descr
+# ::cluster::extend::Combine -- combine together huddle YAML content
+#
+#      Given a huddle map representation, this procedure will merge onto of its
+#      keys the content of another similar map.
+#
+# Arguments:
+#      tgt_     Pointer to huddle map to modify
+#      src      Huddle map to copy into map
+#      allow    List of key matching patterns to consider when copying
+#      deny     List of key matching patterns not to consider when copying
+#
+# Results:
+#      List of keys that were combined
+#
+# Side Effects:
+#      Actively modify the target
+proc ::cluster::extend::Combine { tgt_ src {allow {*}} {deny {}} } {
+    upvar $tgt_ tgt
     
-    foreach k [huddle keys $descr] {
+    set combined [list]
+    foreach k [huddle keys $src] {
         
         # Decide if the content of this key should be merged or not
         set allow 0
@@ -190,28 +241,31 @@ proc ::cluster::extend::Combine { n_descr_ descr {allow {*}} {deny {}} } {
         }
         
         if { $allow } {
-            set v [huddle get $descr $k]
-            if { $k in [huddle keys $n_descr] } {
+            set v [huddle get $src $k]
+            if { $k in [huddle keys $tgt] } {
                 switch [huddle type $v] {
                     "mapping" -
                     "dict" {
-                        huddle set n_descr \
-                            $k [huddle combine [huddle get $n_descr $k] $v]
+                        huddle set tgt \
+                            $k [huddle combine [huddle get $tgt $k] $v]
                     }
                     "sequence" -
                     "list" {
-                        huddle set n_descr \
-                            $k [huddle combine [huddle get $n_descr $k] $v]
+                        huddle set tgt \
+                            $k [huddle combine [huddle get $tgt $k] $v]
                     }
                     default {
-                        huddle set n_descr $k $v
+                        huddle set tgt $k $v
                     }
                 }
             } else {
-                huddle set n_descr $k $v
+                huddle set tgt $k $v
             }
+            lappend combined $k
         }
     }
+    
+    return $combined
 }
 
 
