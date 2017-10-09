@@ -181,6 +181,20 @@ up:
 
     ./machinery -cluster test/test.yml destroy
 
+## Notes
+
+Support for [Swarm Mode] is work in progress and not yet released yet, so is
+support for the creation of cluster-wide overlay networks that can be used for
+communication between [Docker Stack]s across the cluster. In order to handle the
+creation of both machines and networks the YAML format has been modified in the
+development version. The default is to keep a list of machines under the root of
+the YAML file. However, whenever a key called `version` is present, `machinery`
+will expect a list of machines under the key `mcahines` and a possible list of
+networks under the key `networks`. 
+
+  [Docker Stack]: https://docs.docker.com/engine/reference/commandline/stack/
+
+
 ## Comparison to Other Tools
 
 `machinery` is closely related to [Vagrant](https://www.vagrantup.com/), and it
