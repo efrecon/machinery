@@ -1,22 +1,20 @@
 # machinery
 
 `machinery` is a command-line tool to operate on a whole cluster of
-[Docker Machine](https://docs.docker.com/machine/) virtual
-machines.  `machinery` uses a YAML definition of the whole cluster to
-create machines, bring them up or down, or remove them at will.  In
-short, `machinery` is to `docker-machine` what `docker-compose` is to
-`docker`.  In addition, `machinery` provides [Docker
-Swarm](https://docs.docker.com/swarm/) and
-[Compose](https://docs.docker.com/compose/) integration.  It will
-automatically arrange for the created virtual machines to join the
-swarm cluster, generate the token as needed or even manage the
-life-cycle of several compose projects to be run on the
-cluster.  `machinery` can automatically bring up specific project files
-onto machines that it controls.  `machinery` is able to substitute the
-value of local environment variables in the compose project files
-before bringing the components up.  Together with conventions for the
-dynamic construction of network-related environment variables, this
-provides for a simple mechanism for service discovery.
+[Docker Machine] virtual or bare-metal machines. `machinery` uses a YAML
+definition of the whole cluster to create machines, bring them up or down,
+remove them at will and create (overlay) networks to be used across deployed
+containers. In short, `machinery` is to `docker-machine` what `docker-compose`
+is to `docker`. In addition, `machinery` provides [Docker Swarm] and
+[Swarm Mode], and [Docker Compose] integration. It will automatically arrange
+for the created virtual machines to join the swarm cluster, generate the
+token(s) as needed or even manage the life-cycle of several compose projects to
+be run on the cluster. `machinery` can automatically bring up specific project
+files onto machines that it controls. `machinery` is able to substitute the
+value of local environment variables in the compose project files before
+bringing the components up. Together with conventions for the dynamic
+construction of network-related environment variables, this provides for a
+simple mechanism for service discovery.
 
 In short `machinery` provides you with an at-a-glance view of your
 whole cluster, from all the (virtual) machines that build it up, to
@@ -26,6 +24,11 @@ on your cluster from the central controlling point that it constructs.
 This document provides a quick introduction to the main features of
 `machinery`, read the [documentation](docs/Reference.md) for a thorough
 description of all its functionality.
+
+  [Docker Machine]: https://docs.docker.com/machine/
+  [Docker Swarm]: https://docs.docker.com/swarm/
+  [Swarm Mode]: https://docs.docker.com/engine/swarm
+  [Docker Compose]: https://docs.docker.com/compose/
 
 ## Quick Tour
 
@@ -43,6 +46,10 @@ Finally, it arranges for the components pinpointed by a relative
 `compose` project file to automatically be started up when `db` is
 brought up and created.
 
+````
+version: '2'
+
+machines:
     wk01: &worker
       driver: virtualbox
       memory: 2GiB
@@ -63,6 +70,7 @@ brought up and created.
         role: core
       shares:
         - $HOME
+````
 
 Given access to a cluster definition file such as the one described
 above, the following command would create all the configured machines
@@ -81,8 +89,8 @@ it for execution by calling:
 
     machinery swarm myapp.yml
 
-Do you want to try for yourself at once? Read the next the next
-section ant try the example.  You might want to download a "compiled"
+Do you want to try for yourself at once? Read the next section ant try the
+example. You might want to download a "compiled"
 [binary](https://github.com/efrecon/machinery/releases) to avoid
 having to solve the few dependencies `machinery` has yourself. For a
 complete description, read the [documentation](docs/Reference.md).
