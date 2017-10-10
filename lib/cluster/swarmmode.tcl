@@ -411,6 +411,10 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                             file delete -force -- $tmp_fname
                         }
                     }
+                } else {
+                    log WARN "No compose file specified!"
+                    tooling machine -- -s [storage $mgr] ssh $nm \
+                            docker stack $cmd --help                
                 }
             }
             default {
