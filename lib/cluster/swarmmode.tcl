@@ -294,6 +294,20 @@ proc ::cluster::swarmmode::network { masters cmd net } {
 }
 
 
+proc ::cluster::swarmmode::node { masters cmd args } {
+    # Pick a manager to use for stack operations
+    set managers [Managers $masters]
+    set mgr [PickManager $managers]
+    if { [dict exists $mgr -name] } {
+        set nm [dict get $mgr -name]
+        tooling machine -- -s [storage $mgr] ssh $nm \
+                docker node $cmd {*}$args                
+    } else {
+        log WARN "No running manager to pick for node operation: $cmd"
+    }    
+}
+
+
 proc ::cluster::swarmmode::stack { masters cmd args } {
     # Pick a manager to use for stack operations
     set managers [Managers $masters]
@@ -303,6 +317,14 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
         switch -nocase -- $cmd {
             "up" -
             "deploy" {
+                # Capture up and deploy (they are aliases within the set of
+                # docker stack commands). This is in order to benefit from some
+                # of the compose v2 features in v3 formatted files, but also to
+                # be able to forward all underlying files to the manager
+                # (temporarily) before deployment.
+                
+                # Start by detecting the compose file that is used for
+                # deployment.
                 set fname ""
                 if { ![getopt args -c fname] } {
                     getopt args --compose-file fname
@@ -391,17 +413,16 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                     }
                 }
             }
-            "remove" -
-            "down" -
-            "rm" -
-            "services" -
-            "ps" {
+            default {
+                # In all other cases, we simply forward everything to docker
+                # stack, which allows us to be forward compatible with any
+                # command that it provides now and might provide in the future.
                 tooling machine -- -s [storage $mgr] ssh $nm \
                         docker stack $cmd {*}$args                
             }
         }
     } else {
-        log WARN "No running manager to pick for network operation: $cmd"
+        log WARN "No running manager to pick for stack operation: $cmd"
     }    
 }
 
