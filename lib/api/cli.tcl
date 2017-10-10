@@ -390,6 +390,20 @@ proc ::api::cli::yaml { fname {pfx ""} } {
     if { [catch {cluster parse $fname \
                 -prefix $pfx -driver ${vars::-driver}} cluster] } {
         help $cluster
+    } else {
+        # Check that there is at least one master in the file that we have
+        # parsed. Maybe isn't this the proper location for this type of warning?
+        set masters [list]
+        foreach m [dict get $cluster -machines] {
+            if { [dict exists $m -master] && [dict get $m -master] } {
+                lappend masters [dict get $m -name]
+            }
+        }
+        if { [llength $masters] == 0 } {
+            cluster log WARN "Cluster file at $fname has no master!"
+        } else {
+            cluster log DEBUG "Masters are: [join $masters ,\ ]"
+        }
     }
     return $cluster
 }
