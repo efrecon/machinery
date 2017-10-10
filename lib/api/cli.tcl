@@ -49,6 +49,7 @@ namespace eval ::api::cli {
             reinit  "Rerun finalisation stages on machine(s), specify via -step"
             swarm   "Lifecycle management of components via swarm"
             stack   "Stack lifecycle for new swarm mode"
+            node    "Relays low(er)-level node operations for new swarm mode"
             sync    "One shot synchronisation of rsync shares"
             forall  "Execute docker command on all matching containers"
             search  "Search for matching containers"
@@ -606,7 +607,22 @@ proc ::api::cli::command { cmd args } {
             if { [llength $masters] } {
                 swarmmode stack $masters {*}$args
             } else {
-                log WARN "$cmd can only be used with new Swarm mode"
+                log WARN "$cmd can only be used with new Swarm Mode"
+            }
+        }
+        "node" {
+            tooling runtime exit
+            
+            if { [cluster getopt args -help] } {
+                chelp $cmd \
+                        "Relays low(er)-level node opeations on swarm to one of the managers" \
+                        { -help "Print his help" }
+            }
+            set masters [Masters [init]]
+            if { [llength $masters] } {
+                swarmmode node $masters {*}$args
+            } else {
+                log WARN "$cmd can only be used with new Swarm Mode"
             }
         }
         "swarm" {
