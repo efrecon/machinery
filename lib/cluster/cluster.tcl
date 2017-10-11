@@ -26,6 +26,7 @@ package require cluster::unix
 package require cluster::swarmmode
 package require cluster::environment
 package require cluster::tooling
+package require cluster::utils
 
 
 # Hard sourcing of the local json package to avoid using the one from
@@ -45,8 +46,6 @@ namespace eval ::cluster {
         variable -keys      {cpu size memory master labels driver options \
                              ports shares images compose registries aliases \
                              addendum files swarm prelude}
-        # Current verbosity level
-        variable -verbose   NOTICE
         # Locally cache images?
         variable -cache     on
         # Caching rules. First match (glob-style) will prevail. These are only
@@ -61,16 +60,8 @@ namespace eval ::cluster {
         variable -bootlocal /var/lib/boot2docker/bootlocal.sh
         # Marker in bootlocal
         variable -marker    "#### A U T O M A T E D  ## S/E/C/T/I/O/N ####"
-        # Mapping from integer to string representation of verbosity levels
-        variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG 7 TRACE}
         # Extension for machine storage cache directory
         variable -ext       .mch
-        # File descriptor to dump log messages to
-        variable -log       stderr
-        # Date log output
-        variable -date      "%Y%m%d %H%M%S"
-        # Temporary directory, empty for good platform guess
-        variable -tmp       ""
         # Default number of retries when polling
         variable -retries   3
         # Environement variable prefix
@@ -118,8 +109,6 @@ namespace eval ::cluster {
         variable marker {^#\s*docker\-machinery}
         # Good default machine for local storage of images (for -cache)
         variable defaultMachine ""
-        # Characters to keep in temporary filepath
-        variable fpathCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.,=_"
         # Local volume mounts on windows
         variable volMounts {}
         # Cluster status cache
@@ -129,6 +118,7 @@ namespace eval ::cluster {
     # create an ensemble for an easier API.
     namespace export {[a-z]*}
     namespace ensemble create
+    namespace import [namespace current]::utils::log
 }
 
 
@@ -150,94 +140,18 @@ namespace eval ::cluster {
 # Side Effects:
 #       None.
 proc ::cluster::defaults { {args {}}} {
-    foreach {k v} $args {
-        set k -[string trimleft $k -]
-        if { [info exists vars::$k] } {
-            set vars::$k $v
-        }
-    }
+    set state [utils defaults [namespace current] {*}$args]
     
-    if { "win32" in [split [::platform::generic] -] \
-                && $vars::defaultMachine eq "" } {
+    if { $vars::defaultMachine eq "" \
+            && "win32" in [split [::platform::generic] -] } {
         set vars::defaultMachine [DefaultMachine]
         log NOTICE "Will use '$vars::defaultMachine' as the default machine"
     }
     
-    set state {}
-    foreach v [info vars vars::-*] {
-        lappend state [lindex [split $v ":"] end] [set $v]
-    }
     return $state
 }
 
-# ::cluster::getopt -- Quick and Dirty Options Parser
-#
-#       Parses options, code comes from wiki.  Once parsed, an option
-#       (and its argument) are removed from the argument list.
-#
-# Arguments:
-#        _argv        List of arguments to parse
-#        name        Name of option to look for.
-#        _var        Pointer to variable in which to store value
-#        dft        Default value if not found
-#
-# Results:
-#       1 if option was found, 0 otherwise.
-#
-# Side Effects:
-#       Modifies the incoming arguments list.
-proc ::cluster::getopt {_argv name {_var ""} {dft ""}} {
-    upvar $_argv argv $_var var
-    set pos [lsearch -regexp $argv ^$name]
-    if {$pos>=0} {
-        set to $pos
-        if {$_var ne ""} {
-            set var [lindex $argv [incr to]]
-        }
-        set argv [lreplace $argv $pos $to]
-        return 1
-    } else {
-        # Did we provide a value to default?
-        if {[llength [info level 0]] == 5} {set var $dft}
-        return 0
-    }
-}
 
-
-# ::cluster::log -- Conditional logging
-#
-#       Conditionally output the message passed as an argument
-#       depending on the current module debug level.  The level can
-#       either be an integer or one of FATAL ERROR WARN NOTICE INFO
-#       DEBUG, where FATAL corresponds to level 1 and DEBUG to
-#       level 6.  Level 0 will therefor turn off ALL debugging.
-#       Logging happens on the standard error, but this can be changed
-#       through the -log option to the module.  Logging is pretty
-#       printed using ANSI codes when the destination channel is a
-#       terminal.
-#
-# Arguments:
-#        lvl        Logging level of the message
-#        msg        String content of the message.
-#
-# Results:
-#       None.
-#
-# Side Effects:
-#       Output message to logging channel whenever at the proper level.
-proc ::cluster::log { lvl msg } {
-    # If we should output (i.e. level of message is below the global
-    # module level), pretty print and output.
-    if { [Log? $lvl l] } {
-        set toTTY [dict exists [fconfigure ${vars::-log}] -mode]
-        # Output the whole line.
-        if { $toTTY } {
-            puts ${vars::-log} [LogTerminal $l $msg]
-        } else {
-            puts ${vars::-log} [LogStandard $l $msg]
-        }
-    }
-}
 
 
 # ::cluster::ls -- Return dynamic state of cluster
@@ -466,7 +380,11 @@ proc ::cluster::bind { vm {ls -} {options {}} } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::create { vm token masters networks} {
+proc ::cluster::create { vm args } {
+    utils getopt args -token token ""
+    utils getopt args -masters masters [list]
+    utils getopt args -networks networks [list]
+    utils getopt args -applications apps [list]
     set nm [Create $vm $token $masters]
     
     if { $nm ne "" } {
@@ -505,6 +423,14 @@ proc ::cluster::create { vm token masters networks} {
                     }
                     
                     init $vm
+
+                    if { [swarmmode mode $vm] eq "manager" && [llength $apps] } {
+                        log INFO "Creating swarm-wide apps that are not yet running"
+                        swarmmode stack ls
+                        foreach net $apps {
+                            swarmmode network $masters create $net
+                        }
+                    }
                 } else {
                     log WARN "No docker daemon running on $nm!"
                 }
@@ -587,11 +513,6 @@ proc ::cluster::init { vm {steps {shares registries files images prelude compose
         log WARN "No docker daemon running on $nm!"
     }
 }
-
-proc ::cluster::tempfile { pfx ext } {
-    return [Temporary [file join [TempDir] $pfx].[string trimleft $ext .]]
-}
-
 
 proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
     set vm [bind $vm]
@@ -974,7 +895,7 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Create a local temporary file with the new content.  This is far
     # from perfect, but should do as we are only creating one file and
     # will be removing it soon.
-    set fname [Temporary [file join [TempDir] profile]]
+    set fname [utils temporary [file join [utils tmpdir] profile]]
     environment write $fname [array get DARGS] "'"
     
     # Copy new file to same place (assuming /tmp is a good place!) and
@@ -1216,7 +1137,7 @@ proc ::cluster::shares { vm { shares {}} } {
                 }
                 
                 # Now create a temporary file with the new content
-                set fname [Temporary [file join [TempDir] bootlocal]]
+                set fname [utils temporary [file join [utils tmpdir] bootlocal]]
                 set fd [open $fname w]
                 foreach l $bootlocal {
                     puts $fd $l
@@ -1555,8 +1476,8 @@ proc ::cluster::pull { vm {images {}} } {
                 
                 # Save it to the local disk
                 set rootname [file rootname [file tail $img]]; # Cheat!...
-                set tmp_fpath [Temporary \
-                        [file join [TempDir] $rootname]].tar
+                set tmp_fpath [utils temporary \
+                        [file join [utils tmpdir] $rootname]].tar
                 log INFO "Using a local snapshot at $tmp_fpath to copy $img\
                         to $nm..."
                 tooling docker -stderr -- save -o $tmp_fpath $img
@@ -1704,8 +1625,8 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
 # Side Effects:
 #       None.
 proc ::cluster::parse { fname args } {
-    getopt args -prefix pfx [file rootname [file tail $fname]]
-    getopt args -driver drv "none"
+    utils getopt args -prefix pfx [file rootname [file tail $fname]]
+    utils getopt args -driver drv "none"
     
     set d [::yaml::yaml2dict -file $fname]
     
@@ -1722,7 +1643,7 @@ proc ::cluster::parse { fname args } {
     # Arrange to access to the list of machines, directly under the top of the
     # YAML root in the old version 1.0 format (the default) or under the key
     # called machines in the newer format
-    set machines [list]; set networks [list]
+    set machines [list]; set networks [list]; set apps [list]
     if { [vcompare ge $version 1.0] && [vcompare lt $version 2.0] } {
         # Isolate machines that are not named "version", this introduces a
         # backward compatibility!
@@ -1766,7 +1687,36 @@ proc ::cluster::parse { fname args } {
                 lappend networks $net
             }
         }
+        
+        # Collect list of applications from either the key named applications or
+        # the one named stacks. This might be a bad idea, but is handy.
+        set fapps [list]
+        if { [dict exists $d applications] } {
+            set fapps [dict get $d applications]
+        } elseif { [dict exists $d stacks] } {
+            set fapps [dict get $d stacks]
+        }
+        
+        # Construct list of apps, arranging for the key -name to always be
+        # present.
+        dict for { name descr } $fapps {
+            if { $pfx eq "" } {
+                set app [dict create -name $n origin $fname]
+            } else {
+                set app [dict create -name ${pfx}${vars::-separator}$n origin $fname]
+            }
 
+            if { [dict exists $descr file] } {
+                dict for {k v} $descr {
+                    dict set app -[string trimleft $k -] $v
+                }
+            } else {
+                dict set app -file $descr
+            }
+            lappend apps $app
+        }
+
+        
         if { [dict exists $d machines] } {
             set machines [dict get $d machines]
         } else {
@@ -1855,7 +1805,11 @@ proc ::cluster::parse { fname args } {
         log DEBUG "Masters are: [join $masters ,\ ]"
     }
     
-    return [dict create -machines $vms -options $options -networks $networks]
+    return [dict create \
+                    -machines $vms \
+                    -options $options \
+                    -networks $networks \
+                    -applications $apps]
 }
 
 
@@ -1947,50 +1901,6 @@ proc ::cluster::candidates { {dir .} } {
 #
 ####################################################################
 
-# ::cluster::LogLevel -- Convert log levels
-#
-#       For convenience, log levels can also be expressed using
-#       human-readable strings.  This procedure will convert from this
-#       format to the internal integer format.
-#
-# Arguments:
-#        lvl        Log level (integer or string).
-#
-# Results:
-#       Log level in integer format, -1 if it could not be converted.
-#
-# Side Effects:
-#       None.
-proc ::cluster::LogLevel { lvl } {
-    if { ![string is integer $lvl] } {
-        foreach {l str} $vars::verboseTags {
-            if { [string match -nocase $str $lvl] } {
-                return $l
-            }
-        }
-        return -1
-    }
-    return $lvl
-}
-
-
-proc ::cluster::Log? { { lvl "" } { intlvl_ ""} } {
-    # Convert current module level from string to integer.
-    set current [LogLevel ${vars::-verbose}]
-    
-    # Either return current log level or if we should log.
-    if { $lvl eq "" } {
-        return $current
-    } else {
-        if { $intlvl_ ne "" } {
-            upvar $intlvl_ intlvl
-        }
-        # Convert incoming level from string to integer.
-        set intlvl [LogLevel $lvl]
-        return [expr {$current >= $intlvl}]
-    }
-    return -1
-}
 
 
 # ::cluster::StorageDir -- Path to machine storage cache
@@ -2018,34 +1928,6 @@ proc ::cluster::StorageDir { yaml } {
     }
     
     return [file normalize $dir]
-}
-
-
-# ::cluster::+ -- Implements ANSI colouring codes.
-#
-#       Output ANSI colouring codes, inspired by wiki code at
-#       http://wiki.tcl.tk/1143.
-#
-# Arguments:
-#        args        List of colouring and effects to apply
-#
-# Results:
-#       Return coding escape.
-#
-# Side Effects:
-#       None.
-proc ::cluster::+ { args } {
-    set map {
-        normal 0 bold 1 light 2 blink 5 invert 7
-        black 30 red 31 green 32 yellow 33 blue 34 purple 35 cyan 36 white 37
-        Black 40 Red 41 Green 42 Yellow 43 Blue 44 Purple 45 Cyan 46 White 47
-    }
-    set t 0
-    foreach i $args {
-        set ix [lsearch -exact $map $i]
-        if {$ix>-1} {lappend t [lindex $map [incr ix]]}
-    }
-    return "\033\[[join $t {;}]m"
 }
 
 
@@ -2101,7 +1983,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             kvm --kvm-memory
         }
         if { [info exist MOPT($driver)] } {
-            lappend cmd $MOPT($driver) [Convert [dict get $vm -memory] MiB MiB]
+            lappend cmd $MOPT($driver) [utils convert [dict get $vm -memory] MiB MiB]
         } else {
             log WARN "Cannot set memory size for driver $driver!"
         }
@@ -2141,7 +2023,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
         foreach { p opt mult } $SOPT {
             if { $driver eq $p } {
                 lappend cmd $opt \
-                        [expr {[Convert [dict get $vm -size] MB MB]*$mult}]
+                        [expr {[utils convert [dict get $vm -size] MB MB]*$mult}]
                 set found 1
                 break
             }
@@ -2264,9 +2146,9 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
 proc ::cluster::Attach { vm args } {
     global env;   # Access program environment.
     
-    set swarm [getopt args -swarm]
-    set force [getopt args -force]
-    set external [getopt args -external]
+    set swarm [utils getopt args -swarm]
+    set force [utils getopt args -force]
+    set external [utils getopt args -external]
     
     if { $external } {
         set nm $vm
@@ -2478,8 +2360,8 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
             if { [file exists $src_path] } {
                 set rootname [file rootname [file tail $f]]
                 set ext [file extension $f]
-                set tmp_fpath [Temporary \
-                        [file join [TempDir] $rootname]]$ext
+                set tmp_fpath [utils temporary \
+                        [file join [utils tmpdir] $rootname]]$ext
                 log INFO "Copying a resolved version of $src_path to\
                         $tmp_fpath"
                 set in_fd [open $src_path]
@@ -2530,7 +2412,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
         # Copy resolved result to temporary file
         set projdirname [file tail [file dirname $fpath]]
         set projname [file rootname [file tail $fpath]]
-        set tmp_fpath [Temporary [file join [TempDir] $projname]].yml
+        set tmp_fpath [utils temporary [file join [utils tmpdir] $projname]].yml
         set fd [open $tmp_fpath w]
         puts -nonewline $fd $yaml
         close $fd
@@ -2582,7 +2464,7 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     # Cleanup files in temporaries list.
     if { $substitution < 2 && [llength $temporaries] > 0 } {
         log INFO "Cleaning up [llength $temporaries] temporary file(s)\
-                from [TempDir]"
+                from [utils tmpdir]"
         foreach tmp_fpath $temporaries {
             file delete -force -- $tmp_fpath
         }
@@ -2772,10 +2654,10 @@ proc ::cluster::Exec { vm args } {
             set cargs [dict get $exe args]
         }
         
-        set remotely [DGet $exe remote 0]
-        set copy [DGet $exe copy 1]
-        set keep [DGet $exe keep 0]
-        set sudo [DGet $exe sudo 0]
+        set remotely [utils dget $exe remote 0]
+        set copy [utils dget $exe copy 1]
+        set keep [utils dget $exe keep 0]
+        set sudo [utils dget $exe sudo 0]
         
         # Resolve using initial location of YAML description file
         set cmd ""
@@ -2792,7 +2674,7 @@ proc ::cluster::Exec { vm args } {
                     # Dump to temporary location
                     set rootname [file rootname [file tail $fpath]]
                     set ext [file extension $fpath]
-                    set tmp_fpath [Temporary [file join [TempDir] $rootname]]$ext
+                    set tmp_fpath [utils temporary [file join [utils tmpdir] $rootname]]$ext
                     set fd [open $tmp_fpath w]
                     puts -nonewline $fd $dta
                     close $fd
@@ -2810,7 +2692,7 @@ proc ::cluster::Exec { vm args } {
         
         if { $cmd ne "" } {
             if { $remotely } {
-                set dst [Temporary [file join /tmp [file tail $fpath]]]
+                set dst [utils temporary [file join /tmp [file tail $fpath]]]
                 SCopy $vm $cmd $dst recurse off mode a+x
                 log NOTICE "Executing $fpath remotely (args: $cargs)"
                 if { $sudo } {
@@ -2934,116 +2816,6 @@ proc ::cluster::Discovery { vm } {
 
 
 
-
-# ::cluster::LogTerminal -- Create log line for terminal output
-#
-#       Pretty print a log message for output on the terminal.  This
-#       will use ANSI colour codings to improve readability (and will
-#       omit the timestamps).
-#
-# Arguments:
-#        lvl     Log level (an integer)
-#        msg     Log message
-#
-# Results:
-#       Line to output on terminal
-#
-# Side Effects:
-#       None.
-proc ::cluster::LogTerminal { lvl msg } {
-    # Format the tagger so that they all have the same size,
-    # i.e. the size of the longest level (in words)
-    array set TAGGER $vars::verboseTags
-    if { [info exists TAGGER($lvl)] } {
-        set lbl [format %.6s "$TAGGER($lvl)        "]
-    } else {
-        set lbl [format %.6s "$lvl        "]
-    }
-    # Start by appending a human-readable level, using colors to
-    # rank the levels. (see the + procedure below)
-    set line "\["
-    array set LABELER { 3 yellow 2 red 1 purple 4 blue 6 light }
-    if { [info exists LABELER($lvl)] } {
-        append line [+ $LABELER($lvl)]$lbl[+ normal]
-    } else {
-        append line $lbl
-    }
-    append line "\] "
-    # Append the message itself, colorised again
-    array set COLORISER { 3 yellow 2 red 1 purple 4 bold 6 light }
-    if { [info exists COLORISER($lvl)] } {
-        append line [+ $COLORISER($lvl)]$msg[+ normal]
-    } else {
-        append line $msg
-    }
-    
-    return $line
-}
-
-
-# ::cluster::LogTerminal -- Create log line for file output
-#
-#       Pretty print a log message for output to a file descriptor.
-#       This will add a timestamp to ease future introspection.
-#
-# Arguments:
-#        lvl        Log level (an integer)
-#        msg     Log message
-#
-# Results:
-#       Line to output on file
-#
-# Side Effects:
-#       None.
-proc ::cluster::LogStandard { lvl msg } {
-    array set TAGGER $vars::verboseTags
-    if { [info exists TAGGER($lvl)] } {
-        set lbl $TAGGER($lvl)
-    } else {
-        set lbl $lvl
-    }
-    set dt [clock format [clock seconds] -format ${vars::-date}]
-    return "\[$dt\] \[$lbl\] $msg"
-}
-
-
-# ::cluster::Temporary -- Temporary name
-#
-#       Generate a rather unique temporary name (to be used, for
-#       example, when creating temporary files). The procedure only keep
-#       worthwhile characters, trying to ensure minimal problems when it comes
-#       to file paths.
-#
-# Arguments:
-#        pfx        Prefix before unicity taggers
-#
-# Results:
-#       A string that is made unique through the process identifier
-#       and some randomness.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Temporary { pfx } {
-    set dirname [file dirname $pfx]
-    set fname [file tail $pfx]
-    
-    set nm ""
-    set allowed [split $vars::fpathCharacters ""]
-    foreach c [split $fname ""] {
-        if { [lsearch $allowed $c] >= 0 } {
-            append nm $c
-        } else {
-            append nm "-"
-        }
-    }
-    if { $dirname eq "." || $dirname eq "" } {
-        return ${nm}-[pid]-[expr {int(rand()*1000)}]
-    } else {
-        return [file join $dirname ${nm}-[pid]-[expr {int(rand()*1000)}]]
-    }
-}
-
-
 # ::cluster::CacheFile -- Good name for a cache file
 #
 #       Generates a dotted (therefor hidden) filename to use for
@@ -3104,72 +2876,6 @@ proc ::cluster::NameCmp { name nm {op equal}} {
     return 0
 }
 
-
-
-# ::cluster::Convert -- SI multiples converter
-#
-#       This procedure will convert sizes (memory or disk) to a target
-#       unit.  The incoming size specification is either a floating
-#       point (see below for value) or a floating point followed by a
-#       unit specifier, e.g. 10k to express 10 kilobytes.  The unit
-#       specifier is case independent and the conversion will
-#       understand both k, kB or KB.  Recognised are multipliers up to
-#       yottabyte, e.g. the leading letters (in order!): b (bytes), k,
-#       m, g, t, p, e, z, y.  When the incoming size, its default unit
-#       can be specified, in which case this is one of the unit string
-#       as described before.  If a returning unit is specified, then it
-#       is a unit string as described before and describes the unit of
-#       the returned value.
-#
-# Arguments:
-#	spec	Size specification, e.g. 1345, 34k or 20MB.
-#	dft	Default Unit of size spec when unspecified, e.g. k, GB, etc.
-#	unit	Unit of converted returned value, e.g. k, GB or similar.
-#
-# Results:
-#       The converted value in the requested SI unit, or an error.
-#
-# Side Effects:
-#       None.
-proc ::cluster::Convert { spec {dft ""} { unit "" } { precision "%.01f"} } {
-    # Extract value and first letter of unit specification from
-    # string.
-    set len [scan $spec "%f %c" val ustart]
-    
-    # Convert incoming string to number of bytes in metric format,
-    # see: http://en.wikipedia.org/wiki/Gigabyte
-    if { $len == 2 } {
-        set i [string first [format %c $ustart] $spec]
-        set m [Multiplier [string range $spec $i end]]
-        set val [expr {$val*$m}]
-    } else {
-        if { $dft ne "" } {
-            set m [Multiplier $dft]
-            set val [expr {$val*$m}]
-        }
-    }
-    
-    # Now convert back to the requested size
-    if { $unit ne "" } {
-        set m [Multiplier $unit]
-        set val [expr {$val/$m}]
-    }
-    if { [string match "*.0" $val] } {
-        return [expr {int($val)}]
-    }
-    return [format $precision $val]
-}
-
-
-proc ::cluster::Multiplier { unit } {
-    foreach {rx m} $vars::converters {
-        if { [regexp -nocase -- $rx $unit] } {
-            return $m
-        }
-    }
-    
-    return -code error "$unit is not a recognised multiple of bytes"
-}
 
 
 # ::cluster::Wait -- Wait for state
@@ -3268,27 +2974,6 @@ proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
 }
 
 
-# ::cluster::DGet -- get or default from dictionary
-#
-#       Get the value of a key from a dictionary, returning a default value if
-#       the key does not exist in the dictionary.
-#
-# Arguments:
-#       d       Dictionary to get from
-#       key     Key in dictionary to query
-#       default	Default value to return when key does not exist
-#
-# Results:
-#       Value of key in dictionary, or default value if it does not exist.
-#
-# Side Effects:
-#       Copy the file using scp
-proc ::cluster::DGet { d key { default "" } } {
-    if { [dict exists $d $key] } {
-        return [dict get $d $key]
-    }
-    return $default
-}
 
 
 # ::cluster::SCopy -- scp to machine
@@ -3314,7 +2999,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     }
     
     set elevation ""
-    if { [DGet $args sudo off] } {
+    if { [utils dget $args sudo off] } {
         set elevation sudo
     }
     
@@ -3335,7 +3020,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     # at the remote host!
     if { $elevation eq "sudo" } {        
         set d_real $d_fname
-        set d_fname [string trimright [Temporary /tmp/scp] /]/
+        set d_fname [string trimright [utils temporary /tmp/scp] /]/
         log INFO "Performing copy through temporary directory $d_fname"
         tooling machine -- -s [storage $vm] ssh $nm mkdir -p $d_fname
     }
@@ -3378,7 +3063,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
         set opts [list]
 
         # Recursion is auto or a boolean
-        set recursion [DGet $args recurse auto]
+        set recursion [utils dget $args recurse auto]
         if { $recursion eq "auto" } {
             set recursion [file isdirectory $src]
         }
@@ -3387,7 +3072,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
         }
         
         # Delta for rsync-helped copy
-        if { [DGet $args delta off] } {
+        if { [utils dget $args delta off] } {
             lappend opts -d
         }
         
@@ -3402,19 +3087,19 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
         }
 
         # chmod        
-        set mode [DGet $args mode]
+        set mode [utils dget $args mode]
         if { $mode ne "" } {
             tooling machine -stderr -- -s $storage ssh $nm chmod {*}$opts $mode $d_fname
         }
         
         # chown
-        set owner [DGet $args owner]
+        set owner [utils dget $args owner]
         if { $owner ne "" } {
             tooling machine -stderr -- -s $storage ssh $nm chown {*}$opts $owner $d_fname
         }
         
         # chgrp
-        set group [DGet $args group]
+        set group [utils dget $args group]
         if { $group ne "" } {
             tooling machine -stderr -- -s $storage ssh $nm chgrp {*}$opts $group $d_fname
         }
@@ -3543,38 +3228,6 @@ proc ::cluster::AbsolutePath { vm fpath { native 0 } } {
     }
     
     return $fpath
-}
-
-
-proc ::cluster::TempDir {} {
-    if { ${vars::-tmp} ne "" } {
-        return ${vars::-tmp}
-    }
-    
-    if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
-        set resolutions [list USERPROFILE AppData/Local/Temp \
-                windir TEMP \
-                SystemRoot TEMP \
-                TEMP "" TMP "" \
-                "" "C:/TEMP" "" "C:/TMP" "" "C:/"]
-    } else {
-        set resolutions [list TMP "" "" /tmp]
-    }
-    
-    foreach { var subdir }  $resolutions {
-        set dir ""
-        if { $var eq "" } {
-            set dir $subdir
-        } elseif { [info exists ::env($var)] && [set ::env($var)] ne "" } {
-            set dir [file join [set ::env($var)] $subdir]
-        }
-        if { $dir ne "" && [file isdirectory $dir] } {
-            log TRACE "Using $dir as a temporary directory"
-            return $dir
-        }
-    }
-    
-    return [cwd]
 }
 
 

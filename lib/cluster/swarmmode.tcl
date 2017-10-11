@@ -12,6 +12,7 @@
 
 package require cluster::tooling
 package require cluster::extend
+package require cluster::utils
 package require huddle;           # To parse and operate on stack files
 
 namespace eval ::cluster::swarmmode {
@@ -34,9 +35,8 @@ namespace eval ::cluster::swarmmode {
     namespace import [namespace parent]::Machines \
                         [namespace parent]::IsRunning \
                         [namespace parent]::CacheFile \
-                        [namespace parent]::AbsolutePath \
-                        [namespace parent]::Temporary \
-                        [namespace parent]::TempDir
+                        [namespace parent]::AbsolutePath
+    namespace import [namespace parent]::utils::log
 }
 
 
@@ -361,8 +361,8 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                 # Start by detecting the compose file that is used for
                 # deployment.
                 set fname ""
-                if { ![getopt args -c fname] } {
-                    getopt args --compose-file fname
+                if { ![utils getopt args -c fname] } {
+                    utils getopt args --compose-file fname
                 }
                 
                 if { $fname ne "" } {
@@ -378,7 +378,7 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                         # compose file to make this something we can easily
                         # understand and debug in.
                         set dirbase [file tail [file dirname $c_fname]]-[file rootname [file tail $c_fname]]
-                        set tmp_dirname [Temporary [file join [TempDir] $dirbase]]
+                        set tmp_dirname [utils temporary [file join [utils tmpdir] $dirbase]]
                         log INFO "Temporarily copying all files included by $c_fname to $nm in $tmp_dirname"
                         tooling machine -stderr -- -s [storage $mgr] ssh $nm mkdir -p $tmp_dirname
                         
@@ -428,7 +428,7 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
 
                         # Now create local temporary file to host manipulated
                         # content in and copy it to the remote host.
-                        set tmp_fname [Temporary [file join [TempDir] [file rootname [file tail $c_fname]].yml]]
+                        set tmp_fname [utils temporary [file join [utils tmpdir] [file rootname [file tail $c_fname]].yml]]
                         log INFO "Linearising content into $tmp_fname"                        
                         set yaml [extend huddle2yaml $hdl]                        
                         if { [catch {open $tmp_fname w} ofd] } {
@@ -541,7 +541,7 @@ proc ::cluster::swarmmode::SCopy { mgr dir fname tmp_dirname } {
     set nm [dict get $mgr -name]
     set src_fname [file join $dir $fname]
     if { [file exists $src_fname] } {
-        set dst_fname [Temporary [file join $tmp_dirname [file rootname [file tail $fname]]]]
+        set dst_fname [utils temporary [file join $tmp_dirname [file rootname [file tail $fname]]]]
         tooling machine -stderr -- -s [storage $mgr] scp $src_fname ${nm}:$dst_fname
         return $dst_fname
     } else {

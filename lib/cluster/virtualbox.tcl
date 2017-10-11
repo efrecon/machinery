@@ -10,6 +10,8 @@
 ##################
 
 package require cluster::tooling
+package require cluster::utils
+
 namespace eval ::cluster::virtualbox {
     # Encapsulates variables global to this namespace under their own
     # namespace, an idea originating from http://wiki.tcl.tk/1489.
@@ -21,6 +23,7 @@ namespace eval ::cluster::virtualbox {
     }
     namespace export {[a-z]*}
     namespace path [namespace parent]
+    namespace import [namespace parent]::utils::log
 }
 
 
@@ -135,7 +138,7 @@ proc ::cluster::virtualbox::addshare { vm path } {
             halt $vm
         }
         # Generate a unique name and add the share
-        set nm [[namespace parent]::Temporary [file tail $path]]
+        set nm [utils temporary [file tail $path]]
         log INFO "Adding share ${vm}:${nm} for localhost:$path"
         Manage sharedfolder add $vm \
             --name $nm \

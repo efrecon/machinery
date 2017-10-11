@@ -13,6 +13,7 @@
 
 package require cluster::environment
 package require cluster::tooling
+package require cluster::utils
 
 namespace eval ::cluster::unix {
     namespace eval vars {
@@ -26,6 +27,7 @@ namespace eval ::cluster::unix {
     namespace export {[a-z]*}
     namespace path [namespace parent]
     namespace ensemble create -command ::unix
+    namespace import [namespace parent]::utils::log
 }
 
 

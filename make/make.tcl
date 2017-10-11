@@ -14,6 +14,7 @@ set rootdir [file join $dirname ..]
 
 lappend auto_path [file join $rootdir lib]
 package require cluster;    # So we can call Run...
+package require cluster::utils
 cluster defaults -verbose INFO
 
 # Quick options parsing, accepting several times -target
@@ -109,7 +110,7 @@ cluster log NOTICE "Getting tcllib v$tcllib_ver from github mirror"
 set gver [string map [list . _] $tcllib_ver]
 set url https://github.com/tcltk/tcllib/archive/tcllib_$gver.tar.gz
 set tok [::http::geturl_followRedirects $url -binary on]
-set tcllib_path [::cluster::Temporary tcllib].tar.gz
+set tcllib_path [utils temporary tcllib].tar.gz
 if { [::http::ncode $tok] == 200 } {
     # Copy content of file to file, we can't use -channel as the
     # procedure to follow redirects cannot rewind on file descriptor

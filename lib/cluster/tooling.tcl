@@ -1,4 +1,5 @@
 package require cluster::vcompare
+package require cluster::utils
 
 namespace eval ::cluster::tooling {
     # Encapsulates variables global to this namespace under their own
@@ -28,38 +29,7 @@ namespace eval ::cluster::tooling {
     namespace export {[a-z]*}
     namespace path [namespace parent]
     namespace ensemble create -command ::tooling
-    namespace import [namespace parent]::Log?
-}
-
-# ::cluster::tooling::defaults -- Set/get default parameters
-#
-#       This procedure takes an even list of keys and values used to
-#       set the values of the options supported by the library.  The
-#       list of options is composed of all variables starting with a
-#       dash in the vars sub-namespace.  In the list, the dash
-#       preceding the key is optional.
-#
-# Arguments:
-#        args        List of key and values to set for module options.
-#
-# Results:
-#       A dictionary with all current keys and their values
-#
-# Side Effects:
-#       None.
-proc ::cluster::tooling::defaults { {args {}}} {
-    foreach {k v} $args {
-        set k -[string trimleft $k -]
-        if { [info exists vars::$k] } {
-            set vars::$k $v
-        }
-    }
-        
-    set state {}
-    foreach v [info vars vars::-*] {
-        lappend state [lindex [split $v ":"] end] [set $v]
-    }
-    return $state
+    namespace import [namespace parent]::utils::log
 }
 
 
@@ -165,7 +135,7 @@ proc ::cluster::tooling::docker { args } {
     }
     
     # Put docker in debug mode when we are ourselves at debug level.
-    if { [Log?] >= 7 } {
+    if { [utils outlog] >= 7 } {
         set args [linsert $args 0 --debug]
     }
     if { [string is true ${vars::-sticky}] } {
@@ -220,7 +190,7 @@ proc ::cluster::tooling::compose { args } {
     }
     
     # Put docker in debug mode when we are ourselves at debug level.
-    if { [Log?] >= 7 } {
+    if { [utils outlog] >= 7 } {
         set args [linsert $args 0 --verbose]
     }
     return [eval run $opts -- [auto_execok ${vars::-compose}] $args]
@@ -257,7 +227,7 @@ proc ::cluster::tooling::machine { args } {
     
     # Put docker-machine in debug mode when we are ourselves at debug
     # level.
-    if { [Log?] >= 7 } {
+    if { [utils outlog] >= 7 } {
         set args [linsert $args 0 --debug]
     }
     if { 0 && [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
@@ -316,10 +286,10 @@ proc ::cluster::tooling::run { args } {
     # pipe.  As we want to capture output of the command, we will be
     # using the Tcl command "open" with a file path that starts with a
     # "|" sign.
-    set CMD(keep) [getopt opts -keepblanks]
-    set CMD(back) [getopt opts -return]
-    set CMD(outerr) [getopt opts -stderr]
-    set CMD(relay) [getopt opts -raw]
+    set CMD(keep) [utils getopt opts -keepblanks]
+    set CMD(back) [utils getopt opts -return]
+    set CMD(outerr) [utils getopt opts -stderr]
+    set CMD(relay) [utils getopt opts -raw]
     set CMD(done) 0
     set CMD(result) {}
     

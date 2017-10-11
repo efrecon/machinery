@@ -1,3 +1,5 @@
+package require cluster::utils
+
 namespace eval ::cluster::swarm {
     # Encapsulates variables global to this namespace under their own
     # namespace, an idea originating from http://wiki.tcl.tk/1489.
@@ -26,6 +28,7 @@ namespace eval ::cluster::swarm {
             [namespace parent]::Detach \
             [namespace parent]::Create \
             [namespace parent]::CacheFile
+    namespace import [namespace parent]::utils::log
 }
 
 
@@ -168,7 +171,7 @@ proc ::cluster::swarm::Token { {driver none} } {
         set token [tooling docker -return -- run --rm swarm create]
         log NOTICE "Created cluster token $token"
     } else {
-        set nm [Temporary "tokeniser"]
+        set nm [utils temporary "tokeniser"]
         log NOTICE "Creating machine $nm for token creation"
         set vm [dict create -name $nm -driver $driver]
         if { [Create $vm] ne "" } {

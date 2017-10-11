@@ -10,6 +10,8 @@
 ##
 ##################
 
+package require cluster::utils
+
 namespace eval ::cluster::vcompare {
     namespace eval vars {
         variable -depth   8
@@ -17,6 +19,7 @@ namespace eval ::cluster::vcompare {
     namespace export {[a-z]*}
     namespace path [namespace parent]
     namespace ensemble create -command ::vcompare
+    namespace import [namespace parent]::utils::log
 }
 
 

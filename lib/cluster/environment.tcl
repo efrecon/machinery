@@ -1,3 +1,5 @@
+package require cluster::utils
+
 namespace eval ::cluster::environment {
     # Encapsulates variables global to this namespace under their own
     # namespace, an idea originating from http://wiki.tcl.tk/1489.
@@ -18,7 +20,8 @@ namespace eval ::cluster::environment {
     namespace export {[a-z]*}
     namespace path [namespace parent]
     namespace ensemble create -command ::environment
-    namespace import [namespace parent]::CacheFile
+    namespace import [namespace parent]::CacheFile \
+                        [namespace parent]::utils::log
 }
 
 
