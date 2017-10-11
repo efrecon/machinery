@@ -294,6 +294,20 @@ proc ::cluster::swarmmode::network { masters cmd net } {
 }
 
 
+# ::cluster::swarmmode::node -- pure docker node relay
+#
+#      Relays docker node command randomly to one of the masters.
+#
+# Arguments:
+#      masters  List of masters
+#      cmd      docker node sub-command to relay
+#      args     Arguments to sub-command
+#
+# Results:
+#      None.
+#
+# Side Effects:
+#      Calls docker node on one of the masters and relays its output.
 proc ::cluster::swarmmode::node { masters cmd args } {
     # Pick a manager to use for stack operations
     set managers [Managers $masters]
@@ -308,6 +322,27 @@ proc ::cluster::swarmmode::node { masters cmd args } {
 }
 
 
+# ::cluster::swarmmode::stack -- docker stack relay
+#
+#      Relays docker stack command randomly to one of the masters. Most
+#      sub-commands are blindly relayed to the elected master for execution, but
+#      deploy goes through some extra processing. First, this implementatio will
+#      linearise the YAML content so that it is still possible to use 'extends'
+#      constructs (from v2 format) in v3 format. Secondly all files that are
+#      pointed at by the compose file will be copied to the manager. Finally,
+#      the YAML file for deployment is sent over, but modified in order to point
+#      at the local copies of the depending files.
+#
+# Arguments:
+#      masters  List of masters
+#      cmd      docker stack sub-command to relay
+#      args     Arguments to sub-command
+#
+# Results:
+#      None.
+#
+# Side Effects:
+#      Calls docker stack on one of the masters and relays its output.
 proc ::cluster::swarmmode::stack { masters cmd args } {
     # Pick a manager to use for stack operations
     set managers [Managers $masters]
@@ -440,6 +475,28 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
 ####################################################################
 
 
+# ::cluster::swarmmode::Inline -- Huddle inlining
+#
+#      Detects if a main key in the huddle representation of a YAML file
+#      contains a specific subkey (defaults to 'file'). Whenver that sub-key
+#      exists, the file that it points at is copied to a swarm manager and the
+#      huddle representation is modified so as to point at the path to the copy
+#      at the manager.
+#
+# Arguments:
+#      mgr         Representation of the manager machine
+#      hdl_        Huddle representation to look into and possibly modify
+#      mainkey     Main key to address
+#      dir         Local directory hosting the file
+#      fname       Name of file source of the huddle representation
+#      tmp_dirname Name of the remote directory at the manager where to copy files to
+#      subkey      Children key to enquire and possibly modify in huddle representation
+#
+# Results:
+#      None.
+#
+# Side Effects:
+#      Modifies the huddle representation so that it points at the remote file instead
 proc ::cluster::swarmmode::Inline { mgr hdl_ mainkey dir fname tmp_dirname { subkey "file" } } {
     upvar $hdl_ hdl
 
@@ -463,6 +520,23 @@ proc ::cluster::swarmmode::Inline { mgr hdl_ mainkey dir fname tmp_dirname { sub
 }
 
 
+# ::cluster::swarmmode::SCopy -- Temporary manager file copy
+#
+#      Copy a file to a manager within a dedicated directory. A temporary name
+#      for the destination file will be generated in a way that makes it easy to
+#      detect the name of the source file.
+#
+# Arguments:
+#      mgr         Representation of the manager machine
+#      dir         Local directory hosting the file
+#      fname       Name of file to copy
+#      tmp_dirname Name of the remote directory at the manager where to copy files to
+#
+# Results:
+#      The full path to the remote copy or an empty string on errors.
+#
+# Side Effects:
+#      None.
 proc ::cluster::swarmmode::SCopy { mgr dir fname tmp_dirname } {
     set nm [dict get $mgr -name]
     set src_fname [file join $dir $fname]
@@ -760,4 +834,4 @@ proc ::cluster::swarmmode::TokenGet { vm mode } {
 }
 
 
-package provide cluster::swarmmode 0.2
+package provide cluster::swarmmode 0.3
