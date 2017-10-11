@@ -1788,8 +1788,9 @@ proc ::cluster::parse { fname args } {
         }        
     }
 
-    set master ""    
     set vms {}
+    set masters [list]
+    set clustering [dict get $options -clustering]
     dict for {m keys} $machines {
         # Create vm "object" with proper name, i.e. using the prefix.
         # We also make sure that we keep a reference to the name of
@@ -1801,24 +1802,25 @@ proc ::cluster::parse { fname args } {
         }
         
         # Check validity of keys and insert them as dash-led.  Arrange
-        # for one master only and store fully-qualified aliases for
-        # the machine.
+        # for one master only in old docker swarm mode and store fully-qualified
+        # aliases for the machine.
         dict for {k v} $keys {
             if { [lsearch ${vars::-keys} $k] < 0 } {
                 log WARN "In $m, key $k is not recognised!"
             } else {
-                dict set vm -$k $v
-                # Prevent several masters when using old "Docker Swarm", in
-                # swarm mode there might be several master (managers).
-                if { [string match -nocase "docker*swarm" \
-                      [dict get $options -clustering]] && $k eq "master" } {
-                    if { $master eq "" } {
-                        set master [dict get $vm -name]
-                    } else {
-                        if { [string is true [dict get $vm -master]] } {
+                dict set vm -[string trimleft $k -] $v
+                if { [string trimleft $k -] eq "master" } {
+                    if { [dict get $vm -master] } {
+                        lappend masters [dict get $vm -name]
+                        # Prevent several masters when using old "Docker Swarm",
+                        # in swarm mode there might be several master
+                        # (managers).
+                        if { [string match -nocase "docker*swarm" $clustering] \
+                                && [llength $masters] > 0 } {
                             log WARN "There can only be one master,\
-                                      keeping $master as the master"
+                                      keeping [lindex $masters 0] as the master"
                             dict set vm -master 0
+                            set masters [lrange $masters 0 0]
                         }
                     }
                 }
@@ -1843,6 +1845,14 @@ proc ::cluster::parse { fname args } {
         }
         
         lappend vms $vm
+    }
+    
+    # Check that there is at least one master in the file that we have
+    # parsed.
+    if { [llength $masters] == 0 } {
+        log WARN "Cluster file at $fname has no master!"
+    } else {
+        log DEBUG "Masters are: [join $masters ,\ ]"
     }
     
     return [dict create -machines $vms -options $options -networks $networks]
