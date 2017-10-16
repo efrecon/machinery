@@ -49,7 +49,7 @@ namespace eval ::cluster::utils {
 }
 
 
-# ::cluster::tooling::defaults -- Set/get default parameters
+# ::cluster::utils::defaults -- Set/get default parameters
 #
 #       This procedure takes an even list of keys and values used to
 #       set the values of the options supported by the library.  The
@@ -82,7 +82,7 @@ proc ::cluster::utils::defaults { ns {args {}}} {
 }
 
 
-# ::cluster::getopt -- Quick and Dirty Options Parser
+# ::cluster::utils::getopt -- Quick and Dirty Options Parser
 #
 #       Parses options, code comes from wiki.  Once parsed, an option
 #       (and its argument) are removed from the argument list.
