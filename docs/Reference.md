@@ -1,24 +1,29 @@
 # machinery
 
-`machinery` is a command-line tool to operate on a whole cluster of [Docker
-Machine](https://docs.docker.com/machine/) virtual machines. `machinery` uses a
-YAML definition of the whole cluster to create machines, bring them up or down,
-or remove them at will. In short, `machinery` is to `docker-machine` what
-`docker-compose` is to `docker`. In addition, `machinery` provides [Docker
-Swarm](https://docs.docker.com/swarm/) and
-[Compose](https://docs.docker.com/compose/) integration. It will automatically
-arrange for the created virtual machines to join the swarm cluster, generate the
-token as needed or even manage the life-cycle of several compose projects to be
-run on the cluster. `machinery` can automatically bring up specific project
+`machinery` is a command-line tool to operate on a whole cluster of
+[Docker Machine] virtual or bare-metal machines. `machinery` uses a YAML
+definition of the whole cluster to create machines, bring them up or down,
+remove them at will and create (overlay) networks to be used across deployed
+containers. In short, `machinery` is to `docker-machine` what `docker-compose`
+is to `docker`. In addition, `machinery` provides [Docker Swarm] and
+[Swarm Mode], and [Docker Compose] integration. It will automatically arrange
+for the created virtual machines to join the swarm cluster, generate the
+token(s) as needed or even manage the life-cycle of several compose projects to
+be run on the cluster. `machinery` can automatically bring up specific project
 files onto machines that it controls. `machinery` is able to substitute the
 value of local environment variables in the compose project files before
-bringing the components up.  Together with conventions for the dynamic
+bringing the components up. Together with conventions for the dynamic
 construction of network-related environment variables, this provides for a
 simple mechanism for service discovery.
 
 `machinery` has been thoroughly tested on Linux, but is also able to run on
 Windows, in the shell of the Docker
 [Toolbox](https://www.docker.com/products/docker-toolbox).
+
+  [Docker Machine]: https://docs.docker.com/machine/
+  [Docker Swarm]: https://docs.docker.com/swarm/
+  [Swarm Mode]: https://docs.docker.com/engine/swarm
+  [Docker Compose]: https://docs.docker.com/compose/
 
 ## Command-Line API
 
@@ -56,6 +61,10 @@ networking information for all the machines of the cluster ([see
 below](#netinfo)).  This file will have the same root name as the
 cluster YAML file, but with a leading `.` to hide it and the extension
 `.env` (see `env` [command description](#env)).
+
+When using v2 of the file format, any network that has not been created but has
+been declared as part of the YAML description will be created whenever a manager
+machine is created or brought up.
 
 #### halt
 
@@ -130,16 +139,40 @@ components.  The supported options are:
   where `k` is the name of a YAML indirection directive, such as
   `substitution` or `project` and where `v` is the overriding value. 
 
+#### stack
+
+The command `stack` only works with the new [Swarm Mode]. The command will pick
+one of the existing running managers and deploy or operate further on stacks.
+After the commands comes one of the sub-commands that are otherwise accepted by
+`docker stack`. When the path to a compose file format is provided (through the
+`-c` option for example), it is understood as relative to the current machinery
+YAML file. All files that are pointed at by the compose file will automatically
+be transferred to the remote manager so that the manager is able to find these
+files at deployment time. In addition, deployment is able to understand
+old-style v2 `extends` directives even as part of the v3 file format. Even
+though this is not compatible, this departure provides with the flexibility that
+has been requested by many.
+
+
+#### node
+
+The command `node` only works with the new [Swarm Mode]. The command will pick
+one of the existing running managers and operate further on nodes as seen by the
+manager. After the commands comes one of the sub-commands that are otherwise
+accepted by `docker node` and the command and all its arguments are sent further
+to the manager that had been randomly selected.
+
+
 #### token
 
-The command `token` will (re)generate a swarm token for cluster.  Cluster tokens
-are cached in hidden files in the same directory as the YAML file that was used
-to describe the cluster.  These files will have the same root name as the
-cluster YAML file, but with a leading `.` to hide them and the extension `.tkn`.
-`machinery token` will print out the token on the standard output, which eases
-further automation.  If a token for the cluster can be found in the cache, it
-will be returned directly.  To force regeneration of the token, you can specify
-the option `-force` to the command.
+The command `token` will (re)generate a [Docker Swarm] token for cluster.
+Cluster tokens are cached in hidden files in the same directory as the YAML file
+that was used to describe the cluster. These files will have the same root name
+as the cluster YAML file, but with a leading `.` to hide them and the extension
+`.tkn`. `machinery token` will print out the token on the standard output, which
+eases further automation. If a token for the cluster can be found in the cache,
+it will be returned directly. To force regeneration of the token, you can
+specify the option `-force` to the command.
 
 Whenever a token needs to be generated, `machinery` will run `swarm create` in a
 component on the local machine.  The component is automatically removed once the
@@ -493,34 +526,50 @@ directory.
 
 ## YAML Specification
 
-Clusters are described using a YAML definition file.  These files
-should contain a list of YAML dictionaries, where each key should be
-the name of a virtual machine within that cluster.  Note that, as
-described before, `machinery` will prepend the rootname of the YAML
-file to the virtual machine in `docker-machine` in most cases. For
-each VM-specifying dictionary, `machinery` recognises a number of keys
-as described below:
+Clusters are described using a YAML definition file. There are two versions of
+this file format. When no version is specified, the old v1 is assumed and
+`machinery` will default to [Docker Swarm]. When a toplevel key called version
+exists and contains a version number greater than `2`, the file is considered to
+be in the new file format and `machinery` will default to creating new
+[Swarm Mode] clusters.
 
-### `driver`
+In the new file format, a toplevel key called `machines` should contain a list
+of YAML dictionaries, where each key should be the name of a virtual machine
+within that cluster. In the old file format, virtual machine names are toplevel
+keys instead. Note that, as described before, `machinery` will prepend
+the rootname of the YAML file to the virtual machine in `docker-machine` in most
+cases. For each VM-specifying dictionary, `machinery` recognises a number of
+keys as described below:
+
+### `machines`
+
+The machines top-level key, introduced in v2 contains a list of machines. In v1,
+these names are at the top-level of the YAML hierarchy instead. The following
+keys are allowed in machine descriptions:
+
+#### `driver`
 
 The value of `driver` should be the `docker-machine` driver to be used
 when creating the machine.  If none is provided, the driver that is
 specified at the command-line under the option `-driver` will be used.
 This defaults to `virtualbox` as it is available on all platforms.
 
-### `master`
+#### `master`
 
 `master` should be a boolean and the value of `master` will specify if this
-machine is the swarm master.  There can only be one swarm master per cluster.
+machine is (one of) the swarm master. In the old [Docker Swarm] there can only
+be one swarm master per cluster, in the new [Swarm Mode], there can be several
+masters. `machinery` will arrange for masters (and workers) to automatically
+join the cluster as necessary.
 
-### `cpu`
+#### `cpu`
 
 `cpu` should be an integer and specifies the number of CPUs to allocate to that
 virtual machine.  This will be automatically translated to each driver-specific
 option whenever possible.  A warning will be issued at creation time if the
 driver does not support that option.
 
-### `size`
+#### `size`
 
 In its simplest form, `size` is an integer and specifies the size of
 the virtual disk for the virtual machine.  This should be expressed in
@@ -540,7 +589,7 @@ option whenever possible, possibly making the translation between MB
 and GB, or similar.  A warning will be issued at creation time if the
 driver does not support that option.
 
-### `memory`
+#### `memory`
 
 `memory` should specify the amount of memory for that virtual machine,
 it defaults to being expressed in MiB (see discussion above).  This
@@ -548,20 +597,20 @@ will be automatically translated to each driver-specific option
 whenever possible.  A warning will be issued at creation time if the
 driver does not support that option.
 
-### `labels`
+#### `labels`
 
 `labels` should be itself a dictionary.  The content of this dictionary will be
 used as labels for the docker machines that are created.  These labels can be
 used to schedule components on particular machines at a later time.
 
-### `options`
+#### `options`
 
 `options` should be itself a dictionary and contain a number of driver-specific
 options that will be blindly passed to the driver at machine creation.  The
 leading double-dash that precedes these options can be omitted to keep the
 syntax simpler.
 
-### `ports`
+#### `ports`
 
 `ports` should be a list of port forwarding specifications.  A specification is
 either a single port or a host port separated from a guest port using a colon.
@@ -574,7 +623,7 @@ onto the standard syslog port `514` on UDP.
 At present, port forwarding is only meaningful and supported on virtualbox based
 machines.
 
-### `shares`
+#### `shares`
 
 `shares` should be a list of share mounting specifications.  A
 specification is a either a single path or a host path separated from
@@ -597,7 +646,7 @@ onto the host using the command `sync`.  When proper mounting is
 possible, the mounting will persist restarts of the virtual machine,
 e.g. when doing `docker-machine restart` or similar.
 
-### `images`
+#### `images`
 
 `images` should be a list of images to automatically pull from
 registries once a virtual machine has been created, initialised and
@@ -619,7 +668,7 @@ To switch off that behaviour and download the images from the virtual
 machines instead, set the global option `-cache` to `off`, `0` or
 `false`.
 
-### `registries`
+#### `registries`
 
 `registries` should be a list of dictionaries specifying (private) registries at
 which to login upon machine creation.  These dictionaries should contain values
@@ -628,7 +677,7 @@ server is the URL to the registry and the other fields are self-explanatory.
 `machinery` will log into all specified registries before attempting to
 pre-download images as explained above.
 
-### `compose` <a name="compose" />
+#### `compose` <a name="compose" />
 
 `compose` should be a list of dictionaries that will, each, reference a
 `docker-compose` project file.  Each dictionary must have a key called `file`
@@ -650,7 +699,7 @@ Finally a key called `project` can be set and is a string.  It will contain the
 name of the compose project and will replace the one that usually is extracted
 from the directory name.
 
-### `addendum`
+#### `addendum`
 
 `addendum` should be a list of dictionary that will, each, reference a
 program or script to be run once a machine has been completely
@@ -666,17 +715,63 @@ arguments when starting the program.  Finally, if a key called
 `substitution` is present and set to a positive boolean, substitution
 will occur in the run script, as for compose files above.
 
-### `swarm`
+#### `prelude`
+
+`prelude` should be a list of dictionary that will, each, reference a program or
+script to be run as soon as a machine has been initiated. The prelude is
+executed as soon as all files specified using the `files` directive have been
+copied to the remote machine. This allows transfer of configuration files of all
+sorts onto the host before its further initialisation. It works otherwise
+similarly to `adddendum`.
+
+#### `swarm`
 
 By default, all machines specified in a YAML definition file will be part of the
 same swarm cluster. You can turn this feature off by explicitely setting the key
 `swarm` to a negative boolean.
 
-### `files`
+#### `files`
 
 specifies a list of files and directory copy specifications between the host and
-the machine. Each specification is written as the source path (on the host)
-separated from the destination path (on the machine) using the `:` character.
+the machine. There are two ways of describing file copies.
+
+* In its easiest form, each specification is written as the source path (on the
+  host) separated from the destination path (on the machine) using the `:`
+  character. There can also follow a number of hints placed behind a trailing
+  `:`. These hints are separated from one another using a coma sign, but the
+  only recognised hint is currently `norecurse`which avoids recusrion when
+  directories are being copied.
+  
+* In its more complex form, each specification is a dictionary itself. This
+  dictionary can contain the following keys:
+  
+  - `source` should point to the source file (or directory) and should always be
+    present.
+    
+  - `destination` should point to the destination file (or directory) at the
+    host and should always be present.
+    
+  - `sudo` is a boolean that, when on, will arrange for the file or directory to
+    be copied to a temporary location before it is moved in place, at the host,
+    using elevated privileges. This is to allow copying to sensitive parts of
+    the filesystem.
+    
+  - `recurse` can be `auto` or a boolean. When `auto` is used, directories will
+    be recursively coped automatically. Otherwise, the recursion will happen as
+    specified by the boolean.
+    
+  - `delta` is a boolean that turns off delta-intelligent copying via `rsync` when
+    the tool is picked up for copy by `docker-machine`. 
+
+  - `mode` arranges for the mode of the file/directory at the host to be
+    modified using `chmod`. This is mostly used together with `sudo`. 
+
+  - `owner` arranges for the owner of the file/directory at the host to be
+    modified using `chown`. This is mostly used together with `sudo`. 
+
+  - `group` arranges for the group of the file/directory at the host to be
+    modified using `chgrp`. This is mostly used together with `sudo`. 
+
 Copies are issued using the underlying `scp` command of `docker-machine`. This
 is still an experimental feature, but it eases migration of project relevant
 files to relevant machines on the cluster. This can even include secrets as

@@ -14,6 +14,7 @@ package require cluster::utils
 
 namespace eval ::cluster::vcompare {
     namespace eval vars {
+        # Maximum of version dividers (dots in the number!)
         variable -depth   8
     }
     namespace export {[a-z]*}
