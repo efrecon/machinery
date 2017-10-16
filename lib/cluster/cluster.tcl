@@ -80,25 +80,6 @@ namespace eval ::cluster {
         variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
         variable attached   ""
-        # Size converters
-        variable converters [list \
-                {^b$} 1 \
-                {^k(?!i)(b|)$} 1000.0 \
-                {^ki(b|)$}     1024.0 \
-                {^m(?!i)(b|)$} [expr {pow(1000,2)}] \
-                {^mi(b|)$}     [expr {pow(1024,2)}] \
-                {^g(?!i)(b|)$} [expr {pow(1000,3)}] \
-                {^gi(b|)$}     [expr {pow(1024,3)}] \
-                {^t(?!i)(b|)$} [expr {pow(1000,4)}] \
-                {^ti(b|)$}     [expr {pow(1024,4)}] \
-                {^p(?!i)(b|)$} [expr {pow(1000,5)}] \
-                {^pi(b|)$}     [expr {pow(1024,5)}] \
-                {^e(?!i)(b|)$} [expr {pow(1000,6)}] \
-                {^ei(b|)$}     [expr {pow(1024,6)}] \
-                {^z(?!i)(b|)$} [expr {pow(1000,7)}] \
-                {^zi(b|)$}     [expr {pow(1024,7)}] \
-                {^y(?!i)(b|)$} [expr {pow(1000,8)}] \
-                {^yi(b|)$}     [expr {pow(1024,8)}]]
         # Dynamically discovered list of machine create options
         variable machopts {}
         # List of additional driver specific options that should be

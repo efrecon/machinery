@@ -17,6 +17,25 @@ namespace eval ::cluster::utils {
         variable -tmp       ""
         # Characters to keep in temporary filepath
         variable fpathCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.,=_"
+        # Size converters
+        variable converters [list \
+                {^b$} 1 \
+                {^k(?!i)(b|)$} 1000.0 \
+                {^ki(b|)$}     1024.0 \
+                {^m(?!i)(b|)$} [expr {pow(1000,2)}] \
+                {^mi(b|)$}     [expr {pow(1024,2)}] \
+                {^g(?!i)(b|)$} [expr {pow(1000,3)}] \
+                {^gi(b|)$}     [expr {pow(1024,3)}] \
+                {^t(?!i)(b|)$} [expr {pow(1000,4)}] \
+                {^ti(b|)$}     [expr {pow(1024,4)}] \
+                {^p(?!i)(b|)$} [expr {pow(1000,5)}] \
+                {^pi(b|)$}     [expr {pow(1024,5)}] \
+                {^e(?!i)(b|)$} [expr {pow(1000,6)}] \
+                {^ei(b|)$}     [expr {pow(1024,6)}] \
+                {^z(?!i)(b|)$} [expr {pow(1000,7)}] \
+                {^zi(b|)$}     [expr {pow(1024,7)}] \
+                {^y(?!i)(b|)$} [expr {pow(1000,8)}] \
+                {^yi(b|)$}     [expr {pow(1024,8)}]]
     }
     # Export all lower case procedure, arrange to be able to access
     # commands from the parent (cluster) namespace from here and
@@ -131,6 +150,24 @@ proc ::cluster::utils::log { lvl msg } {
 }
 
 
+# ::cluster::utils::outlog -- current or decide log output
+#
+#      When called with no arguments, this procedure will return the current
+#      loglevel in numberical form. Otherwise, the procedure will decide if log
+#      should be output according to the level passed as a parameter. In that
+#      case, callers can collect back the loglevel passed as a parameter in
+#      numberical form using a variable name. 
+#
+# Arguments:
+#      lvl      Log level of the message that we wish to output (text or numeric)
+#      intlvl_  Name of variable to store numerical level of lvl
+#
+# Results:
+#      Either the numeric loglevel or a 1/0 boolean telling if we should output
+#      to log.
+#
+# Side Effects:
+#      None.
 proc ::cluster::utils::outlog { { lvl "" } { intlvl_ ""} } {
     # Convert current module level from string to integer.
     set current [LogLevel ${vars::-verbose}]
@@ -146,7 +183,7 @@ proc ::cluster::utils::outlog { { lvl "" } { intlvl_ ""} } {
         set intlvl [LogLevel $lvl]
         return [expr {$current >= $intlvl}]
     }
-    return -1
+    return -1;     # Never reached.
 }
 
 
@@ -211,6 +248,21 @@ proc ::cluster::utils::temporary { pfx } {
 }
 
 
+# ::cluster::utils::tmpdir -- Good platform temporary directory
+#
+#      Return the path to a good location for a temporary directory. Decision is
+#      foremost the -tmp variable from the global module variable, otherwise
+#      good platform-defaults making use of well-known environment variables.
+#
+# Arguments:
+#      None.
+#
+# Results:
+#      Path to a directory where to store temporary files/directories. This
+#      directory is guaranteed to exist.
+#
+# Side Effects:
+#      None.
 proc ::cluster::utils::tmpdir {} {
     if { ${vars::-tmp} ne "" } {
         return ${vars::-tmp}
@@ -243,13 +295,29 @@ proc ::cluster::utils::tmpdir {} {
 }
 
 
+# ::cluster::utils::tmpfile -- Generate path to temporary file
+#
+#      Return a path that can be used for a temporary file (or directory). The
+#      procedure utilises a prefix and extension in order to better identify
+#      files wihtin the system.
+#
+# Arguments:
+#      pfx      Prefix string to add at beginning of file name.
+#      ext      Extension for file
+#
+# Results:
+#      Return a full path to a file, in a good platform-dependent temporary
+#      directory.
+#
+# Side Effects:
+#      None.
 proc ::cluster::utils::tmpfile { pfx ext } {
     return [temporary [file join [tmpdir] $pfx].[string trimleft $ext .]]
 }
 
 
 
-# ::cluster::Convert -- SI multiples converter
+# ::cluster::utils::onvert -- SI multiples converter
 #
 #       This procedure will convert sizes (memory or disk) to a target
 #       unit.  The incoming size specification is either a floating
@@ -312,7 +380,7 @@ proc ::cluster::utils::convert { spec {dft ""} { unit "" } { precision "%.01f"} 
 #
 ####################################################################
 
-# ::cluster::LogLevel -- Convert log levels
+# ::cluster::utils::LogLevel -- Convert log levels
 #
 #       For convenience, log levels can also be expressed using
 #       human-readable strings.  This procedure will convert from this
@@ -339,7 +407,7 @@ proc ::cluster::utils::LogLevel { lvl } {
 }
 
 
-# ::cluster::+ -- Implements ANSI colouring codes.
+# ::cluster::utils::+ -- Implements ANSI colouring codes.
 #
 #       Output ANSI colouring codes, inspired by wiki code at
 #       http://wiki.tcl.tk/1143.
@@ -367,7 +435,7 @@ proc ::cluster::utils::+ { args } {
 }
 
 
-# ::cluster::LogTerminal -- Create log line for terminal output
+# ::cluster::utils::LogTerminal -- Create log line for terminal output
 #
 #       Pretty print a log message for output on the terminal.  This
 #       will use ANSI colour codings to improve readability (and will
@@ -413,7 +481,7 @@ proc ::cluster::utils::LogTerminal { lvl msg } {
 }
 
 
-# ::cluster::LogTerminal -- Create log line for file output
+# ::cluster::utils::LogStandard -- Create log line for file output
 #
 #       Pretty print a log message for output to a file descriptor.
 #       This will add a timestamp to ease future introspection.
@@ -439,6 +507,18 @@ proc ::cluster::utils::LogStandard { lvl msg } {
 }
 
 
+# ::cluster::utils::Multiplier -- Human-multiplier detection
+#
+#      Return the decimal multiplier for a human-readable unit.
+#
+# Arguments:
+#      unit     Human-readabe unit, e.g. K, MiB, etc.
+#
+# Results:
+#      A decimal value to multiply with to convert to (bytes).
+#
+# Side Effects:
+#      Generate an error for unrecognised units.
 proc ::cluster::utils::Multiplier { unit } {
     foreach {rx m} $vars::converters {
         if { [regexp -nocase -- $rx $unit] } {
@@ -452,3 +532,4 @@ proc ::cluster::utils::Multiplier { unit } {
 
 
 package provide cluster::utils 0.1
+
