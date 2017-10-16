@@ -13,6 +13,8 @@ namespace eval ::cluster::utils {
         variable -log       stderr
         # Date log output
         variable -date      "%Y%m%d %H%M%S"
+        # Options marker
+        variable -marker    "-"
         # Temporary directory, empty for good platform guess
         variable -tmp       ""
         # Characters to keep in temporary filepath
@@ -66,14 +68,14 @@ namespace eval ::cluster::utils {
 proc ::cluster::utils::defaults { ns {args {}}} {
     set store ::[string trim $ns :]::vars
     foreach {k v} $args {
-        set k -[string trimleft $k -]
+        set k ${vars::-marker}[string trimleft $k ${vars::-marker}]
         if { [info exists ${store}::$k] } {
             set ${store}::$k $v
         }
     }
         
     set state {}
-    foreach v [info vars ${store}::-*] {
+    foreach v [info vars ${store}::${vars::-marker}*] {
         lappend state [lindex [split $v ":"] end] [set $v]
     }
     return $state
@@ -211,7 +213,60 @@ proc ::cluster::utils::dget { d key { default "" } } {
 
 
 
-# ::cluster::Temporary -- Temporary name
+# ::cluster::utils::options -- Separate options and args
+#
+#      Separate options from arguments. A double dash (double marker) is
+#      prefered to mark the end of the options and the beginning of the
+#      arguments. Otherwise, the beginning of the arguments is where there is an
+#      option that does not start with the dash marker.
+#
+# Arguments:
+#      _argv    "Pointer" to incoming list of arguments. Will be modified.
+#      _opts    "pointer" to list of options."
+#
+# Results:
+#      None.
+#
+# Side Effects:
+#      None.
+proc ::cluster::utils::options {_argv _opts} {
+    upvar $_argv argv $_opts opts
+
+    set opts {}
+    set ddash [lsearch $argv [string repeat ${vars::-marker} 2]]
+    if { $ddash >= 0 } {
+        # Double dash is always on the safe-side.
+        set opts [lrange $argv 0 [expr {$ddash-1}]]
+        set argv [lrange $argv [expr {$ddash+1}] end]
+    } else {
+        # Otherwise, we give it a good guess, i.e. first non-dash-led
+        # argument is the start of the arguments.
+        set i 0
+        while { $i < [llength $argv] } {
+            set lead [string index [lindex $argv $i] 0]
+            if { $lead eq ${vars::-marker} } {
+                set next [string index [lindex $argv [expr {$i+1}]] 0]
+                if { $next eq ${vars::-marker} } {
+                    incr i
+                } elseif { $next eq "" } {
+                    set opts $argv
+                    set argv [list]
+                    return
+                } else {
+                    incr i 2
+                }
+            } else {
+                break
+            }
+        }
+        set opts [lrange $argv 0 [expr {$i-1}]]
+        set argv [lrange $argv $i end]
+    }
+}
+
+
+
+# ::cluster::utils::temporary -- Temporary name
 #
 #       Generate a rather unique temporary name (to be used, for
 #       example, when creating temporary files). The procedure only keep
@@ -532,4 +587,5 @@ proc ::cluster::utils::Multiplier { unit } {
 
 
 package provide cluster::utils 0.1
+
 

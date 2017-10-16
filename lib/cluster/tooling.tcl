@@ -215,15 +215,9 @@ proc ::cluster::tooling::compose { args } {
 #       None.
 proc ::cluster::tooling::machine { args } {
     # Isolate -- that will separate options to procedure from options
-    # that would be for command.  Using -- is MANDATORY if you want to
+    # that would be for command.  Using -- is preferred if you want to
     # specify options to the procedure.
-    set sep [lsearch $args "--"]
-    if { $sep >= 0 } {
-        set opts [lrange $args 0 [expr {$sep-1}]]
-        set args [lrange $args [expr {$sep+1}] end]
-    } else {
-        set opts [list]
-    }
+    utils options args opts
     
     # Put docker-machine in debug mode when we are ourselves at debug
     # level.
@@ -266,13 +260,7 @@ proc ::cluster::tooling::run { args } {
     # Isolate -- that will separate options to procedure from options
     # that would be for command.  Using -- is MANDATORY if you want to
     # specify options to the procedure.
-    set sep [lsearch $args "--"]
-    if { $sep >= 0 } {
-        set opts [lrange $args 0 [expr {$sep-1}]]
-        set args [lrange $args [expr {$sep+1}] end]
-    } else {
-        set opts [list]
-    }
+    utils options args opts
     
     # Create an array global to the namespace that we'll use for
     # synchronisation and context storage.
