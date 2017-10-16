@@ -31,32 +31,6 @@ namespace eval ::cluster::unix {
 }
 
 
-# ::cluster::defaults -- Set default parameters
-#
-#       This procedure takes an even list of keys and values used to
-#       set the values of the options supported by the library.  The
-#       list of options is composed of all variables starting with a
-#       dash in the vars sub-namespace.  In the list, the dash
-#       preceding the key is optional.
-#
-# Arguments:
-#        args    List of key and values to set for module options.
-#
-# Results:
-#       None.
-#
-# Side Effects:
-#       None.
-proc ::cluster::unix::defaults { args } {
-    foreach {k v} $args {
-        set k -[string trimleft $k -]
-        if { [info exists vars::$k] } {
-            set vars::$k $v
-        }
-    }
-}
-
-
 # ::cluster::unix::release -- OS Identification
 #
 #      Read the os-release file as specified by

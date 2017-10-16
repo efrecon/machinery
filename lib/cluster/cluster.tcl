@@ -3085,7 +3085,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
             tooling machine -stderr -- -s $storage ssh $nm chgrp {*}$opts $group $d_fname
         }
     } else {
-        unix defaults -ssh [SCommand $vm]
+        utils defaults cluster::unix -ssh [SCommand $vm]
         unix scp $vm $s_fname $d_fname
     }
     
