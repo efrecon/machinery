@@ -81,7 +81,9 @@ namespace eval ::cluster {
         # name of VM that we are attached to
         variable attached   ""
         # Dynamically discovered list of machine create options
-        variable machopts {}
+        variable machopts   {}
+        # Dynamically discovered list of docker stack deploy options
+        variable deplopts   {}
         # List of additional driver specific options that should be
         # resolved into absolute path.
         variable absPaths {azure-publish-settings-file azure-subscription-cert hyper-v-boot2docker-location generic-ssh-key}
@@ -362,24 +364,13 @@ proc ::cluster::bind { vm {ls -} {options {}} } {
 # Side Effects:
 #       None.
 proc ::cluster::create { vm args } {
+    set inargs $args;   # Keep a copy
     utils getopt args -token token ""
-    utils getopt args -masters masters [list]
-    utils getopt args -networks networks [list]
-    utils getopt args -applications apps [list]
     set nm [Create $vm $token $masters]
     
     if { $nm ne "" } {
         set vm [Running $vm]
         if { $vm ne {} } {
-            # Now that the machine is running, setup all swarm-wide networks if
-            # relevant.
-            if { [swarmmode mode $vm] eq "manager" && [llength $networks] } {
-                log INFO "Creating swarm-wide networks"
-                foreach net $networks {
-                    swarmmode network $masters create $net
-                }
-            }
-
             # Tag virtual machine with labels the hard-way, on older
             # versions.
             if { [vcompare lt [tooling version machine] 0.4] } {
@@ -403,15 +394,7 @@ proc ::cluster::create { vm args } {
                         log ERROR "Cannot test docker for $nm, check manually!"
                     }
                     
-                    init $vm
-
-                    if { [swarmmode mode $vm] eq "manager" && [llength $apps] } {
-                        log INFO "Creating swarm-wide apps that are not yet running"
-                        swarmmode stack ls
-                        foreach net $apps {
-                            swarmmode network $masters create $net
-                        }
-                    }
+                    init $vm {*}$inargs 
                 } else {
                     log WARN "No docker daemon running on $nm!"
                 }
@@ -450,7 +433,12 @@ proc ::cluster::storage { vm } {
 }
 
 
-proc ::cluster::init { vm {steps {shares registries files images prelude compose addendum}} } {
+proc ::cluster::init { vm args } {
+    utils getopt args -steps steps {shares registries files images prelude networks compose addendum applications}
+    utils getopt args -masters masters [list]
+    utils getopt args -networks networks [list]
+    utils getopt args -applications apps [list]
+
     # Poor man's discovery: write down a description of all the
     # network interfaces existing on the virtual machines,
     # including the most important one (e.g. the one returned by
@@ -479,6 +467,17 @@ proc ::cluster::init { vm {steps {shares registries files images prelude compose
         if { [lsearch -nocase $steps prelude] >= 0 } {
             prelude $vm
         }
+
+        if { [lsearch -nocase $steps networks] >= 0 } {
+            # Now that the machine is running, setup all swarm-wide networks if
+            # relevant.
+            if { [llength $networks] && [swarmmode mode $vm] eq "manager" } {
+                log INFO "Creating swarm-wide networks"
+                foreach net $networks {
+                    swarmmode network $masters create $net
+                }
+            }
+        }
         
         # And iteratively run compose.  Compose will get the complete
         # description of the discovery status in the form of
@@ -490,10 +489,79 @@ proc ::cluster::init { vm {steps {shares registries files images prelude compose
         if { [lsearch -nocase $steps addendum] >= 0 } {
             addendum $vm
         }
+
+        if { [lsearch -nocase $steps applications] >= 0 } {
+            # Now that the machine is running, setup all swarm-wide applications if
+            # relevant.
+            if { [llength $apps] && [swarmmode mode $vm] eq "manager" } {
+                log NOTICE "Creating swarm-wide apps that are not yet running"
+
+                log DEBUG "Collecting running stacks"
+                set stacks [tooling parser [swarmmode stack $masters .ls]]
+
+                foreach a $apps {
+                    # Check if the application (name is at -name key) is already
+                    # running on the cluster
+                    set already 0
+                    foreach running $stacks {
+                        if { [dict exists $running name] \
+                                && [NameCmp [dict get $running $name] [dict get $a -name]] } {
+                            set already 1; break
+                        }
+                    }
+
+                    # Not already running, start it up.
+                    if { !$already } {
+                        # Discover docker stack deploy options once and only once.
+                        if { [llength $vars::deplopts] == 0 } {
+                            log DEBUG "Automatically discovering deploy options"
+                            set vars::deplopts [tooling options [swarmmode stack $masters  .deploy --help]]
+                        }
+
+                        # Now carry on options that we do not hijack into variable
+                        # dargs and call docker stack deploy with the proper path
+                        # to a compose file, these options and the name of the application.                        
+                        if { [llength $vars::deplopts] } {
+                            set dargs [list]
+                            foreach {k v} $a {
+                                switch -glob -- $k {
+                                    "-file" -
+                                    "file" -
+                                    "-name" -
+                                    "name" -
+                                    "origin" {
+                                        # Nothing here, just kept on purpose to make the
+                                        # algorithm clear
+                                    }
+                                    "c" -
+                                    "compose-file" {
+                                        log WARN "File composition options are hijacked by our implementation, use 'file' instead!"
+                                    }
+                                    "--*" {
+                                        # Internal, don't do anything
+                                    }
+                                    default {
+                                        if { [dict exists $vars::deplopts $k] } {
+                                            lappend dargs --[string trimleft $k -] $v
+                                        } else {
+                                            log WARN "$k is not a known docker stack deploy option!"
+                                        }
+
+                                    }
+                                }
+                            }
+                            log INFO "Deploying application [dict get $a -name] onto cluster"
+                            swarmmode stack $masters deploy -c [dict get $a -file] {*}$dargs [dict get $a -name]
+                        }
+                    }
+                }
+            }
+        }
     } else {
         log WARN "No docker daemon running on $nm!"
     }
 }
+
 
 proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
     set vm [bind $vm]

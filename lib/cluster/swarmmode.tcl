@@ -349,6 +349,16 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
     set mgr [PickManager $managers]
     if { [dict exists $mgr -name] } {
         set nm [dict get $mgr -name]
+
+        # Recognise dot-led commands as commands that we should execute and
+        # return results for (instead of regular terminal output). This is 
+        # a bit of a hack...
+        set return 0
+        if { [string match .* $cmd] } {
+            set return 1
+            set cmd [string range $cmd 1 end]
+        }
+
         switch -nocase -- $cmd {
             "up" -
             "deploy" {
@@ -358,6 +368,12 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                 # be able to forward all underlying files to the manager
                 # (temporarily) before deployment.
                 
+                # Immediate bypassed if we hade requested for return
+                if { $return } {
+                    return [tooling machine -return -- -s [storage $mgr] ssh $nm \
+                                docker stack $cmd {*}$args]
+                }
+
                 # Start by detecting the compose file that is used for
                 # deployment.
                 set fname ""
@@ -456,8 +472,13 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                 # In all other cases, we simply forward everything to docker
                 # stack, which allows us to be forward compatible with any
                 # command that it provides now and might provide in the future.
-                tooling machine -- -s [storage $mgr] ssh $nm \
-                        docker stack $cmd {*}$args                
+                if { $return } {
+                    return [tooling machine -return -- -s [storage $mgr] ssh $nm \
+                                docker stack $cmd {*}$args]
+                } else {
+                    tooling machine -- -s [storage $mgr] ssh $nm \
+                            docker stack $cmd {*}$args                
+                }
             }
         }
     } else {

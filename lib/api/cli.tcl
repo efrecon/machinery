@@ -763,14 +763,26 @@ proc ::api::cli::command { cmd args } {
                         { -help "Print this help"
                 -steps "List of comma separated steps to perform, the steps are named after the YAML description, i.e. registries, compose, images, addendum, etc." }
             }
-            set cluster [init]
-            utils getopt args -steps steps "registries,files,images,compose,addendum"
+
+            # Extract steps to perform, understand both comma-separated lists
+            # and clear Tcl-like whitespace lists).
+            utils getopt args -steps steps "registries,files,images,prelude,networks,compose,addendum,applications"
             if { [string first "," $steps] } {
                 set steps [split $steps ","]
             }
-            
+
+            set cluster [init]
+            set clustering [dict get $cluster -options -clustering]
             foreach vm [machines $cluster $args] {
-                cluster init $vm $steps
+                if { [string match -nocase "swarm*mode" $clustering] } {
+                    cluster init $vm \
+                        -steps $steps \
+                        -masters [Masters $cluster] \
+                        -applications [dict get $cluster -applications] \
+                        -networks [dict get $cluster -networks]
+                } else {
+                    cluster init $vm -steps $steps
+                }
             }
         }
         "down" -
