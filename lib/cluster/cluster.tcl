@@ -366,6 +366,7 @@ proc ::cluster::bind { vm {ls -} {options {}} } {
 proc ::cluster::create { vm args } {
     set inargs $args;   # Keep a copy
     utils getopt args -token token ""
+    utils getopt args -masters masters [list]
     set nm [Create $vm $token $masters]
     
     if { $nm ne "" } {
@@ -3414,4 +3415,3 @@ proc ::cluster::WaitSSH { vm { sleep 5 } { retries 5 } } {
 }
 
 package provide cluster 0.4
-
