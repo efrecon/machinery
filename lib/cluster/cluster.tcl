@@ -720,19 +720,38 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
     set composed {}
     set maindir [pwd]
     foreach project $projects {
-        if { [dict exists $project file] } {
-            set fpath [dict get $project file]
-            # Resolve with initial location of YAML description to
-            # make sure we can have relative paths.
-            set fpath [AbsolutePath $vm $fpath]
-            if { [file exists $fpath] } {
+        if { [dict exists $project file] || [dict exists $project files] } {
+            # Prefer files, cover the simpler case of file, and arrange for a
+            # list called fpaths to contain all the path which ever key was
+            # used.
+            if { [dict exists $project files] } {
+                set fpaths [dict get $project files]
+            } elseif { [dict exists $project file] } {
+                set fpaths [list [dict get $project file]]
+            }
+
+            # Resolve with initial location of YAML description to make sure we
+            # can have relative paths and warn on inexisting files.
+            set apaths [list]
+            foreach fpath $fpaths {
+                set apath [AbsolutePath $vm $fpath]
+                if { [file exists $apath] } {
+                    lappend apaths $apath
+                } else {
+                    log WARN "Cannot find compose file at $apath"
+                }
+            }
+
+            # Push further for composing onto machine when we could access all
+            # files.
+            if { [llength $apaths] == [llength $fpaths] } {
                 set descr [string map \
                         [list "UP" "Creating and starting up" \
                         "KILL" "Killing" \
                         "STOP" "Stopping" \
                         "START" "Starting" \
                         "RM" "Removing"] [string toupper $op]]
-                log NOTICE "$descr components from $fpath in $nm"
+                log NOTICE "$descr components from [join $apaths ,\ ] in $nm"
                 set substitution 0
                 if { [dict exists $project substitution] } {
                     set substitution \
@@ -746,12 +765,10 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
                 if { [dict exists $project project] } {
                     set projname [dict get $project project]
                 }
-                set parsed [Project $fpath $op $substitution $projname $options]
+                set parsed [Project $apaths $op $substitution $projname $options]
                 if { $parsed ne "" } {
                     lappend composed $parsed
                 }
-            } else {
-                log WARN "Cannot find compose file at $fpath"
             }
         }
     }
@@ -2358,7 +2375,7 @@ proc ::cluster::Ports { pspec } {
 }
 
 
-proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
+proc ::cluster::Project { fpaths op {substitution 0} {project ""} {options {}}} {
     set composed ""
     
     if { [string toupper $op] ni {START STOP KILL RM UP} } {
@@ -2371,122 +2388,130 @@ proc ::cluster::Project { fpath op {substitution 0} {project ""} {options {}}} {
     # but there does not seem to be any other solution at this point
     # for compose < 1.2
     if { [vcompare lt [tooling version compose] 1.2] } {
-        cd [file dirname $fpath]
+        set maindir [pwd]
+        cd [file dirname [lindex $fpaths 0]]
     }
     
     # Perform substituion of environment variables if requested from
     # the VM description (and thus the YAML file).
-    set temporaries {}
-    if { $substitution } {
-        # Read content of project file and resolve environment
-        # variables to their values in one go.  This supports defaults
-        # whenever a variable does not exist,
-        # e.g. ${VARNAME:defaultValue}.
-        set fd [open $fpath]
-        set yaml [environment resolve [read $fd]]
-        close $fd
-        
-        # Parse the YAML project to see if it contains extending
-        # services, in which case we need to make sure the extended
-        # services are also available to the temporary copy.
-        set projects [yaml::yaml2dict -stream $yaml]
-        set associated {}
-        foreach p $projects {
-            if { [dict exists $p extends] && [dict exists $p extends file] } {
-                lappend associated [dict get $p extends file]
-            }
-            if { [dict exists $p env_file] } {
-                lappend associated [dict get $p env_file]
-            }
-        }
-        
-        # Resolve the associated files, i.e. the one that the YAML
-        # extends to a temporary location.
-        set included {}
-        foreach f [lsort -unique $associated] {
-            # find the real location and resolve it out of its
-            # environment variables as well...
-            set src_path [file normalize [file join [file dirname $fpath] $f]]
-            if { [file exists $src_path] } {
-                set rootname [file rootname [file tail $f]]
-                set ext [file extension $f]
-                set tmp_fpath [utils temporary \
-                        [file join [utils tmpdir] $rootname]]$ext
-                log INFO "Copying a resolved version of $src_path to\
-                        $tmp_fpath"
-                set in_fd [open $src_path]
-                set out_fd [open $tmp_fpath w]
-                puts -nonewline $out_fd [environment resolve [read $in_fd]]
-                close $in_fd
-                close $out_fd
-                
-                lappend temporaries $tmp_fpath
-                lappend included $f $tmp_fpath
+    set temporaries [list]
+    set composed [list]
+    foreach fpath $fpaths {
+        if { $substitution } {
+            # Read content of project file and resolve environment
+            # variables to their values in one go.  This supports defaults
+            # whenever a variable does not exist,
+            # e.g. ${VARNAME:defaultValue}.
+            set fd [open $fpath]
+            set yaml [environment resolve [read $fd]]
+            close $fd
+            
+            # Parse the YAML project to see if it contains extending services,
+            # in which case we need to make sure the extended services are also
+            # available to the temporary copy.  Cover newer file formats where
+            # the list of services is under the main key called services.
+            set content [yaml::yaml2dict -stream $yaml]
+            if { [dict exists $content "services"] } {
+                set services [dict get $content "services"]
             } else {
-                log WARN "Cannot find location of $f at $src_path!"
+                set services $content
             }
-        }
-        
-        # Do some manual query/replace on the source YAML so that
-        # mentions of relative extended services are replaced by a
-        # reference to the temporary file resolved just above
-        set i 0
-        foreach {f dst} $included {
-            # Replace and count replacements.
-            set count 0
-            while 1 {
-                set i [string first $f $yaml $i]
-                if { $i < 0 } {
-                    # Nothing left to be found, done!
-                    break
-                } else {
-                    # We've found a occurence of the filename, we
-                    # replace if we can find a preceeding file:
-                    # otherwise, we just advance.
-                    set extender [string last "file:" $yaml $i]
-                    if { $extender >= 0 } {
-                        set j [expr {$i+[string length $f]-1}]
-                        set yaml [string replace $yaml $i $j $dst]
-                        # Advance to next possible, account for
-                        # length of replacement.
-                        incr i [expr {[string length $dst]-1}];
-                        incr count 1
-                    } else {
-                        incr i [expr {[string length $f]-1}]
-                    }
+            set associated {}
+            foreach s $services {
+                if { [dict exists $s extends] && [dict exists $s extends file] } {
+                    lappend associated [dict get $s extends file]
+                }
+                if { [dict exists $s env_file] } {
+                    lappend associated [dict get $s env_file]
                 }
             }
-            log DEBUG "Replaced $count occurrences of $f in source YAML"
-        }
-        
-        # Copy resolved result to temporary file
-        set projdirname [file tail [file dirname $fpath]]
-        set projname [file rootname [file tail $fpath]]
-        set tmp_fpath [utils temporary [file join [utils tmpdir] $projname]].yml
-        set fd [open $tmp_fpath w]
-        puts -nonewline $fd $yaml
-        close $fd
-        lappend temporaries $tmp_fpath
-        
-        log NOTICE "Substituting environment variables in\
-                compose project at $fpath via $tmp_fpath"
-        if { $project eq "" } {
-            set project $projdirname
-        }
-        
-        # Arrange for compose to pick up the temporary
-        # file, but still use the proper project name.
-        set cmd [list tooling compose -stderr -- \
-                --file $tmp_fpath --project-name $project]
-        set composed $tmp_fpath
-    } else {
-        if { $project eq "" } {
-            set cmd [list tooling compose -stderr -- --file $fpath]
+            
+            # Resolve the associated files, i.e. the one that the YAML
+            # extends to a temporary location.
+            set included {}
+            foreach f [lsort -unique $associated] {
+                # find the real location and resolve it out of its
+                # environment variables as well...
+                set src_path [file normalize [file join [file dirname $fpath] $f]]
+                if { [file exists $src_path] } {
+                    set rootname [file rootname [file tail $f]]
+                    set ext [file extension $f]
+                    set tmp_fpath [utils temporary \
+                            [file join [utils tmpdir] $rootname]]$ext
+                    log INFO "Copying a resolved version of $src_path to\
+                            $tmp_fpath"
+                    set in_fd [open $src_path]
+                    set out_fd [open $tmp_fpath w]
+                    puts -nonewline $out_fd [environment resolve [read $in_fd]]
+                    close $in_fd
+                    close $out_fd
+                    
+                    lappend temporaries $tmp_fpath
+                    lappend included $f $tmp_fpath
+                } else {
+                    log WARN "Cannot find location of $f at $src_path!"
+                }
+            }
+            
+            # Do some manual query/replace on the source YAML so that
+            # mentions of relative extended services are replaced by a
+            # reference to the temporary file resolved just above
+            set i 0
+            foreach {f dst} $included {
+                # Replace and count replacements.
+                set count 0
+                while 1 {
+                    set i [string first $f $yaml $i]
+                    if { $i < 0 } {
+                        # Nothing left to be found, done!
+                        break
+                    } else {
+                        # We've found a occurence of the filename, we
+                        # replace if we can find a preceeding file:
+                        # otherwise, we just advance.
+                        set extender [string last "file:" $yaml $i]
+                        if { $extender >= 0 } {
+                            set j [expr {$i+[string length $f]-1}]
+                            set yaml [string replace $yaml $i $j $dst]
+                            # Advance to next possible, account for
+                            # length of replacement.
+                            incr i [expr {[string length $dst]-1}];
+                            incr count 1
+                        } else {
+                            incr i [expr {[string length $f]-1}]
+                        }
+                    }
+                }
+                log DEBUG "Replaced $count occurrences of $f in source YAML"
+            }
+            
+            # Copy resolved result to temporary file
+            set projdirname [file tail [file dirname $fpath]]
+            set projname [file rootname [file tail $fpath]]
+            set tmp_fpath [utils temporary [file join [utils tmpdir] $projname]].yml
+            set fd [open $tmp_fpath w]
+            puts -nonewline $fd $yaml
+            close $fd
+            lappend temporaries $tmp_fpath
+            
+            log NOTICE "Substituting environment variables in\
+                    compose project at $fpath via $tmp_fpath"
+            if { $project eq "" } {
+                set project $projdirname
+            }
+            lappend composed $tmp_fpath
         } else {
-            set cmd [list tooling compose -stderr -- \
-                    --file $fpath --project-name $project]
+            lappend composed $fpath
         }
-        set composed $fpath
+    }
+
+    # Construct main command out of list of composed files and project name
+    set cmd [list tooling compose -stderr --]
+    foreach c $composed {
+        lappend cmd --file $c
+    }
+    if { $project ne "" } {
+        lappend cmd --project-name $project
     }
     
     # Finalise command
