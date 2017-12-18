@@ -44,7 +44,7 @@ RUN wget -q -O /tmp/til.zip https://github.com/efrecon/til/archive/master.zip &&
     rm -rf /tmp/til.zip
 
 # Expose for running as a service
-EXPOSE 8080
+EXPOSE 8070
 
 # Mount your main working directory onto /cluster
 RUN mkdir -p /cluster
