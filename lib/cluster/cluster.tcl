@@ -176,7 +176,8 @@ proc ::cluster::ls { yaml {machines *} { force 0 } } {
     # meaning the header).
     if { $capture } {
         log NOTICE "Capturing current overview of cluster"
-        set state [tooling machine -return -- -s [StorageDir $yaml] ls]
+        set state [tooling relatively -- [file dirname [StorageDir $yaml]] \
+                        tooling machine -return -- -s [StorageDir $yaml] ls]
         dict set vars::cluster cluster [tooling parser $state]
         dict set vars::cluster last $now
     }
@@ -926,7 +927,8 @@ proc ::cluster::tag { vm { lbls {}}} {
     # quoting.
     log DEBUG "Getting current boot2docker profile"
     set k ""
-    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm cat ${vars::-profile}] {
+    foreach l [tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -return -- -s [storage $vm] ssh $nm cat ${vars::-profile}] {
         if { $k eq "" } {
             set l [string trim $l]
             if { $l ne "" && [string index $l 0] ne "\#" } {
@@ -968,11 +970,13 @@ proc ::cluster::tag { vm { lbls {}}} {
     # Copy new file to same place (assuming /tmp is a good place!) and
     # install it for reboot.
     SCopy $vm $fname ""
-    tooling machine -- -s [storage $vm] ssh $nm sudo mv $fname ${vars::-profile}
+    tooling relatively -- [file dirname [storage $vm]] \
+            tooling machine -- -s [storage $vm] ssh $nm sudo mv $fname ${vars::-profile}
     
     # Cleanup and restart machine to make sure the labels get live.
     file delete -force -- $fname;        # Remove local file, not needed anymore
-    tooling machine -- -s [storage $vm] restart $nm;# Restart machine to activate tags
+    tooling relatively -- [file dirname [storage $vm]] \
+        tooling machine -- -s [storage $vm] restart $nm;# Restart machine to activate tags
     
     return [Running $vm]
 }
@@ -1158,12 +1162,14 @@ proc ::cluster::shares { vm { shares {}} } {
                 # recreation of data would be possible.
                 set b2d_dir [file dirname ${vars::-bootlocal}]
                 set bootlocal {}
-                foreach f [tooling machine -return -- \
-                        -s [storage $vm] ssh $nm "ls -1 $b2d_dir"] {
+                foreach f [tooling relatively -- [file dirname [storage $vm]] \
+                                tooling machine -return -- \
+                                    -s [storage $vm] ssh $nm "ls -1 $b2d_dir"] {
                     if { $f eq [file tail ${vars::-bootlocal}] } {
-                        set bootlocal [tooling machine -return -- \
-                                -s [storage $vm] \
-                                ssh $nm "cat ${vars::bootlocal}"]
+                        set bootlocal [tooling relatively -- [file dirname [storage $vm]] \
+                                        tooling machine -return -- \
+                                            -s [storage $vm] \
+                                            ssh $nm "cat ${vars::bootlocal}"]
                     }
                 }
                 
@@ -1218,8 +1224,10 @@ proc ::cluster::shares { vm { shares {}} } {
                 log INFO "Persisting shares at reboot through\
                         ${vars::-bootlocal}"
                 SCopy $vm $fname ""
-                tooling machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
-                tooling machine -- -s [storage $vm] ssh $nm "sudo mv $fname ${vars::-bootlocal}"
+                tooling relatively -- [file dirname [storage $vm]] \
+                        tooling machine -- -s [storage $vm] ssh $nm "chmod a+x $fname"
+                tooling relatively -- [file dirname [storage $vm]] \
+                        tooling machine -- -s [storage $vm] ssh $nm "sudo mv $fname ${vars::-bootlocal}"
             }
             "rsync" {
                 # Detect SSH command
@@ -1231,9 +1239,11 @@ proc ::cluster::shares { vm { shares {}} } {
                 foreach {host mchn} $SHARINFO(rsync) {
                     # Create directory on remote VM and arrange for
                     # the UID to match (should we?)
-                    tooling machine -- -s [storage $vm] ssh $nm "sudo mkdir -p $mchn"
+                    tooling relatively -- [file dirname [storage $vm]] \
+                            tooling machine -- -s [storage $vm] ssh $nm "sudo mkdir -p $mchn"
                     if { $uid ne "" } {
-                        tooling machine -- -s [storage $vm] ssh $nm "sudo chown $uid $mchn"
+                        tooling relatively -- [file dirname [storage $vm]] \
+                                tooling machine -- -s [storage $vm] ssh $nm "sudo chown $uid $mchn"
                     }
                     # Synchronise the content of the local host
                     # directory onto the remote VM directory.  Arrange
@@ -1360,7 +1370,8 @@ proc ::cluster::halt { vm {masters {}} } {
     # stop command of docker-machine.
     if { [IsRunning $vm] } {
         log INFO "Attempting graceful shutdown of $nm"
-        tooling machine -- -s [storage $vm] stop $nm
+        tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -- -s [storage $vm] stop $nm
     }
     # Ask state of cluster again and if the machine still isn't
     # stopped, force a kill.
@@ -1368,7 +1379,8 @@ proc ::cluster::halt { vm {masters {}} } {
     if { [dict exists $state state] \
                 && ![string equal -nocase [dict get $vm state] "stopped"] } {
         log NOTICE "Forcing stop of $nm"
-        tooling machine -- -s [storage $vm] kill $nm
+        tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -- -s [storage $vm] kill $nm
     }
     
     Discovery [bind $vm]
@@ -1394,7 +1406,8 @@ proc ::cluster::ssh { vm args } {
     set nm [dict get $vm -name]
     log NOTICE "Entering machine $nm..."
     if { [llength $args] > 0 } {
-        set res [eval [linsert $args 0 tooling machine -raw -stderr -- -s [storage $vm] ssh $nm]]
+        set res [eval [linsert $args 0 tooling relatively -- [file dirname [storage $vm]] \
+                            tooling machine -raw -stderr -- -s [storage $vm] ssh $nm]]
     } else {
         foreach fd {stdout stderr stdin} {
             fconfigure $fd -buffering none -translation binary
@@ -1445,7 +1458,8 @@ proc ::cluster::login { vm {regs {}} } {
                 }
             }
             append cmd [dict get $reg server]
-            tooling machine -- -s [storage $vm] ssh $nm $cmd
+            tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -- -s [storage $vm] ssh $nm $cmd
         }
     }
 }
@@ -1561,7 +1575,8 @@ proc ::cluster::pull { vm {images {}} } {
             }
         } else {
             log INFO "Pulling $img directly in $nm"
-            tooling machine -- -s [storage $vm] ssh $nm "docker pull $img"
+            tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -- -s [storage $vm] ssh $nm "docker pull $img"
             # Should we Attach - tooling docker pull $img - Detach instead?
         }
     }
@@ -1586,7 +1601,8 @@ proc ::cluster::destroy { vm {masters {}}} {
     set nm [dict get $vm -name]
     if { [dict exists $vm state] } {
         log NOTICE "Removing machine $nm..."
-        tooling machine -- -s [storage $vm] rm -y $nm
+        tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -- -s [storage $vm] rm -y $nm
     } else {
         log INFO "Machine $nm does not exist, nothing to do"
     }
@@ -1613,7 +1629,8 @@ proc ::cluster::destroy { vm {masters {}}} {
 proc ::cluster::inspect { vm } {
     set nm [dict get $vm -name]
     set json ""
-    foreach l [tooling machine -return -- -s [storage $vm] inspect $nm] {
+    foreach l [tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -return -- -s [storage $vm] inspect $nm] {
         append json $l
         append json " "
     }
@@ -1654,7 +1671,8 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
             return 1
         }
         log NOTICE "Bringing up machine $nm..."
-        tooling machine -- -s [storage $vm] start $nm
+        tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -- -s [storage $vm] start $nm
         incr retries -1
         if { $retries > 0 } {
             log INFO "Machine $nm could not start, trying again..."
@@ -1968,36 +1986,6 @@ proc ::cluster::candidates { {dir .} } {
 #
 ####################################################################
 
-# get relative path to target file from current file (end of http://wiki.tcl.tk/15925)
-proc ::cluster::RelativeTo {targetFile {currentPath ""}} {
-    if { $currentPath eq "" } {
-        set currentPath [pwd]
-    }
-
-    set cc [file split [file normalize $currentPath]]
-    set tt [file split [file normalize $targetFile]]
-    if {![string equal [lindex $cc 0] [lindex $tt 0]]} {
-        # not on *n*x then
-        return -code error "$targetFile not on same volume as $currentPath"
-    }
-    while {[string equal [lindex $cc 0] [lindex $tt 0]] && [llength $cc] > 0} {
-        # discard matching components from the front
-        set cc [lreplace $cc 0 0]
-        set tt [lreplace $tt 0 0]
-    }
-    set prefix ""
-    if {[llength $cc] == 0} {
-        # just the file name, so targetFile is lower down (or in same place)
-        set prefix "."
-    }
-    # step up the tree
-    for {set i 0} {$i < [llength $cc]} {incr i} {
-        append prefix " .."
-    }
-    # stick it all together (the eval is to flatten the targetFile list)
-    return [eval file join $prefix $tt]
-}
-
 # ::cluster::StorageDir -- Path to machine storage cache
 #
 #       Return the path to the machine storage cache directory.
@@ -2010,7 +1998,7 @@ proc ::cluster::RelativeTo {targetFile {currentPath ""}} {
 #
 # Side Effects:
 #       Create the directory if it did not exist prior to this call.
-proc ::cluster::StorageDir { yaml } {
+proc ::cluster::StorageDir { yaml {rootdir ""}} {
     if { ${vars::-storage} eq "" } {
         set dir [CacheFile $yaml ${vars::-ext}]
     } else {
@@ -2022,8 +2010,11 @@ proc ::cluster::StorageDir { yaml } {
         file mkdir $dir;   # Let it fail since we can't continue otherwise
     }
     
-    return [RelativeTo $dir [pwd]]
-    return [file normalize $dir]
+    if { $rootdir eq "" } {
+        return [file normalize $dir]
+    } else {
+        return [utils relative $dir $rootdir]
+    }
 }
 
 
@@ -2058,7 +2049,8 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # machine creation: first insert creation command with proper
     # driver.
     set driver [dict get $vm -driver]
-    set cmd [list tooling machine -- -s [storage $vm] create -d $driver]
+    set cmd [list tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -- -s [storage $vm] create -d $driver]
     
     # Now translate the standard memory (in MB), size (in MB) and cpu
     # (in numbers) options into options that are specific to the
@@ -2191,7 +2183,8 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # we'll compare to our local version below for upgrades.
     log DEBUG "Testing SSH connection to $nm"
     WaitSSH $vm
-    set rv_line [lindex [tooling machine -return -- -s [storage $vm] ssh $nm "docker --version"] 0]
+    set rv_line [lindex [tooling relatively -- [file dirname [storage $vm]] \
+                            tooling machine -return -- -s [storage $vm] ssh $nm "docker --version"] 0]
     set remote_version [vcompare extract $rv_line]
     if { $remote_version eq "" } {
         log FATAL "Cannot log into $nm!"
@@ -2204,7 +2197,8 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             if { [vcompare gt $docker_version $remote_version] } {
                 log NOTICE "Local docker version greater than machine,\
                             trying an upgrade"
-                tooling machine -- -s [storage $vm] upgrade $nm
+                tooling relatively -- [file dirname [storage $vm]] \
+                        tooling machine -- -s [storage $vm] upgrade $nm
             }
         }
     }
@@ -2257,9 +2251,11 @@ proc ::cluster::Attach { vm args } {
         log INFO "Attaching to $nm"
         array set DENV {};   # Will hold the set of variables to be set.
         
-        set cmd [list tooling machine -return --]
         if { !$external } {
-            lappend cmd -s [storage $vm]
+            set cmd [list tooling relatively -chdir -- [file dirname [storage $vm]] \
+                            tooling machine -return -- -s [storage $vm]]
+        } else {
+            set cmd [list tooling machine -return --]            
         }
         lappend cmd env --shell sh
         if { $swarm } {
@@ -2277,9 +2273,11 @@ proc ::cluster::Attach { vm args } {
             }
         } else {
             log INFO "Could not request environment through machine, trying a good guess through inspection"
-            set cmd [list tooling machine -return --]
             if { !$external } {
-                lappend cmd -s [storage $vm]
+                set cmd [list tooling relatively -chdir -- [file dirname [storage $vm]] \
+                                    tooling machine -return -- -s [storage $vm]]
+            } else {
+                set cmd [list tooling machine -return --]
             }
             lappend cmd inspect $nm
             
@@ -2892,7 +2890,8 @@ proc ::cluster::Discovery { vm } {
             }
             # Add the official IP address, as this is what will be
             # usefull most of the time.
-            set ip [lindex [tooling machine -return -- -s [storage $vm] ip $nm] 0]
+            set ip [lindex [tooling relatively -- [file dirname [storage $vm]] \
+                                tooling machine -return -- -s [storage $vm] ip $nm] 0]
             if { $ip ne "" \
                         && [regexp {((\w|\w[\w\-]{0,61}\w)(\.(\w|\w[\w\-]{0,61}\w))*)|(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})} $ip] } {
                 foreach pfx $prefixes {
@@ -3109,13 +3108,16 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     
     # Create directory where to receive data.
     if { [file isdirectory $s_fname] } {
-        tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p $d_fname            
+        tooling relatively -- [file dirname [storage $vm]] \
+            tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p $d_fname            
     } else {
         # Use formatting of destination to guess if it is a directory or not...
         if { [string index $d_fname end] eq "/" } {
-            tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p $d_fname
+            tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p $d_fname
         } else {
-            tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p [file dirname $d_fname]
+            tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p [file dirname $d_fname]
         }
     }
 
@@ -3126,7 +3128,8 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
         set d_real $d_fname
         set d_fname [string trimright [utils temporary /tmp/scp] /]/
         log INFO "Performing copy through temporary directory $d_fname"
-        tooling machine -- -s [storage $vm] ssh $nm mkdir -p $d_fname
+        tooling relatively -- [file dirname [storage $vm]] \
+            tooling machine -- -s [storage $vm] ssh $nm mkdir -p $d_fname
     }
 
     if { [vcompare ge [tooling version machine] 0.3] } {
@@ -3181,7 +3184,8 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
         }
         
         # Now perform copy
-        tooling machine -stderr -- -s $storage scp {*}$opts $src ${nm}:${d_fname}
+        tooling relatively -- [file dirname $storage] \
+                tooling machine -stderr -- -s $storage scp {*}$opts $src ${nm}:${d_fname}
         
         # And perform past-copy operations in order to be able to operate on
         # ownership of file(s) or access modes.
@@ -3193,19 +3197,22 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
         # chmod        
         set mode [utils dget $args mode]
         if { $mode ne "" } {
-            tooling machine -stderr -- -s $storage ssh $nm chmod {*}$opts $mode $d_fname
+            tooling relatively -- [file dirname $storage] \
+                tooling machine -stderr -- -s $storage ssh $nm chmod {*}$opts $mode $d_fname
         }
         
         # chown
         set owner [utils dget $args owner]
         if { $owner ne "" } {
-            tooling machine -stderr -- -s $storage ssh $nm chown {*}$opts $owner $d_fname
+            tooling relatively -- [file dirname $storage] \
+                tooling machine -stderr -- -s $storage ssh $nm chown {*}$opts $owner $d_fname
         }
         
         # chgrp
         set group [utils dget $args group]
         if { $group ne "" } {
-            tooling machine -stderr -- -s $storage ssh $nm chgrp {*}$opts $group $d_fname
+            tooling relatively -- [file dirname $storage] \
+                tooling machine -stderr -- -s $storage ssh $nm chgrp {*}$opts $group $d_fname
         }
     } else {
         utils defaults cluster::unix -ssh [SCommand $vm]
@@ -3214,7 +3221,8 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     
     if { $elevation eq "sudo" } {
         log INFO "Moving file(s) from $d_fname to $d_real"
-        tooling machine -stderr -- -s $storage ssh $nm {*}$elevation \
+        tooling relatively -- [file dirname $storage] \
+            tooling machine -stderr -- -s $storage ssh $nm {*}$elevation \
             mv -f [file join $d_fname [file tail $s_fname]] $d_real && rm -rf $d_fname
     }
 }
@@ -3294,7 +3302,8 @@ proc ::cluster::InstallRSync { vm } {
                 is not (yet?) supported"
     } else {
         log NOTICE "Installing rsync in $nm"
-        tooling machine -- -s [storage $vm] ssh $nm $installer
+        tooling relatively -- [file dirname [storage $vm]] \
+             tooling machine -- -s [storage $vm] ssh $nm $installer
     }
 }
 
@@ -3302,7 +3311,8 @@ proc ::cluster::InstallRSync { vm } {
 proc ::cluster::OSInfo { vm } {
     set nfo {}
     set nm [dict get $vm -name]
-    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
+    foreach l [tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -return -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
         set k [environment line nfo $l]
     }
     
@@ -3454,7 +3464,8 @@ proc ::cluster::WaitSSH { vm { sleep 5 } { retries 5 } } {
     }
     log DEBUG "Waiting for ssh to be ready on $nm"
     while { $retries > 0 } {
-        set l [lindex [tooling machine -return -- -s [storage $vm] ssh $nm "echo ready"] 0]
+        set l [lindex [tooling relatively -- [file dirname [storage $vm]] \
+                            tooling machine -return -- -s [storage $vm] ssh $nm "echo ready"] 0]
         if { $l eq "ready" } {
             return $retries
         }

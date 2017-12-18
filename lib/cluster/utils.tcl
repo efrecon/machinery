@@ -155,10 +155,10 @@ proc ::cluster::utils::log { lvl msg } {
 # ::cluster::utils::outlog -- current or decide log output
 #
 #      When called with no arguments, this procedure will return the current
-#      loglevel in numberical form. Otherwise, the procedure will decide if log
+#      loglevel in numerical form. Otherwise, the procedure will decide if log
 #      should be output according to the level passed as a parameter. In that
 #      case, callers can collect back the loglevel passed as a parameter in
-#      numberical form using a variable name. 
+#      numerical form using a variable name. 
 #
 # Arguments:
 #      lvl      Log level of the message that we wish to output (text or numeric)
@@ -372,7 +372,7 @@ proc ::cluster::utils::tmpfile { pfx ext } {
 
 
 
-# ::cluster::utils::onvert -- SI multiples converter
+# ::cluster::utils::convert -- SI multiples converter
 #
 #       This procedure will convert sizes (memory or disk) to a target
 #       unit.  The incoming size specification is either a floating
@@ -426,6 +426,39 @@ proc ::cluster::utils::convert { spec {dft ""} { unit "" } { precision "%.01f"} 
     return [format $precision $val]
 }
 
+# get relative path to target file from current file (end of http://wiki.tcl.tk/15925)
+proc ::cluster::utils::relative {targetFile {currentPath ""}} {
+    if { $currentPath eq "" } {
+        set currentPath [pwd]
+    }
+
+    if { [file isdirectory $currentPath] } {
+        set cc [file split [file normalize $currentPath]]
+        set tt [file split [file normalize $targetFile]]
+        if {![string equal [lindex $cc 0] [lindex $tt 0]]} {
+            # not on *n*x then
+            return -code error "$targetFile not on same volume as $currentPath"
+        }
+        while {[string equal [lindex $cc 0] [lindex $tt 0]] && [llength $cc] > 0} {
+            # discard matching components from the front
+            set cc [lreplace $cc 0 0]
+            set tt [lreplace $tt 0 0]
+        }
+        set prefix ""
+        if {[llength $cc] == 0} {
+            # just the file name, so targetFile is lower down (or in same place)
+            set prefix "."
+        }
+        # step up the tree
+        for {set i 0} {$i < [llength $cc]} {incr i} {
+            append prefix " .."
+        }
+        # stick it all together (the eval is to flatten the targetFile list)
+        return [eval file join $prefix $tt]
+    } else {
+        return [relative $targetFile [file dirname $currentPath]]
+    }
+}
 
 
 ####################################################################

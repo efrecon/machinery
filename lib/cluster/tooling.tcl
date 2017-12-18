@@ -223,12 +223,43 @@ proc ::cluster::tooling::machine { args } {
     # level.
     if { [utils outlog] >= 7 } {
         set args [linsert $args 0 --debug]
+        set opts [linsert $opts 0 -stderr]
     }
     if { 0 && [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
         set args [linsert $args 0 --native-ssh]
     }
     
     return [eval run $opts -- [auto_execok ${vars::-machine}] $args]
+}
+
+
+proc ::cluster::tooling::relatively { args } {
+    utils options args opts
+    set chdir [expr {[utils getopt opts -cd] || [utils getopt opts -chdir]}]
+    set dir [lindex $args 0]
+    set args [lrange $args 1 end]
+    
+    set modified 0
+    set nargs [list]
+    foreach a $args {
+        if { [file exists $a] } {
+            set modified 1
+            lappend nargs [utils relative $a $dir]
+        } else {
+            lappend nargs $a
+        }
+    }
+
+    if { $modified } {
+        log DEBUG "Calling '$nargs' in directory context of $dir"
+    }
+    set cwd [pwd]
+    cd $dir
+    set res [uplevel 1 $nargs]
+    if { !$chdir} {
+        cd $cwd
+    }
+    return $res
 }
 
 

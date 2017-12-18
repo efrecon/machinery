@@ -52,7 +52,8 @@ proc ::cluster::unix::release { vm { search ""} } {
     set nm [dict get $vm -name]
     log DEBUG "Getting OS information from $nm..."
     set nfo [dict create]
-    foreach l [tooling machine -return -stderr -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
+    foreach l [tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -return -stderr -- -s [storage $vm] ssh $nm "cat /etc/os-release"] {
         environment line nfo $l
     }
     
@@ -90,7 +91,8 @@ proc ::cluster::unix::ps { vm {filter *}} {
     log DEBUG "Getting list of processes on $nm..."
     set processes {}
     set skip 1
-    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm "sudo ps -e -o pid,comm,args"] {
+    foreach l [tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -return -- -s [storage $vm] ssh $nm "sudo ps -e -o pid,comm,args"] {
         if { $skip } {
             # Skip header!
             set skip 0
@@ -170,7 +172,8 @@ proc ::cluster::unix::mounts { vm } {
     # Parse the output of the 'mount' command line by line, we do this
     # by looking for specific keywords in the string, but we might be
     # better off using regular expressions?
-    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm mount] {
+    foreach l [tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -return -- -s [storage $vm] ssh $nm mount] {
         # Advance to word "on" and isolate the device specification
         # that should be placed before.
         set on [string first " on " $l]
@@ -298,7 +301,8 @@ proc ::cluster::unix::remote { vm } {
     
     # Start looking starting from last lines as newer versions output
     # more when debug is on...
-    foreach l [lreverse [tooling machine -return -stderr -- -s [storage $vm] --debug ssh $nm echo ""]] {
+    foreach l [lreverse [tooling relatively -- [file dirname [storage $vm]] \
+                            tooling machine -return -stderr -- -s [storage $vm] --debug ssh $nm echo ""]] {
         foreach bin [list "/usr/bin/ssh" "ssh"] {
             if { [string first $bin $l] >= 0 } {
                 set sshinfo $l
@@ -340,10 +344,12 @@ proc ::cluster::unix::id { vm { mode "alpha" } {uname ""}} {
     set nm [dict get $vm -name]
     if { $uname eq "" } {
         set idinfo [string map [list "=" " "] \
-                [lindex [tooling machine -return -- -s [storage $vm] ssh $nm id] 0]]
+                [lindex [tooling relatively -- [file dirname [storage $vm]] \
+                            tooling machine -return -- -s [storage $vm] ssh $nm id] 0]]
     } else {
         set idinfo [string map [list "=" " "] \
-                [lindex [tooling machine -return -- -s [storage $vm] ssh $nm "id $uname"] 0]]
+                [lindex [tooling relatively -- [file dirname [storage $vm]] \
+                            tooling machine -return -- -s [storage $vm] ssh $nm "id $uname"] 0]]
     }
     
     set response [dict create]
@@ -420,7 +426,8 @@ proc ::cluster::unix::mount { vm dev path { uid "" } {type "vboxsf"} {sleep 1} {
     while { $retries > 0 } {
         log INFO "Mounting $dev onto ${nm}:${path} (UID:$uid)"
         foreach cmd [mnt.sh $dev $path $uid $type] {
-            tooling machine -- -s [storage $vm] ssh $nm "sudo $cmd"
+            tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -- -s [storage $vm] ssh $nm "sudo $cmd"
         }
         
         # Test that we managed to mount properly.
@@ -533,7 +540,8 @@ proc ::cluster::unix::ifs { vm } {
     set interfaces {};   # List of interface dictionaries.
     set ifs {};          # List of interface names, for logging.
     set iface ""
-    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm ifconfig] {
+    foreach l [tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -return -- -s [storage $vm] ssh $nm ifconfig] {
         # The output of ifconfig is formatted so that each new
         # interface is described with a line without leading
         # whitespaces, while extra information for that interface
@@ -620,7 +628,8 @@ proc ::cluster::unix::DaemonUp { vm daemon {cmd "start"} {force 0} {sleep 1} {re
         if { $pid < 0 || [string is true $force] } {
             log INFO "Daemon $daemon not running on $nm, trying to $cmd..."
             set dctrl [file join ${vars::-daemon} $daemon]
-            tooling machine -- -s [storage $vm] ssh $nm "sudo $dctrl $cmd"
+            tooling relatively -- [file dirname [storage $vm]] \
+                tooling machine -- -s [storage $vm] ssh $nm "sudo $dctrl $cmd"
             after [expr {int($sleep*1000)}]
             set force 0;  # Now let's do it the normal way for the next retries
         } else {
@@ -654,7 +663,8 @@ proc ::cluster::unix::DaemonPID { vm daemon } {
     # Look for pid file in /var/run
     set rundir [string trimright ${vars::-run} "/"]
     set pidfile ""
-    foreach l [tooling machine -return -- -s [storage $vm] ssh $nm "ls -1 ${rundir}/*.pid"] {
+    foreach l [tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -return -- -s [storage $vm] ssh $nm "ls -1 ${rundir}/*.pid"] {
         if { [string match "${rundir}/${daemon}*" $l] } {
             log DEBUG "Found PIDfile for $daemon at $l"
             set pidfile $l
@@ -664,7 +674,8 @@ proc ::cluster::unix::DaemonPID { vm daemon } {
     # If we have a PID file, make sure there is a process that is
     # running at that PID (should we check it's really the daemon?)
     if { $pidfile ne "" } {
-        set dpid [lindex [tooling machine -return -- -s [storage $vm] ssh $nm "cat $pidfile"] 0]
+        set dpid [lindex [tooling relatively -- [file dirname [storage $vm]] \
+                                tooling machine -return -- -s [storage $vm] ssh $nm "cat $pidfile"] 0]
         log DEBUG "Checking that there is a running process with id: $dpid"
         foreach {pid cmd args} [ps $vm] {
             if { $pid == $dpid } {
