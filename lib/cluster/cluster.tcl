@@ -1969,16 +1969,16 @@ proc ::cluster::candidates { {dir .} } {
 ####################################################################
 
 # get relative path to target file from current file (end of http://wiki.tcl.tk/15925)
-proc ::cluster::RelativeTo {targetfile {currentpath ""}} {
+proc ::cluster::RelativeTo {targetFile {currentPath ""}} {
     if { $currentPath eq "" } {
         set currentPath [pwd]
     }
 
-    set cc [file split [file normalize $currentpath]]
-    set tt [file split [file normalize $targetfile]]
+    set cc [file split [file normalize $currentPath]]
+    set tt [file split [file normalize $targetFile]]
     if {![string equal [lindex $cc 0] [lindex $tt 0]]} {
         # not on *n*x then
-        return -code error "$targetfile not on same volume as $currentpath"
+        return -code error "$targetFile not on same volume as $currentPath"
     }
     while {[string equal [lindex $cc 0] [lindex $tt 0]] && [llength $cc] > 0} {
         # discard matching components from the front
@@ -1987,14 +1987,14 @@ proc ::cluster::RelativeTo {targetfile {currentpath ""}} {
     }
     set prefix ""
     if {[llength $cc] == 0} {
-        # just the file name, so targetfile is lower down (or in same place)
+        # just the file name, so targetFile is lower down (or in same place)
         set prefix "."
     }
     # step up the tree
     for {set i 0} {$i < [llength $cc]} {incr i} {
         append prefix " .."
     }
-    # stick it all together (the eval is to flatten the targetfile list)
+    # stick it all together (the eval is to flatten the targetFile list)
     return [eval file join $prefix $tt]
 }
 
