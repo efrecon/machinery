@@ -2261,7 +2261,7 @@ proc ::cluster::Attach { vm args } {
         if { !$external } {
             lappend cmd -s [storage $vm]
         }
-        lappend cmd env
+        lappend cmd env --shell sh
         if { $swarm } {
             lappend cmd --swarm
         }
