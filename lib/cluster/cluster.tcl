@@ -27,6 +27,7 @@ package require cluster::swarmmode
 package require cluster::environment
 package require cluster::tooling
 package require cluster::utils
+package require zipper
 
 
 # Hard sourcing of the local json package to avoid using the one from
@@ -76,6 +77,8 @@ namespace eval ::cluster {
         variable -retention 10000
         # Defaults for networks (see: https://github.com/moby/moby/issues/32957)
         variable -networks  {-driver overlay -attachable true -scope swarm}
+        # Extension for JSON backups.
+        variable -backup    ".bak"
         # Supported sharing types.
         variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
@@ -1953,6 +1956,57 @@ proc ::cluster::env { cluster {force 0} {fd ""} } {
 }
 
 
+proc ::cluster::pack { cluster { zip "" } } {
+    set cluster [Machines $cluster]
+    # Nothing to do on an empty cluster...
+    if { [llength $cluster] == 0 } {
+        log NOTICE "Nothing to do, empty cluster!"
+        return
+    }
+    
+    set zipped [list]
+    set vm [lindex $cluster 0]
+    if { [dict exists $vm origin] } {
+        if { $zip eq "" } {
+            set zip [file rootname [dict get $vm origin]].zip
+        }
+
+        if { [catch {open $zip w} fd] == 0 } {
+            log INFO "Packing entire cluster specification to $zip"
+            set z [zipper initialize $fd]
+            set zipped [concat $zipped [ZipAdd $z [dict get $vm origin] [file dirname [dict get $vm origin]]]]
+            set zipped [concat $zipped [ZipAdd $z [environment cache $vm] [file dirname [dict get $vm origin]]]]
+            log NOTICE "Actively changing docker machine configuration to relative paths"
+            foreach mch $cluster {
+                set cfg [file join [storage $mch] machines [dict get $mch -name] config.json]
+                if { [file exists $cfg] } {
+                    # Read content
+                    set fd [open $cfg]
+                    set dta [read $fd]
+                    close $fd
+                    # Make a copy and replace if necessary.
+                    set ndta [string map [list [file dirname [storage $vm]]/ ""] $dta]
+                    if { $ndta ne $dta } {
+                        log DEBUG "Fixing paths relative to [file dirname [storage $vm]] in $cfg (also backed up)"
+                        file rename -force -- $cfg [file rootname $cfg].[string trimleft ${vars::-backup} .]
+                        # Replace with relative file paths
+                        set fd [open $cfg w]
+                        puts -nonewline $fd $ndta
+                        close $fd
+                    }
+                }
+            }
+            set zipped [concat $zipped [ZipAdd $z [storage $vm] [file dirname [storage $vm]]]]
+            close [$z finalize]
+        } else {
+            log WARN "Cannot open file $zip for writing: $fd"
+        }
+    }
+
+    return $zipped
+}
+
+
 proc ::cluster::candidates { {dir .} } {
     set candidates {}
     foreach fpath [glob -nocomplain -directory $dir -- $vars::lookup] {
@@ -1985,6 +2039,23 @@ proc ::cluster::candidates { {dir .} } {
 # be changed unless you wish to help...
 #
 ####################################################################
+
+proc ::cluster::ZipAdd { z fpath root } {
+    set added [list]
+    if { [file isdirectory $fpath] } {
+        foreach f [lsort [glob -nocomplain [file join $fpath *]]] {
+            set added [concat $added [ZipAdd $z $f $root]]
+        }
+    } else {
+        set fd [open $fpath]
+        fconfigure $fd -translation binary -encoding binary
+        set r [regsub {^\./} [utils relative $fpath $root] {}]
+        $z addentry $r [read $fd] [file mtime $fpath]
+        close $fd
+        lappend added $fpath
+    }
+    return $added
+}
 
 # ::cluster::StorageDir -- Path to machine storage cache
 #

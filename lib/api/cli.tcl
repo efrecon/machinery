@@ -58,6 +58,7 @@ namespace eval ::api::cli {
             server  "Start a web server to respond to REST calls"
             ps      "List all existing containers in cluster or specific machines"
             ls      "List all machines in the cluster and their state"
+            pack    "Pack all cluster info in ZIP for migration"
             version "Print out current version number"
         }
         
@@ -971,6 +972,31 @@ proc ::api::cli::command { cmd args } {
                 }
             }
             cluster forall $machines $ptn $cmd {*}$cargs
+        }
+        "pack" {
+            tooling runtime exit
+            # pack to zip file for project transport
+            if { [utils getopt args -help] } {
+                chelp $cmd \
+                        "Pack to zip file for project transport.  Takes the path to a ZIP file as an argument." \
+                        { -help "Print this help"
+                          -zap "Remove project files once ZIPped. This is irreversible!" }
+            }
+            set zap [utils getopt args -zap]
+
+            set cluster [init]
+            if { [llength $args] } {
+                set zipped [cluster pack $cluster [lindex $args 0]]
+            } else {
+                set zipped [cluster pack $cluster]
+            }
+
+            if { $zap } {
+                log NOTICE "Removing [llength $zipped] project's related file(s)"
+                foreach fpath $zipped {
+                    catch { file delete -force -- $fpath }
+                }
+            }
         }
         default {
             help "$cmd is an unknown command!"
