@@ -487,8 +487,15 @@ proc ::cluster::init { vm args } {
         # And iteratively run compose.  Compose will get the complete
         # description of the discovery status in the form of
         # environment variables.
-        if { [lsearch -nocase $steps compose] >= 0 } {
-            compose $vm UP
+        if { [lsearch -nocase $steps compose] >= 0 || [lsearch -nocase $steps clean] >= 0 } {
+            set ops [list]
+            if { [lsearch -nocase $steps clean] >= 0 } {
+                lappend ops KILL RM
+            }
+            if { [lsearch -nocase $steps compose] >= 0 } {
+                lappend ops UP
+            }            
+            compose $vm $ops
         }
         
         if { [lsearch -nocase $steps addendum] >= 0 } {
@@ -701,7 +708,7 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
 #
 # Side Effects:
 #       None.
-proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
+proc ::cluster::compose { vm ops {swarm 0} { projects {} } } {
     # Get projects, either from parameters (overriding the VM object) or
     # from vm object.
     if { [string length $projects] == 0 } {
@@ -749,13 +756,16 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
             # Push further for composing onto machine when we could access all
             # files.
             if { [llength $apaths] == [llength $fpaths] } {
-                set descr [string map \
-                        [list "UP" "Creating and starting up" \
-                        "KILL" "Killing" \
-                        "STOP" "Stopping" \
-                        "START" "Starting" \
-                        "RM" "Removing"] [string toupper $op]]
-                log NOTICE "$descr components from [join $apaths ,\ ] in $nm"
+                set what [list]
+                foreach op $ops {
+                    lappend what [string map \
+                            [list "UP" "Creating and starting up" \
+                            "KILL" "Killing" \
+                            "STOP" "Stopping" \
+                            "START" "Starting" \
+                            "RM" "Removing"] [string toupper $op]]
+                }
+                log NOTICE "[join $what ,\ ] components from [join $apaths ,\ ] in $nm"
                 set substitution 0
                 if { [dict exists $project substitution] } {
                     set substitution \
@@ -769,7 +779,7 @@ proc ::cluster::compose { vm op {swarm 0} { projects {} } } {
                 if { [dict exists $project project] } {
                     set projname [dict get $project project]
                 }
-                set parsed [Project $apaths $op $substitution $projname $options]
+                set parsed [Project $apaths $ops $substitution $projname $options]
                 if { $parsed ne "" } {
                     lappend composed $parsed
                 }
@@ -2473,13 +2483,15 @@ proc ::cluster::Ports { pspec } {
 }
 
 
-proc ::cluster::Project { fpaths op {substitution 0} {project ""} {options {}}} {
+proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}} {
     set composed ""
     
-    if { [string toupper $op] ni {START STOP KILL RM UP} } {
-        log WARM "Operation should be one of\
-                [join {START STOP KILL RM UP} {, }]"
-        return $composed
+    foreach op $ops {
+        if { [string toupper $op] ni {START STOP KILL RM UP} } {
+            log WARM "Operation should be one of\
+                    [join {START STOP KILL RM UP} {, }]"
+            return $composed
+        }
     }
     
     # Change dir to solve relative access to env files.  This is ugly,
@@ -2603,33 +2615,35 @@ proc ::cluster::Project { fpaths op {substitution 0} {project ""} {options {}}} 
         }
     }
 
-    # Construct main command out of list of composed files and project name
-    set cmd [list tooling compose -stderr --]
-    foreach c $composed {
-        lappend cmd --file $c
-    }
-    if { $project ne "" } {
-        lappend cmd --project-name $project
-    }
-    
-    # Finalise command
-    lappend cmd [string tolower $op]
-    switch -nocase -- $op {
-        "UP" {
-            lappend cmd -d
-            # Blindly add compose options if we had some.
-            foreach o $options {
-                lappend cmd $o
+    foreach op $ops {
+        # Construct main command out of list of composed files and project name
+        set cmd [list tooling compose -stderr --]
+        foreach c $composed {
+            lappend cmd --file $c
+        }
+        if { $project ne "" } {
+            lappend cmd --project-name $project
+        }
+        
+        # Finalise command
+        lappend cmd [string tolower $op]
+        switch -nocase -- $op {
+            "UP" {
+                lappend cmd -d
+                # Blindly add compose options if we had some.
+                foreach o $options {
+                    lappend cmd $o
+                }
+            }
+            "RM" {
+                lappend cmd --force
             }
         }
-        "RM" {
-            lappend cmd --force
-        }
+        
+        # Run compose command that we have built up and return to the main
+        # directory at once for older versions of compose
+        eval $cmd
     }
-    
-    # Run compose command that we have built up and return to the main
-    # directory at once for older versions of compose
-    eval $cmd
     if { [vcompare lt [tooling version compose] 1.2] } {
         cd $maindir
     }
