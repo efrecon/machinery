@@ -1780,10 +1780,10 @@ proc ::cluster::parse { fname args } {
         } elseif { [dict exists $d stacks] } {
             set fapps [dict get $d stacks]
         }
-        
+
         # Construct list of apps, arranging for the key -name to always be
         # present.
-        dict for { name descr } $fapps {
+        dict for { n descr } $fapps {
             if { $pfx eq "" } {
                 set app [dict create -name $n origin $fname]
             } else {
