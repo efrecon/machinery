@@ -293,51 +293,61 @@ proc ::cluster::tooling::run { args } {
     # specify options to the procedure.
     utils options args opts
     
-    # Create an array global to the namespace that we'll use for
-    # synchronisation and context storage.
-    set c [namespace current]::command[incr ${vars::generator}]
-    upvar \#0 $c CMD
-    set CMD(id) $c
-    set CMD(command) $args
-    log DEBUG "Executing $CMD(command) and capturing its output"
-    
-    # Extract some options and start building the
-    # pipe.  As we want to capture output of the command, we will be
-    # using the Tcl command "open" with a file path that starts with a
-    # "|" sign.
-    set CMD(keep) [utils getopt opts -keepblanks]
-    set CMD(back) [utils getopt opts -return]
-    set CMD(outerr) [utils getopt opts -stderr]
-    set CMD(relay) [utils getopt opts -raw]
-    set CMD(done) 0
-    set CMD(result) {}
-    
-    # Kick-off the command and wait for its end
-    # Kick-off the command and wait for its end
-    if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
-        set pipe |[concat $args]
-        if { $CMD(outerr) } {
-            append pipe " 2>@1"
+    if { [utils getopt opts -interactive] } {
+        log DEBUG "Executing $args interactively"
+        foreach fd {stdout stderr stdin} {
+            fconfigure $fd -buffering none -translation binary
         }
-        set CMD(stdin) ""
-        set CMD(stderr) ""
-        set CMD(stdout) [open $pipe]
-        set CMD(pid) [pid $CMD(stdout)]
-        fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
+        if { [catch {exec {*}$args >@ stdout 2>@ stderr <@ stdin} err] } {
+            log WARN "Child returned: $err"
+        }
     } else {
-        lassign [POpen4 {*}$args] CMD(pid) CMD(stdin) CMD(stdout) CMD(stderr)
-        fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
-        fileevent $CMD(stderr) readable [namespace code [list LineRead $c stderr]]
+        # Create an array global to the namespace that we'll use for
+        # synchronisation and context storage.
+        set c [namespace current]::command[incr ${vars::generator}]
+        upvar \#0 $c CMD
+        set CMD(id) $c
+        set CMD(command) $args
+        log DEBUG "Executing $CMD(command) and capturing its output"
+        
+        # Extract some options and start building the
+        # pipe.  As we want to capture output of the command, we will be
+        # using the Tcl command "open" with a file path that starts with a
+        # "|" sign.
+        set CMD(keep) [utils getopt opts -keepblanks]
+        set CMD(back) [utils getopt opts -return]
+        set CMD(outerr) [utils getopt opts -stderr]
+        set CMD(relay) [utils getopt opts -raw]
+        set CMD(done) 0
+        set CMD(result) {}
+        
+        # Kick-off the command and wait for its end
+        # Kick-off the command and wait for its end
+        if { [lsearch [split [::platform::generic] -] win32] >= 0 } {
+            set pipe |[concat $args]
+            if { $CMD(outerr) } {
+                append pipe " 2>@1"
+            }
+            set CMD(stdin) ""
+            set CMD(stderr) ""
+            set CMD(stdout) [open $pipe]
+            set CMD(pid) [pid $CMD(stdout)]
+            fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
+        } else {
+            lassign [POpen4 {*}$args] CMD(pid) CMD(stdin) CMD(stdout) CMD(stderr)
+            fileevent $CMD(stdout) readable [namespace code [list LineRead $c stdout]]
+            fileevent $CMD(stderr) readable [namespace code [list LineRead $c stderr]]
+        }
+        vwait ${c}(done);   # Wait for command to end
+        
+        catch {close $CMD(stdin)}
+        catch {close $CMD(stdout)}
+        catch {close $CMD(stderr)}
+        
+        set res $CMD(result)
+        unset $c
+        return $res
     }
-    vwait ${c}(done);   # Wait for command to end
-    
-    catch {close $CMD(stdin)}
-    catch {close $CMD(stdout)}
-    catch {close $CMD(stderr)}
-    
-    set res $CMD(result)
-    unset $c
-    return $res
 }
 
 

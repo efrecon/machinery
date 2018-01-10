@@ -1422,26 +1422,12 @@ proc ::cluster::ssh { vm args } {
         set res [eval [linsert $args 0 tooling relatively -- [file dirname [storage $vm]] \
                             tooling machine -raw -stderr -- -s [storage $vm] ssh $nm]]
     } else {
-        foreach fd {stdout stderr stdin} {
-            fconfigure $fd -buffering none -translation binary
-        }
-        set mchn [auto_execok ${vars::-machine}]
-        if { ![file exists $mchn] } {
-            set mchn ${vars::-machine}
-        }
-        if { $mchn eq "" } {
-            log ERROR "Cannot find machine at ${vars::-machine}!"
-            return
-        }
-        
-        set cmd [list $mchn -s [storage $vm]]
         if { [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
-            lappend cmd --native-ssh
-        }
-        lappend cmd ssh $nm
-        
-        if { [catch {exec {*}$cmd >@ stdout 2>@ stderr <@ stdin} err] } {
-            log WARN "Child returned: $err"
+            tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -interactive -- -s [storage $vm] --native-ssh ssh $nm
+        } else {
+            tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -interactive -- -s [storage $vm] ssh $nm
         }
     }
 }
