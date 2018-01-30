@@ -13,6 +13,8 @@
 package require cluster::tooling
 package require cluster::extend
 package require cluster::utils
+package require cluster::unix
+package require cluster::environment
 package require huddle;           # To parse and operate on stack files
 
 namespace eval ::cluster::swarmmode {
@@ -24,6 +26,12 @@ namespace eval ::cluster::swarmmode {
     namespace eval vars {
         # Extension for token cache file
         variable -ext       .swt
+        # Prefix for labels
+        variable -prefix    "com.docker-machinery"
+        # Auto-labels sections
+        variable -autolabel "os cpu storage"
+        # Characters to keep
+        variable keepCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"        
     }
     # Export all lower case procedure, arrange to be able to access
     # commands from the parent (cluster) namespace from here and
@@ -200,6 +208,64 @@ proc ::cluster::swarmmode::join { vm masters } {
 }
 
 
+proc ::cluster::swarmmode::autolabel { vm masters } {
+    set nm [dict get $vm -name]    
+    set labelling {}
+
+    foreach s ${vars::-autolabel} {
+        set s [string tolower [string trim $s .]]
+        switch -- $s {
+            "os" {
+                log INFO "Collecting OS information for $nm"
+                # OS Information
+                dict for {k v} [unix release $vm] {
+                    lappend labelling \
+                        --label-add \
+                            [string trimright ${vars::-prefix} .].$s.$k=\"[environment quote $v]\"
+                }
+            }
+            "cpu" {
+                log INFO "Collecting CPU information for $nm"
+                set cpuinfo [tooling machine -return -stderr \
+                                -- -s [storage $vm] ssh $nm "lscpu"]
+                foreach line $cpuinfo {
+                    set colon [string first ":" $line]
+                    if { $colon >= 0 } {
+                        set k [string trim [string range $line 0 [expr {$colon-1}]]]
+                        set v [string trim [string range $line [expr {$colon+1}] end]]
+                        lappend labelling \
+                            --label-add \
+                                [string trimright ${vars::-prefix} .].$s.[CleanString $k]=\"[environment quote $v]\"
+
+                    }
+                }
+            }
+            "storage" {
+                log INFO "Collecting storage information for $nm"
+                set blkinfo [tooling machine -return -stderr \
+                                -- -s [storage $vm] ssh $nm "lsblk -d -o name,hotplug,rm,rota,size"]
+                set header [lindex $blkinfo 0]
+                foreach line [lrange $blkinfo 1 end] {
+                    set d [MakeDict $header $line {RM removable ROTA rotational}]
+                    dict for {k v} $d {
+                        if { $k ne "name" } {
+                            lappend labelling \
+                                --label-add \
+                                    [string trimright ${vars::-prefix} .].$s.[dict get $d name].[CleanString $k]=\"[environment quote $v]\"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if { [llength $labelling] } {
+        log NOTICE "Automatically labelling $nm within ${vars::-autolabel} namespace"
+        node $masters update {*}$labelling $nm
+    }
+}
+
+
 # ::cluster::swarmmode::leave -- Leave swarm
 #
 #   Arrange for the machine passed as a parameter to leave the swarm. Leaving is
@@ -315,7 +381,7 @@ proc ::cluster::swarmmode::node { masters cmd args } {
     if { [dict exists $mgr -name] } {
         set nm [dict get $mgr -name]
         tooling machine -- -s [storage $mgr] ssh $nm \
-                docker node $cmd {*}$args                
+                docker node $cmd {*}$args
     } else {
         log WARN "No running manager to pick for node operation: $cmd"
     }    
@@ -854,5 +920,29 @@ proc ::cluster::swarmmode::TokenGet { vm mode } {
     return $response
 }
 
+proc ::cluster::swarmmode::CleanString { str { replace "" } } {
+    set retstr ""
+    set allowed [split $vars::keepCharacters ""]
+    foreach c [split $str ""] {
+        if { $c in $allowed } {
+            append retstr $c
+        } else {
+            append retstr $replace
+        }
+    }
+
+    return $retstr
+}
+
+proc ::cluster::swarmmode::MakeDict { header values { replacements {} }} {
+    for { set i 0 } { $i < [llength $header] } { incr i } {
+        set k [lindex $header $i]
+        if { [dict exists $replacements $k] } {
+            set k [dict get $replacements $k]
+        }
+        dict set d [string tolower $k] [lindex $values $i]
+    }
+    return [dict get $d]
+}
 
 package provide cluster::swarmmode 0.3

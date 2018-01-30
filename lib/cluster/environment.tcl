@@ -226,4 +226,19 @@ proc ::cluster::environment::resolve { str } {
 }
 
 
+proc ::cluster::environment::quote { str } {
+    ::set prev ""
+    ::set ret ""
+    foreach c [split $str ""] {
+        if { $c in [list "(" ")" "'" "\"" "\$"] && $prev ne "\\" } {
+            append ret "\\" $c
+        } else {
+            append ret $c
+        }
+        ::set prev $c
+    }
+    return $ret
+}
+
+
 package provide cluster::environment 0.2

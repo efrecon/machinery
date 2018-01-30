@@ -48,7 +48,7 @@ namespace eval ::cluster::unix {
 #
 # Side Effects:
 #      Read /etc/os-release on remote machine.
-proc ::cluster::unix::release { vm { search ""} } {
+proc ::cluster::unix::release { vm { search "" } } {
     set nm [dict get $vm -name]
     log DEBUG "Getting OS information from $nm..."
     set nfo [dict create]

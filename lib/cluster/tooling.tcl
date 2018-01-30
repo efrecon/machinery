@@ -228,7 +228,7 @@ proc ::cluster::tooling::machine { args } {
     if { 0 && [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
         set args [linsert $args 0 --native-ssh]
     }
-    
+
     return [eval run $opts -- [auto_execok ${vars::-machine}] $args]
 }
 

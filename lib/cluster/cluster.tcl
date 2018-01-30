@@ -483,6 +483,12 @@ proc ::cluster::init { vm args } {
                 }
             }
         }
+
+        if { [lsearch -nocase $steps labels] >= 0 } {
+            if { [swarmmode mode $vm] ne "" } {
+                swarmmode autolabel $vm $masters 
+            }
+        }
         
         # And iteratively run compose.  Compose will get the complete
         # description of the discovery status in the form of
@@ -517,7 +523,7 @@ proc ::cluster::init { vm args } {
                     set already 0
                     foreach running $stacks {
                         if { [dict exists $running name] \
-                                && [NameCmp [dict get $running $name] [dict get $a -name]] } {
+                                && [NameCmp [dict get $running name] [dict get $a -name]] } {
                             set already 1; break
                         }
                     }
@@ -2272,6 +2278,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     
     if { [llength $masters] } {
         swarmmode join $vm $masters
+        swarmmode autolabel $vm
     }
             
     return [dict get $vm -name]
