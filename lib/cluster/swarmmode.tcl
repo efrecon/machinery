@@ -534,6 +534,53 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                             docker stack $cmd --help                
                 }
             }
+            "__truename" {
+                set truenames [list]
+                # This is an internal command!
+                set stacks [tooling parser [stack $masters .ls]]
+                foreach name $args {
+                    lappend truenames $name
+                    foreach running $stacks {
+                        if { [dict exists $running name] \
+                                && [NameCmp [dict get $running name] $name] } {
+                            set truenames [lreplace $truenames end end [dict get $running name]]
+                            break
+                        }
+                    }
+                }
+                return $truenames                
+            }
+            "ps" -
+            "services" {
+                # Trying resolving last argument (the stack name) to something
+                # that really runs.
+                set stack [stack $masters __truename [lindex $args end]]
+                set args [lreplace $args end end $stack]
+                # In all other cases, we simply forward everything to docker
+                # stack, which allows us to be forward compatible with any
+                # command that it provides now and might provide in the future.
+                if { $return } {
+                    return [tooling machine -return -- -s [storage $mgr] ssh $nm \
+                                docker stack $cmd {*}$args]
+                } else {
+                    tooling machine -- -s [storage $mgr] ssh $nm \
+                            docker stack $cmd {*}$args                
+                }
+            }
+            "rm" {
+                # All arguments are stack names, trying resolving all of them
+                set args [stack $masters __truename {*}$args]
+                # In all other cases, we simply forward everything to docker
+                # stack, which allows us to be forward compatible with any
+                # command that it provides now and might provide in the future.
+                if { $return } {
+                    return [tooling machine -return -- -s [storage $mgr] ssh $nm \
+                                docker stack $cmd {*}$args]
+                } else {
+                    tooling machine -- -s [storage $mgr] ssh $nm \
+                            docker stack $cmd {*}$args                
+                }
+            }
             default {
                 # In all other cases, we simply forward everything to docker
                 # stack, which allows us to be forward compatible with any
