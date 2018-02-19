@@ -3178,6 +3178,8 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     if { $d_fname eq "" } {
         set d_fname $s_fname
     }
+
+    log INFO "Copying $s_fname to ${nm}:$d_fname"
     
     set elevation ""
     if { [utils dget $args sudo off] } {
@@ -3205,7 +3207,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     if { $elevation eq "sudo" } {        
         set d_real $d_fname
         set d_fname [string trimright [utils temporary /tmp/scp] /]/
-        log INFO "Performing copy through temporary directory $d_fname"
+        log DEBUG "Performing copy through temporary directory $d_fname"
         tooling relatively -- [file dirname [storage $vm]] \
             tooling machine -- -s [storage $vm] ssh $nm mkdir -p $d_fname
     }
@@ -3298,7 +3300,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     }
     
     if { $elevation eq "sudo" } {
-        log INFO "Moving file(s) from $d_fname to $d_real"
+        log DEBUG "Moving file(s) from $d_fname to $d_real"
         tooling relatively -- [file dirname $storage] \
             tooling machine -stderr -- -s $storage ssh $nm {*}$elevation \
             mv -f [file join $d_fname [file tail $s_fname]] $d_real && rm -rf $d_fname
