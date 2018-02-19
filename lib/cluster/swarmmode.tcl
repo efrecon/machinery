@@ -567,6 +567,8 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
                             docker stack $cmd {*}$args                
                 }
             }
+            "remove" -
+            "down" -
             "rm" {
                 # All arguments are stack names, trying resolving all of them
                 set args [stack $masters __truename {*}$args]
