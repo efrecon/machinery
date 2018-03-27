@@ -123,10 +123,13 @@ proc ::cluster::extend::huddle2yaml { hdl } {
     }
 
     # Performs a number of textual translations on the output. At present, this
-    # simply forces the version number to be represented as a string as docker
-    # stack deploy is peaky about that very type.
+    # forces the version number to be represented as a string as docker stack
+    # deploy is peaky about that very type, and arranges for values that end
+    # with a : (and that could fool YAML parsing) to be enclosed by quotes.
     foreach translation [list \
-                            "s/version:\\s*(\[0-9.\]+)/\"\\1\"/g1"] {
+                            "s/version:\\s*(\[0-9.\]+)/version: \"\\1\"/g" \
+                            "s/^(\\s*)(\\w*):\\s*(.*:)$/\\1\\2: \"\\3\"/g" \
+                            "s/^(\\s*)-\\s*(.*:)$/\\1- \"\\2\"/g"] {
         set yaml [Sed $translation $yaml]
     }
     
@@ -361,7 +364,7 @@ proc ::cluster::extend::Services { dir hdl } {
 }
 
 
-# ::cluster::extend::Sed -- Mini-sed implementation
+# ::cluster::extend::SedLine -- Mini-sed implementation
 #
 #      This is a minimal sed implementation that has been lifted up from toclbox
 #      and also implements use of \1, \2, etc. in subgroups replacements.
@@ -375,7 +378,7 @@ proc ::cluster::extend::Services { dir hdl } {
 #
 # Side Effects:
 #      None.
-proc ::cluster::extend::Sed {script input} {
+proc ::cluster::extend::SedLine {script input} {
     set sep [string index $script 1]
     foreach {cmd from to flag} [::split $script $sep] break
     switch -- $cmd {
@@ -392,13 +395,17 @@ proc ::cluster::extend::Sed {script input} {
                 set cmd [lreplace $cmd 0 0 regexp]
                 lappend cmd -inline -indices -all -- $from $input
                 set res [eval $cmd]
-                set which [lindex $res $idx]
-                # Create map for replacement of all subgroups, if necessary.
-                for {set i 1} {$i<[llength $res]} { incr i} {
-                    foreach {b e} [lindex $res $i] break
-                    lappend map "\\$i" [string range $input $b $e]
+                if { [llength $res] } {
+                    set which [lindex $res $idx]
+                    # Create map for replacement of all subgroups, if necessary.
+                    for {set i 1} {$i<[llength $res]} { incr i} {
+                        foreach {b e} [lindex $res $i] break
+                        lappend map "\\$i" [string range $input $b $e]
+                    }
+                    return [string replace $input [lindex $which 0] [lindex $which 1] [string map $map $to]]
+                } else {
+                    return $input
                 }
-                return [string replace $input [lindex $which 0] [lindex $which 1] [string map $map $to]]
             }
             # Most generic case
             lappend cmd -- $from $input $to
@@ -418,6 +425,16 @@ proc ::cluster::extend::Sed {script input} {
         }
     }
     return -code error "not yet implemented"
+}
+
+proc ::cluster::extend::Sed {script input} {
+    set input [string map [list "\r\n" "\n" "\r" "\n"] $input]
+    set output ""
+    foreach line [split $input \n] {
+        set res [SedLine $script $line]
+        append output ${res}\n
+    }
+    return [string trimright $output \n]
 }
 
 
