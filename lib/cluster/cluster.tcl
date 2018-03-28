@@ -1455,7 +1455,7 @@ proc ::cluster::login { vm {regs {}} } {
             log INFO "Logging in as [dict get $reg username]\
                     at [dict get $reg server]"
             set cmd "docker login "
-            foreach {o k} [list -u username -p password -e email] {
+            foreach {o k} [list -u username -p password] {
                 if { [dict exists $reg $k] } {
                     append cmd "$o '[dict get $reg $k]' "
                 } else {
