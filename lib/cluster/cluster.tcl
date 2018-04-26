@@ -2278,7 +2278,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     
     if { [llength $masters] } {
         swarmmode join $vm $masters
-        swarmmode autolabel $vm
+        swarmmode autolabel $vm $masters
     }
             
     return [dict get $vm -name]
@@ -2874,7 +2874,7 @@ proc ::cluster::Exec { vm args } {
             if { $remotely } {
                 set dst [utils temporary [file join /tmp [file tail $fpath]]]
                 SCopy $vm $cmd $dst recurse off mode a+x
-                log NOTICE "Executing $fpath remotely (args: $cargs)"
+                log NOTICE "Executing $fpath remotely (args: [string trim $cargs])"
                 if { $sudo } {
                     ssh $vm sudo $dst {*}$cargs
                 } else {
@@ -2884,7 +2884,7 @@ proc ::cluster::Exec { vm args } {
                     ssh $vm /bin/rm -f $dst
                 }
             } else {
-                log NOTICE "Executing $fpath locally (args: $cargs)"
+                log NOTICE "Executing $fpath locally (args: [string trim $cargs])"
                 tooling run -keepblanks -stderr -raw -- $cmd {*}$cargs
             }
             
