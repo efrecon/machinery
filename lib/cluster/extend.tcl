@@ -129,7 +129,8 @@ proc ::cluster::extend::huddle2yaml { hdl } {
     foreach translation [list \
                             "s/version:\\s*(\[0-9.\]+)/version: \"\\1\"/g" \
                             "s/^(\\s*)(\\w*):\\s*(.*:)$/\\1\\2: \"\\3\"/g" \
-                            "s/^(\\s*)-\\s*(.*:)$/\\1- \"\\2\"/g"] {
+                            "s/^(\\s*)-\\s*(.*:)$/\\1- \"\\2\"/g" \
+                            "s/^(\\s*)(cpus|memory):\\s*(\[0-9.\]+)$/\\1\\2: \"\\3\"/g"] {
         set yaml [Sed $translation $yaml]
     }
     
