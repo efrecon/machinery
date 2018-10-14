@@ -439,6 +439,9 @@ proc ::cluster::storage { vm } {
 
 
 proc ::cluster::init { vm args } {
+    # The implementation below forces the steps to happen in their logical
+    # order, and also eases calling from the outsid by allowing abbreviating
+    # step names to the first unique letters among the set of existing steps.
     utils getopt args -steps steps {shares registries files images prelude networks compose addendum applications}
     utils getopt args -masters masters [list]
     utils getopt args -networks networks [list]
@@ -453,30 +456,47 @@ proc ::cluster::init { vm args } {
     Discovery $vm
     
     set nm [dict get $vm -name]
-    if { [lsearch -nocase $steps shares] >= 0 } {
+    
+    # Shares, will (possibly) mount local directories onto the virtual machine,
+    # alt. copy files early.
+    if { [lsearch -nocase -glob $steps s*] >= 0 } {
         shares $vm
     }
 
-    if { [lsearch -nocase $steps prelude] >= 0 } {
+    # Prelude to perform early initialisation. This is freeform, you would
+    # typically arrange for the remote user to be able to run docker, mount
+    # shares at the OS level, etc.
+    if { [lsearch -nocase -glob $steps p*] >= 0 } {
         prelude $vm
     }
 
+    # From now on, we need docker running on the remove machine...
     if { [unix daemon $vm docker up] } {
-        # Now pull images if any
-        if { [lsearch -nocase $steps registries] >= 0 } {
+        # Automatically login at required registries, this will facilitate
+        # access to privata accounts (and images) at the hub, or any other cloud
+        # or private registry.
+        if { [lsearch -nocase -glob $steps r*] >= 0 } {
             login $vm
         }
-        if { [lsearch -nocase $steps images] >= 0 } {
+
+        # Ask the remote machine to download images, which will warm up the
+        # image cache and quickens container startup time. This also allows
+        # copying local images into the remote machine, thus bypassing any
+        # registry and adding some level of security (as long as access to the
+        # operating machine is secure).
+        if { [lsearch -nocase -glob $steps i*] >= 0 } {
             pull $vm
         }
         
-        if { [lsearch -nocase $steps files] >= 0 } {
+        # Copy files, good for copying configuration files that will then be
+        # mounted into containers when using good-old compose.
+        if { [lsearch -nocase -glob $steps f*] >= 0 } {
             mcopy $vm
         }
 
-        if { [lsearch -nocase $steps networks] >= 0 } {
-            # Now that the machine is running, setup all swarm-wide networks if
-            # relevant.
+        # Now that the machine is running, setup all swarm-wide networks if
+        # relevant.
+        if { [lsearch -nocase -glob $steps n*] >= 0 } {
             if { [llength $networks] && [swarmmode mode $vm] eq "manager" } {
                 log INFO "Creating swarm-wide networks"
                 foreach net $networks {
@@ -485,7 +505,10 @@ proc ::cluster::init { vm args } {
             }
         }
 
-        if { [lsearch -nocase $steps labels] >= 0 } {
+        # In swarm mode, this will setup a number of namespaced labels onto the
+        # machine. These can be used to filter and select good candidates with
+        # swarm, e.g. a machine with an SDD, with many cores, etc.
+        if { [lsearch -nocase -glob $steps l*] >= 0 } {
             if { [swarmmode mode $vm] ne "" } {
                 swarmmode autolabel $vm $masters 
             }
@@ -494,22 +517,28 @@ proc ::cluster::init { vm args } {
         # And iteratively run compose.  Compose will get the complete
         # description of the discovery status in the form of
         # environment variables.
-        if { [lsearch -nocase $steps compose] >= 0 || [lsearch -nocase $steps clean] >= 0 } {
+        if { [lsearch -nocase -glob $steps c*] >= 0 } {
             set ops [list]
-            if { [lsearch -nocase $steps clean] >= 0 } {
+            # Clean containers
+            if { [lsearch -nocase -glob $steps cl*] >= 0 } {
                 lappend ops KILL RM
             }
-            if { [lsearch -nocase $steps compose] >= 0 } {
+            # Compose
+            if { [lsearch -nocase -glob $steps co*] >= 0 } {
                 lappend ops UP
             }            
             compose $vm $ops
         }
         
-        if { [lsearch -nocase $steps addendum] >= 0 } {
+        # Addendum scripts to run, now that everything is up and running, or
+        # almost.
+        if { [lsearch -nocase -glob $steps ad*] >= 0 } {
             addendum $vm
         }
 
-        if { [lsearch -nocase $steps applications] >= 0 } {
+        # Applications, this will arrange for all stack files that are pointed
+        # at as part of the YAML description to run on the cluster.
+        if { [lsearch -nocase -glob $steps ap*] >= 0 } {
             # Now that the machine is running, setup all swarm-wide applications if
             # relevant.
             if { [llength $apps] && [swarmmode mode $vm] eq "manager" } {
