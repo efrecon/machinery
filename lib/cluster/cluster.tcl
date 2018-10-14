@@ -456,6 +456,11 @@ proc ::cluster::init { vm args } {
     if { [lsearch -nocase $steps shares] >= 0 } {
         shares $vm
     }
+
+    if { [lsearch -nocase $steps prelude] >= 0 } {
+        prelude $vm
+    }
+
     if { [unix daemon $vm docker up] } {
         # Now pull images if any
         if { [lsearch -nocase $steps registries] >= 0 } {
@@ -467,10 +472,6 @@ proc ::cluster::init { vm args } {
         
         if { [lsearch -nocase $steps files] >= 0 } {
             mcopy $vm
-        }
-        
-        if { [lsearch -nocase $steps prelude] >= 0 } {
-            prelude $vm
         }
 
         if { [lsearch -nocase $steps networks] >= 0 } {
