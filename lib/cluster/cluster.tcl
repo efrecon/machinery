@@ -79,6 +79,10 @@ namespace eval ::cluster {
         variable -networks  {-driver overlay -attachable true -scope swarm}
         # Extension for JSON backups.
         variable -backup    ".bak"
+        # Default initialisation steps for machines
+        variable -steps     {shares registries files images prelude networks compose addendum applications}
+        # Steps that should be executed on managers (patterns)
+        variable manager    {ap* n*}
         # Supported sharing types.
         variable sharing    {vboxsf rsync}
         # name of VM that we are attached to
@@ -399,7 +403,7 @@ proc ::cluster::create { vm args } {
                         log ERROR "Cannot test docker for $nm, check manually!"
                     }
                     
-                    init $vm {*}$inargs 
+                    init $vm {*}$inargs
                 } else {
                     log WARN "No docker daemon running on $nm!"
                 }
@@ -412,6 +416,44 @@ proc ::cluster::create { vm args } {
     }
     
     return $nm
+}
+
+
+proc ::cluster::steps { target steps } {
+    switch -glob -- [string tolower $target] {
+        "m*" {
+            # Master/manager
+            set extracted [list]
+            foreach s $steps {
+                foreach ptn $vars::manager {
+                    if { [string match -nocase $ptn $s] } {
+                        lappend extracted $s
+                    }
+                }
+            }
+            return $extracted
+        }
+        "w*" -
+        "s*" {
+            # slave / worker
+            set extracted [list]
+            foreach s $steps {
+                set manager 0
+                foreach ptn $vars::manager {
+                    if { [string match -nocase $ptn $s] } {
+                        set manager 1; break
+                    }
+                }
+                if { !$manager } {
+                    lappend extracted $s
+                }
+            }
+            return $extracted
+        }
+        default {
+            return -code error "$target is not a known sort of node, should be manager, worker"
+        }
+    }
 }
 
 
@@ -442,10 +484,15 @@ proc ::cluster::init { vm args } {
     # The implementation below forces the steps to happen in their logical
     # order, and also eases calling from the outsid by allowing abbreviating
     # step names to the first unique letters among the set of existing steps.
-    utils getopt args -steps steps {shares registries files images prelude networks compose addendum applications}
+    utils getopt args -steps steps ${vars::-steps}
     utils getopt args -masters masters [list]
     utils getopt args -networks networks [list]
     utils getopt args -applications apps [list]
+
+    # Abort at once when nothing to do...
+    if { [llength $steps] == 0 } {
+        return
+    }
 
     # Poor man's discovery: write down a description of all the
     # network interfaces existing on the virtual machines,

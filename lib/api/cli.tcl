@@ -523,7 +523,9 @@ proc ::api::cli::up { vm args } {
         }
     } else {
         cluster create $vm {*}$args
+        return 1
     }
+    return 0
 }
 
 
@@ -589,8 +591,19 @@ proc ::api::cli::command { cmd args } {
                 }
                 ::cluster::swarm::recapture $cluster
             } else {
+                set created [list]
                 foreach vm [machines $cluster $args] {
-                    up $vm \
+                    if { [up $vm \
+                            -steps [cluster steps "worker" [cluster defaults -steps]] \
+                            -masters [Masters $cluster] \
+                            -networks [dict get $cluster -networks] \
+                            -applications [dict get $cluster -applications]] } {
+                        lappend created $vm
+                    }
+                }                
+                foreach vm $created {
+                    cluster init $vm \
+                        -steps [cluster steps "manager" [cluster defaults -steps]] \
                         -masters [Masters $cluster] \
                         -networks [dict get $cluster -networks] \
                         -applications [dict get $cluster -applications]
@@ -767,7 +780,7 @@ proc ::api::cli::command { cmd args } {
 
             # Extract steps to perform, understand both comma-separated lists
             # and clear Tcl-like whitespace lists).
-            utils getopt args -steps steps "registries,files,images,prelude,networks,compose,addendum,applications"
+            utils getopt args -steps steps [cluster defaults -steps]
             if { [string first "," $steps] } {
                 set steps [split $steps ","]
             }
@@ -777,12 +790,21 @@ proc ::api::cli::command { cmd args } {
             foreach vm [machines $cluster $args] {
                 if { [string match -nocase "swarm*mode" $clustering] } {
                     cluster init $vm \
-                        -steps $steps \
+                        -steps [cluster steps "worker" $steps] \
                         -masters [Masters $cluster] \
                         -applications [dict get $cluster -applications] \
                         -networks [dict get $cluster -networks]
                 } else {
                     cluster init $vm -steps $steps
+                }
+            }
+            if { [string match -nocase "swarm*mode" $clustering] } {
+                foreach vm [machines $cluster $args] {
+                    cluster init $vm \
+                        -steps [cluster steps "manager" $steps] \
+                        -masters [Masters $cluster] \
+                        -applications [dict get $cluster -applications] \
+                        -networks [dict get $cluster -networks]
                 }
             }
         }
