@@ -1787,20 +1787,16 @@ proc ::cluster::vfs { fname mounts } {
     }
 
     if { [llength $mounts] > 0 } {
-        if { [catch {package require vfs} ver] == 0 } {
-            set mapper [list rootname [file rootname $fname] \
-                             dirname [file dirname $fname] \
-                             fname $fname]
-            # Resolve file content to list of 2 elements.
-            foreach {src location} $mounts {
-                set src [::cluster::utils::resolve $src $mapper]
-                set dst [::cluster::utils::resolve $location $mapper]
-                if { [mount add $src $dst] eq "" } {
-                    log ERROR "Could not mount $src onto $dst"
-                }
+        set mapper [list rootname [file rootname $fname] \
+                         dirname [file dirname $fname] \
+                         fname $fname]
+        # Resolve file content to list of 2 elements.
+        foreach {src location} $mounts {
+            set src [::cluster::utils::resolve $src $mapper]
+            set dst [::cluster::utils::resolve $location $mapper]
+            if { [mount add $src $dst] eq "" } {
+                log ERROR "Could not mount $src onto $dst"
             }
-        } else {
-            log ERROR "No VFS support, will not be able to mount!"
         }
     }
 }
@@ -3302,7 +3298,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
 
     # Extract out of mounted FS if necessary.    
     set temporaries [list];   # Will contain list of temporary files, if relevant
-    set extracted [CacheVFS $s_fname]
+    set extracted [mount cache $s_fname]
     if { $extracted ne $s_fname } {
         lappend temporaries $extracted
         set s_fname $extracted
@@ -3692,36 +3688,6 @@ proc ::cluster::WaitSSH { vm { sleep 5 } { retries 5 } } {
 }
 
 
-proc ::cluster::CacheVFS { fname { tmpdir "" } { force 0 }} {
-    # Normalize incoming file path
-    set src [::vfs::filesystem fullynormalize $fname]
-
-    # Try to see if the file/dir is part of a mounted filesystem, if so we'll be
-    # copying it.
-    foreach fs [::vfs::filesystem info] {
-        if { [string first $fs $src] == 0 } {
-            # Force leading :: namespace marker on handler for matching
-            # filesystem and assume the namespace right after ::vfs:: in the
-            # handler name provides the type of the VFS used
-            set handler ::[string trimleft [lindex [::vfs::filesystem info $fs] 0] :]
-            set type [lindex [split [string map [list "::" ":"] $handler] :] 2]
-            log INFO "Temporarily caching $fname since mounted onto $fs as $type VFS"
-            set force 1;   # Set the force boolean, a bit ugly?
-            break            
-        }
-    }
-
-    # Recursively copy file/dir into a good candidate temporary directory.
-    if { $force } {
-        log DEBUG "(Recursively) copying from $fname to $dst"
-        set dst [utils tmpfile [file rootname [file tail $fname]] [file extension $fname] $tmpdir]
-        file copy -force -- $fname $dst
-    
-        return $dst
-    } else {
-        return $fname
-    }
-}
 
 
 package provide cluster 0.4

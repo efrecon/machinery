@@ -166,14 +166,20 @@ proc ::cluster::unix::daemon { vm daemon cmd args } {
 # Side Effects:
 #       None.
 proc ::cluster::unix::mounts { vm } {
-    set nm [dict get $vm -name]
-    log DEBUG "Detecting mounts on $nm..."
     set mounts {};
+    if { [llength [dict keys $vm]] } {
+        set nm [dict get $vm -name]
+        log DEBUG "Detecting mounts on $nm..."
+        set lines [tooling relatively -- [file dirname [storage $vm]] \
+                    tooling machine -return -- -s [storage $vm] ssh $nm mount]
+    } else {
+        log DEBUG "Detecting mounts on local machine..."
+        set lines [tooling run -return -- mount]
+    }
     # Parse the output of the 'mount' command line by line, we do this
     # by looking for specific keywords in the string, but we might be
     # better off using regular expressions?
-    foreach l [tooling relatively -- [file dirname [storage $vm]] \
-                    tooling machine -return -- -s [storage $vm] ssh $nm mount] {
+    foreach l $lines {
         # Advance to word "on" and isolate the device specification
         # that should be placed before.
         set on [string first " on " $l]
