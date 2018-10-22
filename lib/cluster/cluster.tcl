@@ -27,6 +27,7 @@ package require cluster::swarmmode
 package require cluster::environment
 package require cluster::tooling
 package require cluster::utils
+package require cluster::mount
 package require zipper
 
 
@@ -1794,41 +1795,12 @@ proc ::cluster::vfs { fname mounts } {
             foreach {src location} $mounts {
                 set src [::cluster::utils::resolve $src $mapper]
                 set dst [::cluster::utils::resolve $location $mapper]
-                set i [string first "://" $src]
-                if { $i >= 0 } {
-                    incr i -1
-                    set proto [string range $src 0 $i]
-                    switch -- $proto {
-                        "http" -
-                        "https" {
-                            if { [catch {package require vfs::http} ver] == 0 } {
-                                log NOTICE "Mounting $src onto $dst"
-                                ::vfs::http::Mount $src $dst
-                            } else {
-                                log WARN "Cannot mount from $src, don't know about http!"
-                            }
-                        }
-                        default {
-                            if { [catch {package require vfs::$proto} ver] == 0 } {
-                                log NOTICE "Mounting $src onto $dst"
-                                ::vfs::${proto}::Mount $src $dst
-                            } else {
-                                log WARN "Cannot mount from $src, don't know about $proto!"
-                            }
-                        }
-                    }
-                } else {
-                    set ext [string trimleft [file extension $src] .]
-                    if { [catch {package require vfs::$ext} ver] == 0 } {
-                        log NOTICE "Mounting $src onto $dst"
-                        ::vfs::${ext}::Mount $src $dst
-                    } else {
-                        log WARN "Cannot mount from $src, don't know about $ext!"
-                    }
+                if { [mount add $src $dst] eq "" } {
+                    log ERROR "Could not mount $src onto $dst"
                 }
             }
         } else {
-            log CRITICAL "No VFS support, will not be able to mount!"
+            log ERROR "No VFS support, will not be able to mount!"
         }
     }
 }

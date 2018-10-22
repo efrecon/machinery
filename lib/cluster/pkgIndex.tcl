@@ -18,5 +18,6 @@ package ifneeded cluster::environment 0.2 [list source [file join $dir environme
 package ifneeded cluster::tooling 0.2 [list source [file join $dir tooling.tcl]]
 package ifneeded cluster::extend 0.1 [list source [file join $dir extend.tcl]]
 package ifneeded cluster::utils 0.1 [list source [file join $dir utils.tcl]]
+package ifneeded cluster::mount 0.1 [list source [file join $dir mount.tcl]]
 package ifneeded proctrace 0.2 [list source [file join $dir proctrace.tcl]]
 package ifneeded zipper 0.12 [list source [file join $dir zipper.tcl]]
