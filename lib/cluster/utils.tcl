@@ -17,6 +17,8 @@ namespace eval ::cluster::utils {
         variable -marker    "-"
         # Temporary directory, empty for good platform guess
         variable -tmp       ""
+        # Character used as a mapping marker
+        variable -mapper    "%"
         # Characters to keep in temporary filepath
         variable fpathCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.,=_"
         # Size converters
@@ -359,6 +361,7 @@ proc ::cluster::utils::tmpdir {} {
 # Arguments:
 #      pfx      Prefix string to add at beginning of file name.
 #      ext      Extension for file
+#      tmpdir   Location of directory for file, empty for good platform guess
 #
 # Results:
 #      Return a full path to a file, in a good platform-dependent temporary
@@ -366,8 +369,13 @@ proc ::cluster::utils::tmpdir {} {
 #
 # Side Effects:
 #      None.
-proc ::cluster::utils::tmpfile { pfx ext } {
-    return [temporary [file join [tmpdir] $pfx].[string trimleft $ext .]]
+proc ::cluster::utils::tmpfile { pfx { ext "" } {tmpdir ""}} {
+    if { $tmpdir eq "" } { set tmpdir [tmpdir] }
+    if { $ext eq "" } {
+        return [temporary [file join $tmpdir $pfx]]
+    } else {
+        return [temporary [file join $tmpdir $pfx].[string trimleft $ext .]]
+    }
 }
 
 
@@ -460,6 +468,16 @@ proc ::cluster::utils::relative {targetFile {currentPath ""}} {
     }
 }
 
+
+proc ::cluster::utils::resolve { str { mapper {}} } {
+    set fullmap [list]
+    foreach {k v} [concat [array get ::tcl_platform] \
+                          [array get ::env] \
+                          $mapper] {
+        lappend fullmap ${vars::-mapper}[string trim $k ${vars::-mapper}]${vars::-mapper} $v
+    }
+    return [string map $fullmap $str]
+}
 
 ####################################################################
 #

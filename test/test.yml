@@ -6,6 +6,8 @@ test:
     labels:
         role: testing
         target: dev
+    files:
+        - test/pwd/access.cfg:/etc/
     images:
         - alpine
     ports:

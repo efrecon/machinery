@@ -36,6 +36,7 @@ namespace eval ::api::cli {
             -config    ""                 "Path to config file, command-line arguments will override configure content"
             -storage   ""                 "Location of machine storage cache, empty for co-located with YAML description"
             -dns       ""                 "IP of nameserver to use for name resolution"
+            -mounts    ""                 "List of alternating remote local virtual mounts, empty for auto, - to turn off"
         }
         # This is the list of recognised commands that will be print
         # when help is requested.
@@ -410,6 +411,8 @@ proc ::api::cli::yaml { fname {pfx ""} } {
 proc ::api::cli::init { {fname ""} } {
     set vars::yaml [resolve pfx $fname]
     set cspec [yaml $vars::yaml $pfx]
+
+    cluster vfs $vars::yaml ${vars::-mounts}
     
     # Recap with current state of cluster as seen from docker-machine
     # and arrange for <cluster> to be the list of virtual machine

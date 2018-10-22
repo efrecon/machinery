@@ -81,6 +81,8 @@ namespace eval ::cluster {
         variable -backup    ".bak"
         # Default initialisation steps for machines
         variable -steps     {shares registries files images prelude networks compose addendum applications}
+        # Automount extensions
+        variable -automount {.zip .tar .kit}
         # Steps that should be executed on managers (patterns)
         variable manager    {ap* n*}
         # Supported sharing types.
@@ -1766,6 +1768,72 @@ proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
 }
 
 
+proc ::cluster::vfs { fname mounts } {
+    if { $mounts eq "-" } {
+        return
+    }
+
+    if { $mounts eq "" } {
+        set rname [file rootname $fname]
+        foreach ext ${vars::-automount} {
+            set mfname ${rname}.[string trimleft $ext .]
+            if { [file exists $mfname] } {
+                log NOTICE "Automounting $mfname"
+                set mounts [list $mfname %rootname%]
+                break
+            }
+        }
+    }
+
+    if { [llength $mounts] > 0 } {
+        if { [catch {package require vfs} ver] == 0 } {
+            set mapper [list rootname [file rootname $fname] \
+                             dirname [file dirname $fname] \
+                             fname $fname]
+            # Resolve file content to list of 2 elements.
+            foreach {src location} $mounts {
+                set src [::cluster::utils::resolve $src $mapper]
+                set dst [::cluster::utils::resolve $location $mapper]
+                set i [string first "://" $src]
+                if { $i >= 0 } {
+                    incr i -1
+                    set proto [string range $src 0 $i]
+                    switch -- $proto {
+                        "http" -
+                        "https" {
+                            if { [catch {package require vfs::http} ver] == 0 } {
+                                log NOTICE "Mounting $src onto $dst"
+                                ::vfs::http::Mount $src $dst
+                            } else {
+                                log WARN "Cannot mount from $src, don't know about http!"
+                            }
+                        }
+                        default {
+                            if { [catch {package require vfs::$proto} ver] == 0 } {
+                                log NOTICE "Mounting $src onto $dst"
+                                ::vfs::${proto}::Mount $src $dst
+                            } else {
+                                log WARN "Cannot mount from $src, don't know about $proto!"
+                            }
+                        }
+                    }
+                } else {
+                    set ext [string trimleft [file extension $src] .]
+                    if { [catch {package require vfs::$ext} ver] == 0 } {
+                        log NOTICE "Mounting $src onto $dst"
+                        ::vfs::${ext}::Mount $src $dst
+                    } else {
+                        log WARN "Cannot mount from $src, don't know about $ext!"
+                    }
+                }
+            }
+        } else {
+            log CRITICAL "No VFS support, will not be able to mount!"
+        }
+    }
+}
+
+
 # ::cluster::parse -- Parse YAML description
 #
 #       This procedure will parse a cluster YAML description and
@@ -3236,9 +3304,11 @@ proc ::cluster::Running { vm { sleep 1 } { retries 3 } } {
 
 # ::cluster::SCopy -- scp to machine
 #
-#       Copy a local file to a machine using scp.  This procedure is
-#       able to circumvent the missing scp command from machine 0.2
-#       and under.
+#       Copy a local file to a machine using scp.  This procedure is able to
+#       circumvent the missing scp command from machine 0.2 and under. As the
+#       file must be made available to external tools (e.g. scp), it will be
+#       first copied out to a temporary directory when it is located as part of
+#       a mounted VFS.
 #
 # Arguments:
 #       vm      Virtual machine description
@@ -3257,7 +3327,15 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     }
 
     log INFO "Copying $s_fname to ${nm}:$d_fname"
-    
+
+    # Extract out of mounted FS if necessary.    
+    set temporaries [list];   # Will contain list of temporary files, if relevant
+    set extracted [CacheVFS $s_fname]
+    if { $extracted ne $s_fname } {
+        lappend temporaries $extracted
+        set s_fname $extracted
+    }
+
     set elevation ""
     if { [utils dget $args sudo off] } {
         set elevation sudo
@@ -3266,7 +3344,7 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
     # Create directory where to receive data.
     if { [file isdirectory $s_fname] } {
         tooling relatively -- [file dirname [storage $vm]] \
-            tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p $d_fname            
+            tooling machine -- -s [storage $vm] ssh $nm {*}$elevation mkdir -p $d_fname
     } else {
         # Use formatting of destination to guess if it is a directory or not...
         if { [string index $d_fname end] eq "/" } {
@@ -3381,6 +3459,11 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
         tooling relatively -- [file dirname $storage] \
             tooling machine -stderr -- -s $storage ssh $nm {*}$elevation \
             mv -f [file join $d_fname [file tail $s_fname]] $d_real && rm -rf $d_fname
+    }
+
+    # Cleanup temporary files and dirs
+    foreach tmpfpath $temporaries {
+        file delete -force -- $tmpfpath
     }
 }
 
@@ -3635,5 +3718,38 @@ proc ::cluster::WaitSSH { vm { sleep 5 } { retries 5 } } {
     log WARN "Gave up waiting for SSH on $nm!"
     return $retries
 }
+
+
+proc ::cluster::CacheVFS { fname { tmpdir "" } { force 0 }} {
+    # Normalize incoming file path
+    set src [::vfs::filesystem fullynormalize $fname]
+
+    # Try to see if the file/dir is part of a mounted filesystem, if so we'll be
+    # copying it.
+    foreach fs [::vfs::filesystem info] {
+        if { [string first $fs $src] == 0 } {
+            # Force leading :: namespace marker on handler for matching
+            # filesystem and assume the namespace right after ::vfs:: in the
+            # handler name provides the type of the VFS used
+            set handler ::[string trimleft [lindex [::vfs::filesystem info $fs] 0] :]
+            set type [lindex [split [string map [list "::" ":"] $handler] :] 2]
+            log INFO "Temporarily caching $fname since mounted onto $fs as $type VFS"
+            set force 1;   # Set the force boolean, a bit ugly?
+            break            
+        }
+    }
+
+    # Recursively copy file/dir into a good candidate temporary directory.
+    if { $force } {
+        log DEBUG "(Recursively) copying from $fname to $dst"
+        set dst [utils tmpfile [file rootname [file tail $fname]] [file extension $fname] $tmpdir]
+        file copy -force -- $fname $dst
+    
+        return $dst
+    } else {
+        return $fname
+    }
+}
+
 
 package provide cluster 0.4
