@@ -1,5 +1,5 @@
 ##################
-## Module Name     --  cluster::vfs
+## Module Name     --  cluster::mount
 ## Original Author --  Emmanuel Frecon - emmanuel@sics.se
 ## Description:
 ##
@@ -142,7 +142,7 @@ proc ::cluster::mount::origin { fname {type_ ""} } {
 }
 
 
-# ::cluster::mount::cache -- Cache in file/dir
+# ::cluster::mount::access -- Cache in file/dir
 #
 #      The base logic is to arrange for caching a copy of a file or directory in
 #      a locally accessible temporary location so that external processes will
@@ -162,7 +162,7 @@ proc ::cluster::mount::origin { fname {type_ ""} } {
 #
 # Side Effects:
 #      None.
-proc ::cluster::mount::cache { fname { tmpdir "" } { force 0 }} {
+proc ::cluster::mount::access { fname { tmpdir "" } { force 0 } { gc 1 } } {
     # If the file is placed under an internally mounted VFS, we force caching so
     # that it can be made available to other processes.
     if { [origin $fname] eq "internal" } {
@@ -175,6 +175,9 @@ proc ::cluster::mount::cache { fname { tmpdir "" } { force 0 }} {
         log DEBUG "(Recursively) copying from $fname to $dst"
         set dst [utils tmpfile [file rootname [file tail $fname]] [file extension $fname] $tmpdir]
         file copy -force -- $fname $dst
+        if { $gc } {
+            atExit [list file delete -force -- $dst]
+        }
     
         return $dst
     } else {
