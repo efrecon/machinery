@@ -165,7 +165,7 @@ proc ::cluster::unix::daemon { vm daemon cmd args } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::unix::mounts { vm } {
+proc ::cluster::unix::mounts { { vm {} } } {
     set mounts {};
     if { [llength [dict keys $vm]] } {
         set nm [dict get $vm -name]

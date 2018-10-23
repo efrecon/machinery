@@ -2614,6 +2614,9 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}}
     set composed [list]
     foreach fpath $fpaths {
         if { $substitution } {
+            # XXX: Can we fold this in the extend framework, both
+            # implementations seems to be doing more or less the same?
+            
             # Read content of project file and resolve environment
             # variables to their values in one go.  This supports defaults
             # whenever a variable does not exist,
@@ -2640,6 +2643,9 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}}
                 if { [dict exists $s env_file] } {
                     lappend associated [dict get $s env_file]
                 }
+                # XXX: Keep up with recent additions to the compose file format,
+                # especially since we can be mounting resources internally onto
+                # virtual path.
             }
             
             # Resolve the associated files, i.e. the one that the YAML
@@ -2840,7 +2846,6 @@ proc ::cluster::Mounting { vm {shares {}} {types *}} {
 #       the host path exists and return either an empty list on
 #       errors, or a list of exactly three items: the host port, the
 #       guest port and the protocol to use for the forwarding.
-#       Description
 #
 # Arguments:
 #       spec        Share mount specification
@@ -2998,7 +3003,7 @@ proc ::cluster::Exec { vm args } {
                 }
             } else {
                 log NOTICE "Executing $fpath locally (args: [string trim $cargs])"
-                tooling run -keepblanks -stderr -raw -- $cmd {*}$cargs
+                tooling run -keepblanks -stderr -raw -- [mount access $cmd] {*}$cargs
             }
             
             # Remove temporary (subsituted) file, if any.
@@ -3068,12 +3073,12 @@ proc ::cluster::Discovery { vm } {
                 foreach pfx $prefixes {
                     set k ${pfx}_[string toupper [dict get $itf interface]]
                     if { [dict exists $itf inet] } {
-			log DEBUG "inet addr for [dict get $itf interface]\
+			            log DEBUG "inet addr for [dict get $itf interface]\
                                 is [dict get $itf inet]"
                         dict set environment ${k}_INET [dict get $itf inet]
                     }
                     if { [dict exists $itf inet6] } {
-			log DEBUG "inet6 addr for [dict get $itf interface]\
+			            log DEBUG "inet6 addr for [dict get $itf interface]\
                                 is [dict get $itf inet6]"
                         dict set environment ${k}_INET6 [dict get $itf inet6]
                     }
@@ -3296,13 +3301,9 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
 
     log INFO "Copying $s_fname to ${nm}:$d_fname"
 
-    # Extract out of mounted FS if necessary.    
-    set temporaries [list];   # Will contain list of temporary files, if relevant
-    set extracted [mount cache $s_fname]
-    if { $extracted ne $s_fname } {
-        lappend temporaries $extracted
-        set s_fname $extracted
-    }
+    # Extract out of mounted FS if necessary, the default is to extract whenever
+    # necessary only and to garbage collect on program end.
+    set s_fname [mount access $s_fname]
 
     set elevation ""
     if { [utils dget $args sudo off] } {
@@ -3428,11 +3429,6 @@ proc ::cluster::SCopy { vm s_fname d_fname args } {
             tooling machine -stderr -- -s $storage ssh $nm {*}$elevation \
             mv -f [file join $d_fname [file tail $s_fname]] $d_real && rm -rf $d_fname
     }
-
-    # Cleanup temporary files and dirs
-    foreach tmpfpath $temporaries {
-        file delete -force -- $tmpfpath
-    }
 }
 
 
@@ -3554,6 +3550,9 @@ proc ::cluster::AbsolutePath { vm fpath { native 0 } } {
 
 
 proc ::cluster::VolumeLocation { vol } {
+    # XX: Replace this with call to unix mounts and extract data from what it
+    # returns. This would nicely refactor all mount introspection calls to same
+    # location and avoid (possible) future mistakes.
     set vol [string toupper [string trimright $vol /]]
     if { [dict exists $vars::volMounts $vol] } {
         return [dict get $vars::volMounts $vol]
