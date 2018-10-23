@@ -30,11 +30,41 @@ namespace eval ::cluster::mount {
     namespace import [namespace parent]::utils::log
 }
 
+
+# ::cluster::mount::add -- Mount external source
+#
+#      This procedure will arrange for mounting a source onto a destination.
+#      Mounting is done to the best of our capability and behaviour can be
+#      adapted through the -order option. This option takes a list of methods
+#      for mounting and these will be proven in turns. Allows techniques are the
+#      keywords internal and external. External mounting uses FUSE and is only
+#      available on UNIX-like system, internal mounting uses Tcl VFS
+#      capabilities, when present. All other options are given further to the
+#      internal or external mounting implementations. 
+#
+# Arguments:
+#      src      Source of information, a remote URL or a local (archive) file
+#      dst      Where to mount, this can be an internal to process path
+#      args     Dash-led options and their values, only -order understood here.
+#
+# Results:
+#      Return how the mount was performed, or an empty string when mounting was
+#      not possible.
+#
+# Side Effects:
+#      External mounting will make available the content of the remote resouce
+#      or file to other processes own by the user for the life-time of the
+#      operation. 
 proc ::cluster::mount::add { src dst args } {
     # Extract the order to see how we prefer to mount the source URL/file onto
     # the destination, all other arguments will be passed to the internal or
-    # external implementations.
-    utils getopt args -order order {extern intern}
+    # external implementations. On windows, no point trying with external
+    # mounting...
+    if { [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
+        utils getopt args -order order internal
+    } else {
+        utils getopt args -order order {external internal}
+    }
 
     # Pass further mounting to internal or external, i.e. in process using
     # TclVFS or system-wide out of process using FUSE.
@@ -57,6 +87,21 @@ proc ::cluster::mount::add { src dst args } {
 }
 
 
+# ::cluster::mount::origin -- Where does a file/dir come from
+#
+#      Look for existing internal to process and fuse-based external mounts and
+#      return either the string internal, the string external or the empty
+#      string.
+#
+# Arguments:
+#      fname    Path to file to detect origin of
+#      type_    Will contain some description of the mount type (impl. dependant)
+#
+# Results:
+#      One of the string internal, external or empty string
+#
+# Side Effects:
+#      None.
 proc ::cluster::mount::origin { fname {type_ ""} } {
     # The type of the origin FS, if found will be contained here.
     if { $type_ ne "" } {
@@ -97,6 +142,26 @@ proc ::cluster::mount::origin { fname {type_ ""} } {
 }
 
 
+# ::cluster::mount::cache -- Cache in file/dir
+#
+#      The base logic is to arrange for caching a copy of a file or directory in
+#      a locally accessible temporary location so that external processes will
+#      be able to use the file(s).  In short, this procedure arranges for files
+#      that are internally mounted within this process to become accessible to
+#      external processes that are spawn.
+#
+# Arguments:
+#      fname    Name of file/dir to make accessible.
+#      tmpdir   Temporary directory to store at, good default if empty
+#      force    Force copy
+#
+# Results:
+#      Return a path location that will be accessible to external processes,
+#      this might be the same location as the original file path when it is
+#      mounted externally (and not forced to caching)
+#
+# Side Effects:
+#      None.
 proc ::cluster::mount::cache { fname { tmpdir "" } { force 0 }} {
     # If the file is placed under an internally mounted VFS, we force caching so
     # that it can be made available to other processes.
@@ -118,6 +183,31 @@ proc ::cluster::mount::cache { fname { tmpdir "" } { force 0 }} {
 }
 
 
+####################################################################
+#
+# Procedures below are internal to the implementation, they shouldn't
+# be changed unless you wish to help...
+#
+####################################################################
+
+
+# ::cluster::mount::AddInternal -- Inter-process mount
+#
+#      Mount a remote location or file onto a local destination. This uses the
+#      TclVFS services, ensuring that files and directories that are mounted
+#      this way are available to this process and implementation, but not to
+#      external processes.
+#
+# Arguments:
+#      src      Source of information, a remote URL or a local (archive) file
+#      dst      Where to mount, this can be an internal to process path
+#      args     Dash-led options and their values, but none supported yet.
+#
+# Results:
+#      1 on mount success, 0 otherwise
+#
+# Side Effects:
+#      None.
 proc ::cluster::mount::AddInternal { src dst args } {
     if { [catch {package require vfs} ver] == 0 } {
         set i [string first "://" $src]
@@ -131,7 +221,7 @@ proc ::cluster::mount::AddInternal { src dst args } {
                         log NOTICE "Mounting $src onto $dst"
                         ::vfs::http::Mount $src $dst
                     } else {
-                        log WARN "Cannot mount from $src, don't know about http!"
+                        log WARN "Cannot mount from $src internally, don't know about http!"
                         return 0
                     }
                 }
@@ -143,7 +233,7 @@ proc ::cluster::mount::AddInternal { src dst args } {
                         log NOTICE "Mounting $src onto $dst"
                         ::vfs::${proto}::Mount $src $dst
                     } else {
-                        log WARN "Cannot mount from $src, don't know about $proto!"
+                        log WARN "Cannot mount from $src internally, don't know about $proto!"
                         return 0
                     }
                 }
@@ -154,7 +244,7 @@ proc ::cluster::mount::AddInternal { src dst args } {
                 log NOTICE "Mounting $src onto $dst"
                 ::vfs::${ext}::Mount $src $dst
             } else {
-                log WARN "Cannot mount from $src, don't know about $ext!"
+                log WARN "Cannot mount from $src internally, don't know about $ext!"
                 return 0
             }
         }
@@ -166,12 +256,37 @@ proc ::cluster::mount::AddInternal { src dst args } {
 }
 
 
+# ::cluster::mount::AddExternal -- OS-based mount
+#
+#      This arranges for a remote location or a file to be mounted onto a
+#      destination using various FUSE-based helpers. External mounting enables
+#      external processes that are spawn from here to access the mounted files
+#      directly. The destination mountpoiint will be created if necessary and
+#      automatically unmounted and cleaned away on exit.
+#
+# Arguments:
+#      src      Source of information, a remote URL or a local (archive) file
+#      dst      Where to mount, this can be an internal to process path
+#      args     Dash-led options and their values, passed further to mounter
+#
+# Results:
+#      1 on mount success, 0 otherwise
+#
+# Side Effects:
+#      FUSE mounting makes the content of the mounted resources available to all
+#      processes that are run by the user under the lifetime of the machinery
+#      session.
 proc ::cluster::mount::AddExternal { src dst args } {
+    # No FUSE on windows, don't even try
     if { [lsearch [split [::platform::generic] -] "win32"] >= 0 } {
         log NOTICE "No FUSE support on Windows!"
         return 0
     }
 
+    # Isolate by scheme so the source can be a remote location (but no support
+    # yet). Otherwise, for typically archives, use the known FUSE helpers
+    # implementations pointed at by the -mount global to mount the archive onto
+    # a directory.
     set i [string first "://" $src]
     if { $i >= 0 } {
         incr i -1
@@ -183,13 +298,27 @@ proc ::cluster::mount::AddExternal { src dst args } {
         }
         return 0
     } else {
+        # Guess the type of the file
         set type [FileType $src]
+
+        # Look for a working mounter for the type of the file and try using it.
+        # Mounters can have options in addition to the binary that needs to be
+        # found in the path. This set of pre-defined options is appended to the
+        # command formed for mounting, in addition to the arguments coming from
+        # outside callers.
         foreach {t mounters} ${vars::-mount} {
+            # Found matching type, try all possible mounters and return ASAP
             if { $t eq $type } {
+                # Go through all commands, these are list with a mounter binary
+                # and options
                 foreach cmd $mounters {
+                    # Extract mounter binary and look for it in path
                     set bin [lindex $cmd 0]
-                    set opts [lrange $cmd 1 end]
                     set mounter [auto_execok $bin]
+                    # Extract options if present.
+                    set opts [lrange $cmd 1 end]
+                    # If the mounter was found in path, create directory and
+                    # mount. Make sure we cleanup on exit.
                     if { $mounter ne "" } {
                         if { ![file isdirectory $dst] } {
                             file mkdir $dst
@@ -198,26 +327,50 @@ proc ::cluster::mount::AddExternal { src dst args } {
                         tooling run -- $mounter {*}$opts {*}$args $src $dst
                         atExit [list [namespace current]::RemoveExternal $dst]
                         return 1; # ASAP
+                    } else {
+                        log WARN "$bin not found to mount $src onto $dst"
                     }
                 }
             }
         }
-        log WARN "Cannot mount from $src, don't know how to mount!"
+
+        log WARN "Cannot mount from $src externally, don't know how to mount!"
         return 0
     }
     return 1
 }
 
+
+# ::cluster::mount::RemoveExternal -- Remove external mount
+#
+#      Unmount an existing mount, and cleanup the directory on which the
+#      resource was mounted once it is empty.
+#
+# Arguments:
+#      dst      Mountpoint to unmount from
+#      rmdir    Should we clean away directory mountpoint (default to yes)
+#
+# Results:
+#      None.
+#
+# Side Effects:
+#      Will call FUSE unmount
 proc ::cluster::mount::RemoveExternal { dst { rmdir 1 } } {
+    # Cache FUSE unmounter
     if { $vars::umount eq "" } {
         set vars::umount [auto_execok ${vars::-umount}]
     }
 
+    # Unmount if we can
     if { $vars::umount ne "" } {
+        # XX: Should we check this is an external mount?
         log NOTICE "Unmounting $dst, this might take time..."
         tooling run -- $vars::umount -qu $dst;   # quiet and unmount, synchronously to make sure we finish
     }
 
+    # Test emptiness of directory and remove if we are asked to. Generate a
+    # warning in all cases so we can warn about not being able to find and
+    # successfully unmount.
     if { [llength [glob -nocomplain -directory $dst -tails -- *]] } {
         log WARN "Directory at $dst not empty, cannot cleanup properly"
     } elseif { $rmdir } {
@@ -229,6 +382,20 @@ proc ::cluster::mount::RemoveExternal { dst { rmdir 1 } } {
 }
 
 
+# ::cluster::mount::FileType -- Guess file type
+#
+#      Crudly guess the type of the file based on the extension. There are
+#      implementation in the tcllib, but we want to keep the dependencies to a
+#      minimum and this will do for our purpose.
+#
+# Arguments:
+#      fpath    Path to file
+#
+# Results:
+#      Type of file, right now only archives are recognised, e.g. tar and zip.
+#
+# Side Effects:
+#      None.
 proc ::cluster::mount::FileType { fpath } {
     switch -glob -nocase -- $fpath {
         "*.zip" {
@@ -242,6 +409,8 @@ proc ::cluster::mount::FileType { fpath } {
             return "tar"
         }
     }
+
+    return "";  # Catch all
 }
 
 
