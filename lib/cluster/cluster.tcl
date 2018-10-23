@@ -2630,12 +2630,26 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}}
             # available to the temporary copy.  Cover newer file formats where
             # the list of services is under the main key called services.
             set content [yaml::yaml2dict -stream $yaml]
+            set associated {};  # List of file that we are refering to.
+
+            foreach toplevel [list "configs" "secrets"] {
+                if { [dict exists $content $toplevel] } {
+                    foreach d [dict get $content $toplevel] {
+                        if { [dict exists $d "file"] } {
+                            lappend associated [dict get $d "file"]
+                        }
+                    }
+                }
+            }
+
+            # Backward compatibility with old compose files where there was no
+            # toplevel services.
             if { [dict exists $content "services"] } {
                 set services [dict get $content "services"]
             } else {
                 set services $content
             }
-            set associated {}
+
             foreach s $services {
                 if { [dict exists $s extends] && [dict exists $s extends file] } {
                     lappend associated [dict get $s extends file]
@@ -2643,9 +2657,6 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}}
                 if { [dict exists $s env_file] } {
                     lappend associated [dict get $s env_file]
                 }
-                # XXX: Keep up with recent additions to the compose file format,
-                # especially since we can be mounting resources internally onto
-                # virtual path.
             }
             
             # Resolve the associated files, i.e. the one that the YAML
@@ -2655,23 +2666,10 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}}
                 # find the real location and resolve it out of its
                 # environment variables as well...
                 set src_path [file normalize [file join [file dirname $fpath] $f]]
-                if { [file exists $src_path] } {
-                    set rootname [file rootname [file tail $f]]
-                    set ext [file extension $f]
-                    set tmp_fpath [utils temporary \
-                            [file join [utils tmpdir] $rootname]]$ext
-                    log INFO "Copying a resolved version of $src_path to\
-                            $tmp_fpath"
-                    set in_fd [open $src_path]
-                    set out_fd [open $tmp_fpath w]
-                    puts -nonewline $out_fd [environment resolve [read $in_fd]]
-                    close $in_fd
-                    close $out_fd
-                    
+                set tmp_fpath [TempCopy $src_path "a resolved version of $f at $src_path"]
+                if { $tmp_fpath ne "" } {
                     lappend temporaries $tmp_fpath
                     lappend included $f $tmp_fpath
-                } else {
-                    log WARN "Cannot find location of $f at $src_path!"
                 }
             }
             
@@ -2717,7 +2715,7 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}}
             lappend temporaries $tmp_fpath
             
             log NOTICE "Substituting environment variables in\
-                    compose project at $fpath via $tmp_fpath"
+                        compose project at $fpath via $tmp_fpath"
             if { $project eq "" } {
                 set project $projdirname
             }
@@ -2772,6 +2770,25 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}}
     return $composed
 }
 
+proc ::cluster::TempCopy { src_path { msg ""} } {
+    if { $msg eq "" } { set msg $src_path }
+    if { [file exists $src_path] } {
+        set rootname [file rootname [file tail $src_path]]
+        set ext [file extension $src_path]
+        set tmp_fpath [utils temporary \
+                            [file join [utils tmpdir] $rootname]]$ext
+        log INFO "Copying $msg to $tmp_fpath"
+        set in_fd [open $src_path]
+        set out_fd [open $tmp_fpath w]
+        puts -nonewline $out_fd [environment resolve [read $in_fd]]
+        close $in_fd
+        close $out_fd
+        return $tmp_fpath
+    } else {
+        log WARN "Cannot find $msg!"
+    }
+    return ""
+}
 
 # ::cluster::Mounting -- Return list of mount points and types
 #
