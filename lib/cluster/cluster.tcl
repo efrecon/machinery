@@ -81,6 +81,9 @@ namespace eval ::cluster {
         variable -backup    ".bak"
         # Default initialisation steps for machines
         variable -steps     {shares registries files images prelude networks compose addendum applications}
+        # Machinery specific defaults for machine creation (dictionary, per
+        # driver). Must use long-options with double-dash here only!!
+        variable -defaults  {virtualbox {--virtualbox-no-vtx-check}}
         # Steps that should be executed on managers (patterns)
         variable manager    {ap* n*}
         # Supported sharing types.
@@ -2201,6 +2204,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     set driver [dict get $vm -driver]
     set cmd [list tooling relatively -- [file dirname [storage $vm]] \
                     tooling machine -- -s [storage $vm] create -d $driver]
+    set optlist [list];   # Will contain the list of command options
     
     # Now translate the standard memory (in MB), size (in MB) and cpu
     # (in numbers) options into options that are specific to the
@@ -2223,6 +2227,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
         if { [info exist MOPT($driver)] } {
             set size [utils convert [dict get $vm -memory] MiB MiB]
             lappend cmd $MOPT($driver) [expr {int($size)}]
+            lappend optlist $MOPT($driver)
         } else {
             log WARN "Cannot set memory size for driver $driver!"
         }
@@ -2241,6 +2246,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
         }
         if { [info exist COPT($driver)] } {
             lappend cmd $COPT($driver) [dict get $vm -cpu]
+            lappend optlist $COPT($driver)
         } else {
             log WARN "Cannot set number of CPUs for driver $driver!"
         }
@@ -2263,6 +2269,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             if { $driver eq $p } {
                 lappend cmd $opt \
                         [expr {int([utils convert [dict get $vm -size] MB MB]*$mult)}]
+                lappend optlist $opt
                 set found 1
                 break
             }
@@ -2272,18 +2279,21 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
         }
     }
     
+    # Cache in machine options, these are stored without the leading double
+    # dash.
+    if { ! [dict exists $vars::machopts $driver] } {
+        # Just remember the options, not their default values.
+        set machopts [list]
+        foreach {k v} [tooling machineOptions $driver] { lappend machopts $k }
+        dict set vars::machopts $driver $machopts
+    } else {
+        set machopts [dict get $vars::machopts $driver]
+    }
+
     # Blindly append driver specific options, if any.  Make sure these
     # are available options, at least!  Also convert these to absolute
     # files so locally stored cached arguments will keep working.
     if { [dict exists $vm -options] } {
-        # Cache in machine options
-        if { ! [dict exists $vars::machopts $driver] } {
-            set machopts [tooling machineOptions $driver]
-            dict set vars::machopts $driver $machopts
-        } else {
-            set machopts [dict get $vars::machopts $driver]
-        }
-
         dict for {k v} [dict get $vm -options] {
             set k [string trimleft $k "-"]
             # Try to automatically add name of driver at the beginning of the
@@ -2294,6 +2304,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             if { [dict exists $machopts $k] } {
                 if { [lsearch $vars::absPaths $k] >= 0 } {
                     lappend cmd --$k [AbsolutePath $vm $v on]
+                    lappend optlist --$k
                 } elseif { [string is boolean -strict $v] } {
                     # Append as an "on" flag by making the flag present on the
                     # command whenever this is a boolean value and is true (when
@@ -2301,8 +2312,15 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
                     if { $v } {
                         lappend cmd --$k
                     }
+                    # optlist is the marker of the options that we have taken
+                    # care of, so remember that we have taken of this boolean
+                    # option even though the flag wasn't inserted in the command
+                    # so that we don't add it again as part of the default
+                    # options, if relevant.
+                    lappend optlist --$k
                 } else {
                     lappend cmd --$k $v
+                    lappend optlist --$k
                 }
             } else {
                 log WARN "--$k is not an option supported by 'create'"
@@ -2310,6 +2328,31 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
         }
     }
     
+    # Add driver-specific options, if any and not overriden above.
+    if { [dict exists ${vars::-defaults} $driver] } {
+        set defaults [dict get ${vars::-defaults} $driver]
+        foreach idx [lsearch -all -glob $defaults --*] {
+            # Add default option (and perhaps its value) if it has not already
+            # been added to the command as part of the other machine properties
+            # and if it is a known option to docker-machine for that driver. The
+            # last "if" allows for backward and forward compatibility through
+            # using the dynamically discovered set of options for the local
+            # docker-machine binary.
+            set opt [lindex $defaults $idx]
+            if { $opt ni $optlist \
+                    && [string trimleft $opt -] in $machopts} {
+                lappend cmd $opt
+                # Add value if it does not look like an option and we have not
+                # reached the end. This builds upon the heuristic that values
+                # are hardly likely to be led by a double-dash.
+                set val? [lindex $defaults [incr idx]]
+                if { $idx < [llength $defaults] && ![string match --* ${val?}] } {
+                    lappend cmd ${val?}
+                }
+            }
+        }
+    }
+
     # Take care of old Docker Swarm. Turn it on in the first place, and
     # recognise the key master (and request for a swarm master when it is on).
     if { [llength $masters] == 0 } {
