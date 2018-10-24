@@ -746,6 +746,7 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
             set substitution 1
             set projname ""
             set options {}
+            set environement {}
             foreach {k v} $opts {
                 switch -nocase -- $k {
                     "substitution" {
@@ -762,10 +763,13 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
                             set substitution 2
                         }
                     }
+                    "environment" {
+                        set environment $v
+                    }
                 }
             }
             Attach $master -swarm
-            Project $fpath $op $substitution $projname $options
+            Project $fpath $op $substitution $projname $options $environment
         }
     } else {
         log WARN "Project file at $fpath does not exist!"
@@ -865,7 +869,11 @@ proc ::cluster::compose { vm ops {swarm 0} { projects {} } } {
                 if { [dict exists $project project] } {
                     set projname [dict get $project project]
                 }
-                set parsed [Project $apaths $ops $substitution $projname $options]
+                set environment {}
+                if { [dict exists $project environment] } {
+                    set environment [dict get $project environment]
+                }
+                set parsed [Project $apaths $ops $substitution $projname $options $environment]
                 if { $parsed ne "" } {
                     lappend composed $parsed
                 }
@@ -2614,7 +2622,29 @@ proc ::cluster::Ports { pspec } {
 }
 
 
-proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}} {
+proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}} {environment {}}} {
+    # Convert environment specifications using equal to proper array set
+    # compatible list.
+    if { [string first "=" [lindex $environment 0]] >= 0 } {
+        set envlist [list]
+        foreach spec $environment {
+            set equal [string first "=" $spec]
+            if { $equal >= 0 } {
+                lappend envlist \
+                    [string toupper [string trim [string range $spec 0 [expr {$equal-1}]]]] \
+                    [string trim [string range $spec [expr {$equal+1}] end]]
+            }
+        }
+        set environement $envlist
+    }
+
+    set envvars [list]
+    array set envcopy [array get ::env];  # Copy current environment
+    foreach {k v} $environement {
+        lappend envvars $k
+        set ::env($k) $v
+    }
+
     set composed ""
     
     foreach op $ops {
@@ -2785,6 +2815,16 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}}}
                 from [utils tmpdir]"
         foreach tmp_fpath $temporaries {
             file delete -force -- $tmp_fpath
+        }
+    }
+
+    # Cleanup environment by removing variables that we had added and reverting
+    # the value of variables that we had changed.
+    foreach k $envvars {
+        if { $k in [array names envcopy] } {
+            set ::env($k) $envcopy($k)
+        } else {
+            unset ::env($k)
         }
     }
     

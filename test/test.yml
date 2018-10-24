@@ -15,3 +15,10 @@ test:
     shares:
         - $HOME
     master: on
+    compose:
+      -
+        environment:
+            - VERSION=1.15-alpine
+        files:
+            - docker-compose.yml
+        project: test
