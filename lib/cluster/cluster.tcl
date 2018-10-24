@@ -2221,7 +2221,8 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             kvm --kvm-memory
         }
         if { [info exist MOPT($driver)] } {
-            lappend cmd $MOPT($driver) [utils convert [dict get $vm -memory] MiB MiB]
+            set size [utils convert [dict get $vm -memory] MiB MiB]
+            lappend cmd $MOPT($driver) [expr {int($size)}]
         } else {
             log WARN "Cannot set memory size for driver $driver!"
         }
@@ -2261,7 +2262,7 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
         foreach { p opt mult } $SOPT {
             if { $driver eq $p } {
                 lappend cmd $opt \
-                        [expr {[utils convert [dict get $vm -size] MB MB]*$mult}]
+                        [expr {int([utils convert [dict get $vm -size] MB MB]*$mult)}]
                 set found 1
                 break
             }
@@ -2275,14 +2276,31 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
     # are available options, at least!  Also convert these to absolute
     # files so locally stored cached arguments will keep working.
     if { [dict exists $vm -options] } {
-        if { [llength $vars::machopts] <= 0 } {
-            set vars::machopts [tooling machineOptions $driver]
+        # Cache in machine options
+        if { ! [dict exists $vars::machopts $driver] } {
+            set machopts [tooling machineOptions $driver]
+            dict set vars::machopts $driver $machopts
+        } else {
+            set machopts [dict get $vars::machopts $driver]
         }
+
         dict for {k v} [dict get $vm -options] {
             set k [string trimleft $k "-"]
-            if { [dict exists $vars::machopts $k] } {
+            # Try to automatically add name of driver at the beginning of the
+            # option for the lazy ones.
+            if { [dict exists $machopts ${driver}-$k] } {
+                set k ${driver}-$k
+            }
+            if { [dict exists $machopts $k] } {
                 if { [lsearch $vars::absPaths $k] >= 0 } {
                     lappend cmd --$k [AbsolutePath $vm $v on]
+                } elseif { [string is boolean -strict $v] } {
+                    # Append as an "on" flag by making the flag present on the
+                    # command whenever this is a boolean value and is true (when
+                    # it is false, the flag will not be present).
+                    if { $v } {
+                        lappend cmd --$k
+                    }
                 } else {
                     lappend cmd --$k $v
                 }
