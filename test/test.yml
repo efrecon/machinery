@@ -1,8 +1,8 @@
 #docker-machinery
 test:
     driver: virtualbox
-    memory: 512
-    size: 512
+    memory: "1GiB"
+    size: "2GB"
     labels:
         role: testing
         target: dev
