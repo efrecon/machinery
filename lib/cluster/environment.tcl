@@ -197,25 +197,34 @@ proc ::cluster::environment::resolve { str } {
     ::set done 0
     # The regexp below using varnames as bash seems to be considering
     # them.
-    ::set exp "\\$\{(\[a-zA-Z_\]+\[a-zA-Z0-9_\]*):(\[^\}\]*?)\}"
+    ::set exp "\\$\{(\[a-zA-Z_\]+\[a-zA-Z0-9_\]*):(-?)(\[^\}\]*?)\}"
     while { !$done } {
         # Look for the expression and if we have a match, extract the
         # name of the variable.
         ::set rpl [regexp -inline -indices -- $exp $quick]
         if { [llength $rpl] >= 3 } {
-            foreach {range var dft} $rpl break
-            foreach {range_start range_stop} $range break
-            foreach {var_start var_stop} $var break
+            lassign $rpl range var marker dft
+            lassign $range range_start range_stop
+            lassign $var var_start var_stop
+            lassign $marker marker_start marker_stop
+            lassign $dft dft_start dft_stop
             ::set var [string range $quick $var_start $var_stop]
+            ::set marker [string range $quick $marker_start $marker_stop]
+            ::set dft [string range $quick $dft_start $dft_stop]
             # If that variable is declared and exist, replace by its
             # value, otherwise replace with the default value.
             if { [info exists ::env($var)] } {
-                ::set quick [string replace $quick $range_start $range_stop \
-                        [::set ::env($var)]]
+                if { $marker eq "-" && [::set ::env($var)] eq ""  } {
+                    ::set quick \
+                        [string replace $quick $range_start $range_stop $dft]
+                } else {
+                    ::set quick \
+                        [string replace $quick $range_start $range_stop \
+                            [::set ::env($var)]]
+                }
             } else {
-                foreach {dft_start dft_stop} $dft break
-                ::set quick [string replace $quick $range_start $range_stop \
-                        [string range $quick $dft_start $dft_stop]]
+                ::set quick \
+                    [string replace $quick $range_start $range_stop $dft]
             }
         } else {
             ::set done 1
