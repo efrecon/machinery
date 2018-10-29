@@ -130,7 +130,7 @@ proc ::cluster::mount::origin { fname {type_ ""} } {
     # Try to find the file under an externally mounted FS, if possible
     if { [lsearch [split [::platform::generic] -] "win32"] < 0 } {
         set src [file normalize $fname]
-        foreach {dev fs t opts } {
+        foreach {dev fs t opts } [unix mounts] {
             if { [string first $fs $src] == 0 && [string match -nocase *fuse* $t] } {
                 set type $t
                 return "external"
