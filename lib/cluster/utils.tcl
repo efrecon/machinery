@@ -67,8 +67,17 @@ namespace eval ::cluster::utils {
 #
 # Side Effects:
 #       None.
-proc ::cluster::utils::defaults { ns {args {}}} {
+proc ::cluster::utils::defaults { ns args } {
     set store ::[string trim $ns :]::vars
+    if { [llength $args] == 1 } {
+        set k ${vars::-marker}[string trimleft [lindex $args 0] ${vars::-marker}]
+        if { [info exists ${store}::$k] } {
+            return [set ${store}::$k]
+        } else {
+            return -code error "$k is not a known option"
+        }
+    }
+
     foreach {k v} $args {
         set k ${vars::-marker}[string trimleft $k ${vars::-marker}]
         if { [info exists ${store}::$k] } {

@@ -132,7 +132,7 @@ namespace eval ::cluster {
 #
 # Side Effects:
 #       None.
-proc ::cluster::defaults { {args {}}} {
+proc ::cluster::defaults { args } {
     set state [utils defaults [namespace current] {*}$args]
     
     if { $vars::defaultMachine eq "" \
