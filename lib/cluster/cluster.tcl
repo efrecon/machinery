@@ -513,6 +513,14 @@ proc ::cluster::init { vm args } {
         shares $vm
     }
 
+    # Copy files, good for copying configuration files that will then be mounted
+    # into containers when using good-old compose. Do this BEFORE the prelude so
+    # it gets possible to move configuration files onto the machine so they can
+    # be used by the remote prelude commands.
+    if { [lsearch -nocase -glob $steps f*] >= 0 } {
+        mcopy $vm
+    }
+
     # Prelude to perform early initialisation. This is freeform, you would
     # typically arrange for the remote user to be able to run docker, mount
     # shares at the OS level, etc.
@@ -520,7 +528,7 @@ proc ::cluster::init { vm args } {
         prelude $vm
     }
 
-    # From now on, we need docker running on the remove machine...
+    # From now on, we need docker running on the remote machine...
     if { [unix daemon $vm docker up] } {
         # Automatically login at required registries, this will facilitate
         # access to privata accounts (and images) at the hub, or any other cloud
@@ -538,12 +546,6 @@ proc ::cluster::init { vm args } {
             pull $vm
         }
         
-        # Copy files, good for copying configuration files that will then be
-        # mounted into containers when using good-old compose.
-        if { [lsearch -nocase -glob $steps f*] >= 0 } {
-            mcopy $vm
-        }
-
         # Now that the machine is running, setup all swarm-wide networks if
         # relevant.
         if { [lsearch -nocase -glob $steps n*] >= 0 } {
