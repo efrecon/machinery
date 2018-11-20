@@ -1,7 +1,8 @@
 # Resolving dependencies
 
-`machinery` has few dependencies and tries to be self-contained as
-much as possible.
+`machinery` has few dependencies and tries to be self-contained as much as
+possible. Required libraries, whenever possible, will appear as submodules in
+this directory.
 
 ## Web Server
 

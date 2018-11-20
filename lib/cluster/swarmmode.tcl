@@ -15,7 +15,10 @@ package require cluster::extend
 package require cluster::utils
 package require cluster::unix
 package require cluster::environment
+package require procfs;           # To automate HW information
+package require sysfs;            # To automate HW information
 package require huddle;           # To parse and operate on stack files
+package require atExit;           # Nice cleanup of remote files
 
 namespace eval ::cluster::swarmmode {
     # Encapsulates variables global to this namespace under their own
@@ -25,13 +28,40 @@ namespace eval ::cluster::swarmmode {
     # implementation.
     namespace eval vars {
         # Extension for token cache file
-        variable -ext       .swt
+        variable -ext         .swt
         # Prefix for labels
-        variable -prefix    "com.docker-machinery"
+        variable -prefix      "com.docker-machinery"
         # Auto-labels sections
-        variable -autolabel "os cpu storage"
+        variable -autolabel   "os cpu storage"
+        # Name of autolabel sub-sections for # of cpus and storage devices,
+        # empty to turn off, leading . optional.
+        variable -autocpu     ".cpus"
+        variable -autostorage ".devices"
         # Characters to keep
-        variable keepCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"        
+        variable keepCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        # Remote /proc cache
+        variable pseudofs     {}
+        variable exitHook     0
+        # Replacement mapper for lsblk keys, the Docker documentation mentions
+        # that only dashes and regular characters should be used
+        variable lsblk        { RA read-ahead
+                                RO read-only
+                                RM removable
+                                ROTA rotational
+                                RAND randomness
+                                MIN-IO minimum-IO-size
+                                OPT-IO optimal-IO-size
+                                PHY-SEC physical-sector-size
+                                LOG-SEC logical-sector-size
+                                RQ-SIZE request-queue-size
+                                DISC-ALN discard-alignment-offset
+                                DISC-GRAN discard-granularity
+                                DISC-MAX discard-max-bytes
+                                DISC-ZERO discard-zeroes-data
+                                WSAME write-same-max-bytes
+                                REV revision
+                                ZONED zone
+                                SECTOR sector-size}
     }
     # Export all lower case procedure, arrange to be able to access
     # commands from the parent (cluster) namespace from here and
@@ -210,8 +240,8 @@ proc ::cluster::swarmmode::join { vm masters } {
 
 proc ::cluster::swarmmode::autolabel { vm masters } {
     set nm [dict get $vm -name]    
-    set labelling {}
 
+    set labels [list];  # List of non-namespaced labels to add
     foreach s ${vars::-autolabel} {
         set s [string tolower [string trim $s .]]
         switch -- $s {
@@ -219,48 +249,61 @@ proc ::cluster::swarmmode::autolabel { vm masters } {
                 log INFO "Collecting OS information for $nm"
                 # OS Information
                 dict for {k v} [unix release $vm] {
-                    lappend labelling \
-                        --label-add \
-                            [string trimright ${vars::-prefix} .].$s.$k=\"[environment quote $v]\"
+                    lappend labels $s.[CleanString $k] $v
                 }
             }
             "cpu" {
                 log INFO "Collecting CPU information for $nm"
-                set cpuinfo [tooling machine -return -stderr \
-                                -- -s [storage $vm] ssh $nm "lscpu"]
-                foreach line $cpuinfo {
-                    set colon [string first ":" $line]
-                    if { $colon >= 0 } {
-                        set k [string trim [string range $line 0 [expr {$colon-1}]]]
-                        set v [string trim [string range $line [expr {$colon+1}] end]]
-                        lappend labelling \
-                            --label-add \
-                                [string trimright ${vars::-prefix} .].$s.[CleanString $k]=\"[environment quote $v]\"
-
-                    }
+                set hook [pseudofs configure -hook]
+                pseudofs configure -hook [list [namespace current]::PseudoFS $vm]
+                set cpus [procfs cpuinfo]
+                dict for {k v} [lindex $cpus 0] {
+                    lappend labels $s.[CleanString $k] $v
                 }
+                if { ${vars::-autocpu} ne "" } {
+                    lappend labels $s.[string trimleft ${vars::-autocpu} .] [llength $cpus]
+                }
+                pseudofs configure -hook $hook
             }
             "storage" {
                 log INFO "Collecting storage information for $nm"
-                set blkinfo [tooling machine -return -stderr \
-                                -- -s [storage $vm] ssh $nm "lsblk -d -o name,hotplug,rm,rota,size"]
-                set header [lindex $blkinfo 0]
-                foreach line [lrange $blkinfo 1 end] {
-                    set d [MakeDict $header $line {RM removable ROTA rotational}]
-                    dict for {k v} $d {
-                        if { $k ne "name" } {
-                            lappend labelling \
-                                --label-add \
-                                    [string trimright ${vars::-prefix} .].$s.[dict get $d name].[CleanString $k]=\"[environment quote $v]\"
+                set hook [pseudofs configure -hook]
+                pseudofs configure -hook [list [namespace current]::PseudoFS $vm]
+                set devices [sysfs lsblk -deny loop*]
+                set names [list]
+                foreach dev $devices {
+                    dict for {k v} $dev {
+                        if { [dict exists $vars::lsblk $k] } {
+                            set k [dict get $vars::lsblk $k]
+                        } else {
+                            set k [string tolower $k]
+                        }
+                        if { $k eq "name" } {
+                            lappend names $v
+                        } else {
+                            lappend labels $s.[dict get $dev NAME].[CleanString $k] $v
                         }
                     }
                 }
+                if { ${vars::-autostorage} ne "" } {
+                    lappend labels $s.[string trimleft ${vars::-autostorage} .] $names
+                }
+                pseudofs configure -hook $hook
             }
         }
     }
 
-    if { [llength $labelling] } {
+    if { [llength $labels] } {
+        set human ""
+        set labelling {}
+        foreach {k v} $labels {
+            lappend labelling \
+                --label-add \
+                    [string trimright ${vars::-prefix} .].$k=\"[environment quote $v]\"
+            append human "\n$k = $v"
+        }
         log NOTICE "Automatically labelling $nm within ${vars::-autolabel} namespace"
+        log INFO "Labelling $nm with:$human"
         node $masters update {*}$labelling $nm
     }
 }
@@ -296,7 +339,7 @@ proc ::cluster::swarmmode::leave { vm masters } {
             }
         }
         "worker" {
-            tooling machine -- -s [storage $vm] ssh $nm "docker swarm leave"        
+            tooling machine -- -s [storage $vm] ssh $nm "docker swarm leave"
         }
     }
 }
@@ -610,6 +653,121 @@ proc ::cluster::swarmmode::stack { masters cmd args } {
 #
 ####################################################################
 
+
+proc ::cluster::swarmmode::RemoveCache { } {
+    if { [dict size $vars::pseudofs] } {
+        log INFO "Cleaning residual HW inventory cache"
+        dict for {fd fpath} $vars::pseudofs {
+            file delete -force -- $fpath
+        }
+        set vars::pseudofs [dict create]
+    }
+}
+
+proc ::cluster::swarmmode::PseudoFS { vm cmd args } {
+    set nm [dict get $vm -name]
+
+    # Install an atExit hook to clean away the copy of the various HW inventory
+    # files that we are going to bring in from the remote machine. Normally,
+    # the cache will be empty as we remove at once (see close implementation
+    # below). It will only execute and remove temporary files whenever machinery
+    # is interrupted for quiting.
+    if { ! $vars::exitHook } {
+        atExit [namespace current]::RemoveCache
+        set vars::exitHook 1
+    }
+
+    # This is the procfs hook that will pick the files from the remote locations instead.
+    switch -nocase -- $cmd {
+        "open" {
+            set fpath [lindex $args 0]
+            set tmp_fname [utils temporary [file join [utils tmpdir] [file rootname [file tail $fpath]]]]
+            log DEBUG "Temporary getting $fpath from $nm"
+            # Copy to local temporary file first through using cat as we need
+            # access to the pseudo filesystems on the remote side (and these do
+            # not exist when running scp). Note that this is hardly generic
+            # enough and will only work on text files, but these are the target
+            # of this implemenation so we are safe for now.
+            set content [tooling machine -return -keepblanks -- -s [storage $vm] ssh $nm cat ${fpath}]
+            set fd [open $tmp_fname w]
+            foreach l $content {
+                puts $fd $l
+            }
+            close $fd
+            # Now open the local copy as requested, i.e. with the requested
+            # arguments and return the file descriptor. We remember about the
+            # association in a global dictionary.
+            set fd [open $tmp_fname {*}[lrange $args 1 end]]
+            dict set vars::pseudofs $fd $tmp_fname
+            return $fd
+        }
+        "close" {
+            set fd [lindex $args 0]
+            # Close descriptor and clean away temporary file from disk.
+            if { [dict exists $vars::pseudofs $fd] } {
+                close $fd
+                file delete -force -- [dict get $vars::pseudofs $fd]
+                dict unset vars::pseudofs $fd
+            }
+        }
+        "glob" {
+            # The following is basically a reimplementation of the glob Tcl
+            # command on top of the minimal subset of ls command options.
+
+            # Get arguments as specified
+            lassign $args dirname pattern
+            set args [lrange $args 2 end]
+            # Collect glob options to reimplement on top of ls
+            set tails [utils getopt args -tails]
+            utils getopt args -types types {b c d f l p s r w x}
+            set fpaths [list]
+            foreach fpath [tooling machine -return -- -s [storage $vm] ssh $nm \
+                                ls -1FdL ${dirname}/${pattern}] {
+                set last [string index $fpath end]
+                switch -- $last {
+                    "*" {
+                        if { "x" in $types } {
+                            set fpath [string range $fpath 0 end-1]
+                        }
+                    }
+                    "/" {
+                        if { "d" in $types } {
+                            set fpath [string range $fpath 0 end-1]
+                        }
+                    }
+                    "=" {
+                        if { "s" in $types } {
+                            set fpath [string range $fpath 0 end-1]
+                        }
+                    }
+                    "@" {
+                        if { "l" in $types } {
+                            set fpath [string range $fpath 0 end-1]
+                        }
+                    }
+                    "|" {
+                        if { "p" in $types } {
+                            set fpath [string range $fpath 0 end-1]
+                        }
+                    }
+                    default {
+                        set fpath ""
+                    }
+                }
+                if { $tails } {
+                    set fpath [file tail $fpath]
+                }
+                if { $fpath ne "" } {
+                    lappend fpaths $fpath
+                }
+            }
+            return $fpaths
+        }
+        default {
+            log ERROR "$cmd not yet implemented"
+        }
+    }
+}
 
 # ::cluster::swarmmode::Inline -- Huddle inlining
 #

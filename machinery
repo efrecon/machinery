@@ -18,6 +18,9 @@ set resolvedArgv0 [file dirname [file normalize $argv0/___]];  # Trick to resolv
 set dirname [file dirname [file normalize $resolvedArgv0]]
 set appname [file rootname [file tail $resolvedArgv0]]
 lappend auto_path [file join $dirname lib] [file join $dirname lib til]
+foreach module [list pseudofs] {
+    ::tcl::tm::path add [file join $dirname lib $module]
+}
 package require cluster;   # This implements the core of our routines!
 package require api::cli
 
