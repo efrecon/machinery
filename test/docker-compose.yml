@@ -1,0 +1,9 @@
+version: '2.1'
+
+services:
+  web:
+    image: nginx:${VERSION:-latest}
+    ports:
+      - "80:80"
+    environment:
+      - NGINX_PORT=80
