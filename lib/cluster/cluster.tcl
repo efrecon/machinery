@@ -66,7 +66,7 @@ namespace eval ::cluster {
         variable -ext       .mch
         # Default number of retries when polling
         variable -retries   3
-        # Environement variable prefix
+        # Environment variable prefix
         variable -prefix    "MACHINERY_"
         # Sharing mapping between drivers (pattern matching) and types
         variable -sharing   "virtualbox vboxsf * rsync"
@@ -751,7 +751,7 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
             set substitution 1
             set projname ""
             set options {}
-            set environement {}
+            set environment {}
             foreach {k v} $opts {
                 switch -nocase -- $k {
                     "substitution" {
@@ -929,7 +929,7 @@ proc ::cluster::mcopy { vm { fspecs {}} } {
         # When here cpy is a variable that host a dictionary in the new style
         # specification able to handle more copying options.
         if { [dict exists $cpy source] && [dict get $cpy source] ne "" } {
-            set src [AbsolutePath $vm [dict get $cpy source]]
+	    set src [AbsolutePath $vm [dict get $cpy source]]
             dict unset cpy source;   # Remove source from dict, mandatory for SCopy below
             if { [file exists $src] } {
                 if { [dict exists $cpy destination] && [dict get $cpy destination] ne "" } {
@@ -2344,10 +2344,10 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             set k [string trimleft $k "-"]
             # Try to automatically add name of driver at the beginning of the
             # option for the lazy ones.
-            if { [dict exists $machopts ${driver}-$k] } {
+            if { [lsearch $machopts ${driver}-$k] >= 0} {
                 set k ${driver}-$k
             }
-            if { [dict exists $machopts $k] } {
+            if { [lsearch $machopts $k] >= 0 } {
                 if { [lsearch $vars::absPaths $k] >= 0 } {
                     lappend cmd --$k [AbsolutePath $vm $v on]
                     lappend optlist --$k
@@ -2673,12 +2673,12 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}} 
                     [string trim [string range $spec [expr {$equal+1}] end]]
             }
         }
-        set environement $envlist
+        set environment $envlist
     }
 
     set envvars [list]
     array set envcopy [array get ::env];  # Copy current environment
-    foreach {k v} $environement {
+    foreach {k v} $environment {
         lappend envvars $k
         set ::env($k) $v
     }
@@ -3003,7 +3003,7 @@ proc ::cluster::Shares { spec {origin ""} {type ""}} {
         return {}
     }
     
-    # Resolve (local) environement variables to the values and make
+    # Resolve (local) environment variables to the values and make
     # sure relative directories are resolved.
     set host [environment resolve $host]
     set mchn [environment resolve $mchn]
