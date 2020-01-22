@@ -165,21 +165,22 @@ proc ::cluster::mount::origin { fname {type_ ""} } {
 proc ::cluster::mount::access { fname { tmpdir "" } { force 0 } { gc 1 } } {
     # If the file is placed under an internally mounted VFS, we force caching so
     # that it can be made available to other processes.
-    if { [origin $fname] eq "internal" } {
+    if { [origin $fname type] eq "internal" } {
         log INFO "Temporarily caching $fname since mounted as $type VFS"
         set force 1
     }
 
     # Recursively copy file/dir into a good candidate temporary directory.
     if { $force } {
+        set dst [utils tmpfile automount [string tolower $type] $tmpdir]
+        file mkdir $dst
         log DEBUG "(Recursively) copying from $fname to $dst"
-        set dst [utils tmpfile [file rootname [file tail $fname]] [file extension $fname] $tmpdir]
         file copy -force -- $fname $dst
         if { $gc } {
             atExit [list file delete -force -- $dst]
         }
     
-        return $dst
+        return [file join $dst [file tail $fname]]
     } else {
         return $fname
     }
