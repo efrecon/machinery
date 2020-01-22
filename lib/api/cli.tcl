@@ -37,6 +37,7 @@ namespace eval ::api::cli {
             -storage   ""                 "Location of machine storage cache, empty for co-located with YAML description"
             -dns       ""                 "IP of nameserver to use for name resolution"
             -mounts    ""                 "List of alternating remote local virtual mounts, empty for auto, - to turn off"
+            -tweaks    ""                 "Alternating list of (semi-)internal module configuration"
         }
         # This is the list of recognised commands that will be print
         # when help is requested.
@@ -268,6 +269,22 @@ proc ::api::cli::globals { appname argv_ } {
     if { ${vars::-dns} ne "" } {
         package require dns
         ::dns::configure -nameserver ${vars::-dns}
+    }
+
+    set tweaks [list]
+    foreach { tweak value } ${vars::-tweaks} {
+        foreach {ns var} [split $tweak .] break
+        if { $ns ne "" && $var ne "" } {
+            set tgt cluster::[string trimleft $ns :]
+            if { [catch {utils defaults $tgt $var $value}] == 0 } {
+                lappend tweaks $tweak
+            } else {
+                log WARN "Could not apply tweak $tweak: $res"
+            }
+        }
+    }
+    if { [llength $tweaks] } {
+        log NOTICE "Applied [llength $tweaks] tweaks to internal configurations"
     }
 }
 

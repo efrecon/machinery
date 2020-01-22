@@ -221,7 +221,7 @@ proc ::cluster::mount::AddInternal { src dst args } {
                 "http" -
                 "https" {
                     if { [catch {package require vfs::http} ver] == 0 } {
-                        log NOTICE "Mounting $src onto $dst"
+                        log NOTICE "Internally mounting $src onto $dst"
                         ::vfs::http::Mount $src $dst
                     } else {
                         log WARN "Cannot mount from $src internally, don't know about http!"
@@ -233,7 +233,7 @@ proc ::cluster::mount::AddInternal { src dst args } {
                 }
                 default {
                     if { [catch {package require vfs::$proto} ver] == 0 } {
-                        log NOTICE "Mounting $src onto $dst"
+                        log NOTICE "Internally mounting $src onto $dst"
                         ::vfs::${proto}::Mount $src $dst
                     } else {
                         log WARN "Cannot mount from $src internally, don't know about $proto!"
@@ -244,7 +244,7 @@ proc ::cluster::mount::AddInternal { src dst args } {
         } else {
             set ext [string trimleft [file extension $src] .]
             if { [catch {package require vfs::$ext} ver] == 0 } {
-                log NOTICE "Mounting $src onto $dst"
+                log NOTICE "Internally mounting $src onto $dst"
                 ::vfs::${ext}::Mount $src $dst
             } else {
                 log WARN "Cannot mount from $src internally, don't know about $ext!"
