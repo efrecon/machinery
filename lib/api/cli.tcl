@@ -274,8 +274,12 @@ proc ::api::cli::globals { appname argv_ } {
     set tweaks [list]
     foreach { tweak value } ${vars::-tweaks} {
         foreach {ns var} [split $tweak .] break
-        if { $ns ne "" && $var ne "" } {
-            set tgt cluster::[string trimleft $ns :]
+        if { $var ne "" } {
+            if { $ns eq "" } {
+                set tgt cluster
+            } else {
+                set tgt cluster::[string trimleft $ns :]
+            }
             if { [catch {utils defaults $tgt $var $value}] == 0 } {
                 lappend tweaks $tweak
             } else {
