@@ -87,6 +87,9 @@ namespace eval ::cluster {
         # Machinery specific defaults for machine creation (dictionary, per
         # driver). Must use long-options with double-dash here only!!
         variable -defaults  {virtualbox {--virtualbox-no-vtx-check}}
+        # Patterns for virtual machines names that should be ignored from YAML
+        # file
+        variable -ignore    {.* x-*}
         # Steps that should be executed on managers (patterns)
         variable manager    {ap* n*}
         # Supported sharing types.
@@ -1867,7 +1870,7 @@ proc ::cluster::parse { fname args } {
             -clustering "docker swarm"
         }
         set machines [dict filter $d script {k v} \
-                        { expr {![string equal $k "version"]}}]
+                            { expr {![string equal $k "version"]}}]
     } elseif { [vcompare ge $version 2.0] } {
         # Default to new swarm mode with the new version file format!
         set options {
@@ -1958,59 +1961,70 @@ proc ::cluster::parse { fname args } {
     set masters [list]
     set clustering [dict get $options -clustering]
     dict for {m keys} $machines {
-        # Create vm "object" with proper name, i.e. using the prefix.
-        # We also make sure that we keep a reference to the name of
-        # the file that the machine was originally read from.
-        if { $pfx eq "" } {
-            set vm [dict create -name $m origin $fname]
-        } else {
-            set vm [dict create -name ${pfx}${vars::-separator}$m origin $fname]
-        }
-        
-        # Check validity of keys and insert them as dash-led.  Arrange
-        # for one master only in old docker swarm mode and store fully-qualified
-        # aliases for the machine.
-        dict for {k v} $keys {
-            if { [lsearch ${vars::-keys} $k] < 0 } {
-                log WARN "In $m, key $k is not recognised!"
-            } else {
-                dict set vm -[string trimleft $k -] $v
-                if { [string trimleft $k -] eq "master" } {
-                    if { [dict get $vm -master] } {
-                        lappend masters [dict get $vm -name]
-                        # Prevent several masters when using old "Docker Swarm",
-                        # in swarm mode there might be several master
-                        # (managers).
-                        if { [string match -nocase "docker*swarm" $clustering] \
-                                && [llength $masters] > 0 } {
-                            log WARN "There can only be one master,\
-                                      keeping [lindex $masters 0] as the master"
-                            dict set vm -master 0
-                            set masters [lrange $masters 0 0]
-                        }
-                    }
-                }
-                
-                # Automatically prefix the aliases, maybe should we
-                # save the prefix in each VM instead?
-                if { $k eq "aliases" && $pfx ne "" } {
-                    set aliases {}
-                    foreach a [dict get $d $m $k] {
-                        lappend aliases ${pfx}${vars::-separator}$a
-                    }
-                    dict set vm -$k $aliases
-                }
+        set ignore 0
+        foreach ptn ${vars::-ignore} {
+            if { [string match $ptn $m] } {
+                set ignore 1; break
             }
         }
-        
-        # Automatically give a driver to the VM if possible and
-        # necessary.
-        if { ![dict exists $vm -driver] } {
-            log NOTICE "Adding default driver '$drv' to [dict get $vm -name]"
-            dict set vm -driver $drv
+        if { $ignore } {
+            log DEBUG "Ignoring machine $m, matches one of: ${vars::-ignore}"
+        } else {
+            # Create vm "object" with proper name, i.e. using the prefix. We
+            # also make sure that we keep a reference to the name of the file
+            # that the machine was originally read from.
+            if { $pfx eq "" } {
+                set vm [dict create -name $m origin $fname]
+            } else {
+                set vm [dict create -name ${pfx}${vars::-separator}$m \
+                                origin $fname]
+            }
+            
+            # Check validity of keys and insert them as dash-led.  Arrange for
+            # one master only in old docker swarm mode and store fully-qualified
+            # aliases for the machine.
+            dict for {k v} $keys {
+                if { [lsearch ${vars::-keys} $k] < 0 } {
+                    log WARN "In $m, key $k is not recognised!"
+                } else {
+                    dict set vm -[string trimleft $k -] $v
+                    if { [string trimleft $k -] eq "master" } {
+                        if { [dict get $vm -master] } {
+                            lappend masters [dict get $vm -name]
+                            # Prevent several masters when using old "Docker
+                            # Swarm", in swarm mode there might be several
+                            # master (managers).
+                            if { [string match -nocase "docker*swarm" $clustering] \
+                                    && [llength $masters] > 0 } {
+                                log WARN "There can only be one master,\
+                                          keeping [lindex $masters 0] as the master"
+                                dict set vm -master 0
+                                set masters [lrange $masters 0 0]
+                            }
+                        }
+                    }
+                    
+                    # Automatically prefix the aliases, maybe should we
+                    # save the prefix in each VM instead?
+                    if { $k eq "aliases" && $pfx ne "" } {
+                        set aliases {}
+                        foreach a [dict get $d $m $k] {
+                            lappend aliases ${pfx}${vars::-separator}$a
+                        }
+                        dict set vm -$k $aliases
+                    }
+                }
+            }
+            
+            # Automatically give a driver to the VM if possible and
+            # necessary.
+            if { ![dict exists $vm -driver] } {
+                log NOTICE "Adding default driver '$drv' to [dict get $vm -name]"
+                dict set vm -driver $drv
+            }
+            
+            lappend vms $vm
         }
-        
-        lappend vms $vm
     }
     
     # Check that there is at least one master in the file that we have
