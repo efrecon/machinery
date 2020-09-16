@@ -1,22 +1,30 @@
 #docker-machinery
 test:
+    swarm: off
     driver: virtualbox
     memory: "1GiB"
     size: "2GB"
     labels:
         role: testing
         target: dev
+    prelude:
+        -
+            exec: mkdir
+            args: -p /etc/test
+            sudo: on
+            remote: on
+            copy: off
     files:
-        - test/pwd/access.cfg:/etc/
+        -
+            source: test/pwd/access.cfg
+            destination: /etc/test/
+            sudo: on
     images:
         - alpine
     ports:
         - 8080:80
         - 20514:514/udp
         - 9090
-    shares:
-        - $HOME
-    master: on
     compose:
       -
         environment:
