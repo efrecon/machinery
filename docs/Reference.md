@@ -693,7 +693,14 @@ in the background.
 Another optional key called `substitution` can be set to a boolean.  When
 `true`, the YAML compose file will be substituted for local environment
 variables before being parsed by `docker-compose`.  See [above](#docker-compose)
-for more information.
+for more information. Note that modern `docker-compose` will alway substitute
+for you.
+
+Two keys called `env_file` and `environment` can be used to point at environment
+variables to be set when composing. `environment` has precedence over the
+content of `env_file` and files pointed at `env_files` are read in their order.
+The content of `environment` can either be a dictionary, or a list of `var=val`
+mimicking the behaviour of regular compose files.
 
 Finally a key called `project` can be set and is a string.  It will contain the
 name of the compose project and will replace the one that usually is extracted

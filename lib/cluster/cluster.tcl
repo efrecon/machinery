@@ -754,7 +754,7 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
             set substitution 1
             set projname ""
             set options {}
-            set environment {}
+            set environment [EnvironmentGet $master $opts]
             foreach {k v} $opts {
                 switch -nocase -- $k {
                     "substitution" {
@@ -770,10 +770,7 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
                         if { [string is true $v] } {
                             set substitution 2
                         }
-                    }
-                    "environment" {
-                        set environment $v
-                    }
+                    }                    
                 }
             }
             Attach $master -swarm
@@ -869,18 +866,17 @@ proc ::cluster::compose { vm ops {swarm 0} { projects {} } } {
                     set substitution \
                             [string is true [dict get $project substitution]]
                 }
-                set options {}
+                set options [dict create]
                 if { [dict exists $project options] } {
                     set options [dict get $project options]
                 }
-                set projname ""
+                set projname [dict create]
                 if { [dict exists $project project] } {
                     set projname [dict get $project project]
                 }
-                set environment {}
-                if { [dict exists $project environment] } {
-                    set environment [dict get $project environment]
-                }
+                # Read environment from files pointed at by env_file, override
+                # by the value of the environment
+                set environment [EnvironmentGet $vm $project]
                 set parsed [Project $apaths $ops $substitution $projname $options $environment]
                 if { $parsed ne "" } {
                     lappend composed $parsed
@@ -2675,21 +2671,6 @@ proc ::cluster::Ports { pspec } {
 
 
 proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}} {environment {}}} {
-    # Convert environment specifications using equal to proper array set
-    # compatible list.
-    if { [string first "=" [lindex $environment 0]] >= 0 } {
-        set envlist [list]
-        foreach spec $environment {
-            set equal [string first "=" $spec]
-            if { $equal >= 0 } {
-                lappend envlist \
-                    [string toupper [string trim [string range $spec 0 [expr {$equal-1}]]]] \
-                    [string trim [string range $spec [expr {$equal+1}] end]]
-            }
-        }
-        set environment $envlist
-    }
-
     set envvars [list]
     array set envcopy [array get ::env];  # Copy current environment
     foreach {k v} $environment {
@@ -3797,6 +3778,53 @@ proc ::cluster::DefaultMachine {} {
     }
     
     return ""
+}
+
+# ::cluster::EnvironmentGet -- Get environment
+#
+#       Provided a dictionay passed as an argument, first read the content of
+#       the env files that are pointed at by the env_file key, in order, then
+#       read the content of the environment key. In the environment key, both
+#       dictionaries and lists of var=val are recognised. Return a dictionary.
+#
+# Arguments:
+#       vm      Virtual machine description
+#       d    	Dictionary to read the env_file and environment keys from
+#
+# Results:
+#       A dictionary
+#
+# Side Effects:
+#       Is able to access automounted VFS 
+proc ::cluster::EnvironmentGet { vm d } {
+    set environment [dict create]
+    if { [dict exists $d env_file] } {
+        foreach fpath [dict get $d env_file] {
+            set fullpath [mount access [AbsolutePath $vm $fpath]]
+            log DEBUG "Reading environment from $fpath"
+            set environment [dict merge $environment \
+                                [environment read $fullpath]]
+        }
+    }
+    if { [dict exists $d environment] } {
+        # Convert environment specifications using equal to proper array set
+        # compatible list.
+        set rawenv [dict get $d environment]
+        if { [string first "=" [lindex $rawenv 0]] >= 0 } {
+            set envlist [list]
+            foreach spec $environment {
+                set equal [string first "=" $spec]
+                if { $equal >= 0 } {
+                    dict set environment \
+                        [string toupper [string trim [string range $spec 0 [expr {$equal-1}]]]] \
+                        [string trim [string range $spec [expr {$equal+1}] end]]
+                }
+            }
+        } else {
+            set environment [dict merge $environment $rawenv]
+        }
+    }
+    return $environment
 }
 
 

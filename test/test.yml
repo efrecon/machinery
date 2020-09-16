@@ -29,6 +29,11 @@ test:
       -
         environment:
             - VERSION=1.15-alpine
+        env_file:
+            - myvars.env
         files:
             - docker-compose.yml
         project: test
+
+.ignored:
+    swarm: off
