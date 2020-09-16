@@ -497,10 +497,18 @@ proc ::cluster::init { vm args } {
     utils getopt args -masters masters [list]
     utils getopt args -networks networks [list]
     utils getopt args -applications apps [list]
+    utils getopt args -environment environment [dict create]
 
     # Abort at once when nothing to do...
     if { [llength $steps] == 0 } {
         return
+    }
+
+    # Start by making sure we set the environment that is requested by the
+    # cluster. This can be good to pass secrets or other options to underlying
+    # tools such as docker-machine.
+    dict for {k v} $environment {
+        ::set ::env($k) $v
     }
 
     # Poor man's discovery: write down a description of all the
@@ -1858,7 +1866,7 @@ proc ::cluster::parse { fname args } {
     # Arrange to access to the list of machines, directly under the top of the
     # YAML root in the old version 1.0 format (the default) or under the key
     # called machines in the newer format
-    set machines [list]; set networks [list]; set apps [list]
+    set machines [list]; set networks [list]; set apps [list]; set environment [dict create]
     if { [vcompare ge $version 1.0] && [vcompare lt $version 2.0] } {
         # Isolate machines that are not named "version", this introduces a
         # backward compatibility!
@@ -1937,6 +1945,11 @@ proc ::cluster::parse { fname args } {
         } else {
             log WARN "No key machines found in YAML description!"
         }
+
+        # Get environmet for entire project, this cheats on the internal
+        # implemenation of AbsolutePath to make sure we can resolve relative to
+        # the location of the main YAML file.
+        set environment [EnvironmentGet [dict create origin $fname] $d]
         
         # Get options and initialise to good defaults
         if { [dict exists $d options] } {
@@ -2035,7 +2048,8 @@ proc ::cluster::parse { fname args } {
                     -machines $vms \
                     -options $options \
                     -networks $networks \
-                    -applications $apps]
+                    -applications $apps \
+                    -environment $environment]
 }
 
 
@@ -3800,7 +3814,11 @@ proc ::cluster::EnvironmentGet { vm d } {
     set environment [dict create]
     if { [dict exists $d env_file] } {
         foreach fpath [dict get $d env_file] {
-            set fullpath [mount access [AbsolutePath $vm $fpath]]
+            if { $vm ne "" } {
+                set fullpath [mount access [AbsolutePath $vm $fpath]]
+            } else {
+                set fullpath [mount access $fpath]
+            }
             log DEBUG "Reading environment from $fpath"
             set environment [dict merge $environment \
                                 [environment read $fullpath]]

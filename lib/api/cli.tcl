@@ -443,6 +443,7 @@ proc ::api::cli::init { {fname ""} } {
             -options [dict get $cspec -options] \
             -networks [dict get $cspec -networks] \
             -applications [dict get $cspec -applications] \
+            -environment [dict get $cspec -environment] \
             -machines [list]]
     set state [cluster ls $vars::yaml]
     foreach vm [dict get $cspec -machines] {
@@ -621,7 +622,8 @@ proc ::api::cli::command { cmd args } {
                             -steps [cluster steps "worker" [cluster defaults -steps]] \
                             -masters [Masters $cluster] \
                             -networks [dict get $cluster -networks] \
-                            -applications [dict get $cluster -applications]] } {
+                            -applications [dict get $cluster -applications]] \
+                            -environment [dict get $cluster -environment]} {
                         lappend created $vm
                     }
                 }                
@@ -630,7 +632,8 @@ proc ::api::cli::command { cmd args } {
                         -steps [cluster steps "manager" [cluster defaults -steps]] \
                         -masters [Masters $cluster] \
                         -networks [dict get $cluster -networks] \
-                        -applications [dict get $cluster -applications]
+                        -applications [dict get $cluster -applications] \
+                        -environment [dict get $cluster -environment]
                 }                
             }
         }
@@ -817,7 +820,8 @@ proc ::api::cli::command { cmd args } {
                         -steps [cluster steps "worker" $steps] \
                         -masters [Masters $cluster] \
                         -applications [dict get $cluster -applications] \
-                        -networks [dict get $cluster -networks]
+                        -networks [dict get $cluster -networks] \
+                        -environment [dict get $cluster -environment]
                 } else {
                     cluster init $vm -steps $steps
                 }
@@ -828,7 +832,8 @@ proc ::api::cli::command { cmd args } {
                         -steps [cluster steps "manager" $steps] \
                         -masters [Masters $cluster] \
                         -applications [dict get $cluster -applications] \
-                        -networks [dict get $cluster -networks]
+                        -networks [dict get $cluster -networks] \
+                        -environment [dict get $cluster -environment]
                 }
             }
         }
