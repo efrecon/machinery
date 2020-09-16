@@ -860,7 +860,7 @@ proc ::cluster::compose { vm ops {swarm 0} { projects {} } } {
                             "START" "Starting" \
                             "RM" "Removing"] [string toupper $op]]
                 }
-                log NOTICE "[join $what ,\ ] components from [join $apaths ,\ ] in $nm"
+                log NOTICE "[join $what ,\ ] services from [join $apaths ,\ ] in $nm"
                 set substitution 0
                 if { [dict exists $project substitution] } {
                     set substitution \
@@ -893,7 +893,7 @@ proc ::cluster::compose { vm ops {swarm 0} { projects {} } } {
     }
     
     if { [llength $composed] > 0 } {
-        log INFO "Machine $nm now running the following components"
+        log INFO "Machine $nm now running the following services"
         tooling docker ps
     }
     
@@ -929,7 +929,7 @@ proc ::cluster::mcopy { vm { fspecs {}} } {
         # When here cpy is a variable that host a dictionary in the new style
         # specification able to handle more copying options.
         if { [dict exists $cpy source] && [dict get $cpy source] ne "" } {
-	    set src [AbsolutePath $vm [dict get $cpy source]]
+	        set src [AbsolutePath $vm [dict get $cpy source]]
             dict unset cpy source;   # Remove source from dict, mandatory for SCopy below
             if { [file exists $src] } {
                 if { [dict exists $cpy destination] && [dict get $cpy destination] ne "" } {
@@ -3080,8 +3080,9 @@ proc ::cluster::Exec { vm args } {
         # Resolve using initial location of YAML description file
         set cmd ""
         set tmp_fpath ""
+        set fpath ""
         if { $copy } {
-            set fpath [AbsolutePath $vm [dict get $exe exec]]
+            set fpath [mount access [AbsolutePath $vm [dict get $exe exec]]]
             if { [file exists $fpath] } {
                 if { $substitution } {
                     # Read and substitute content of file
@@ -3105,25 +3106,34 @@ proc ::cluster::Exec { vm args } {
                 log WARN "Cannot find external app to execute at: $fpath"
             }
         } else {
-            set cmd [dict get $exe exec]
+            set cmd [mount access [dict get $exe exec]]
         }
         
         if { $cmd ne "" } {
             if { $remotely } {
-                set dst [utils temporary [file join /tmp [file tail $fpath]]]
-                SCopy $vm $cmd $dst recurse off mode a+x
-                log NOTICE "Executing $fpath remotely (args: [string trim $cargs])"
-                if { $sudo } {
-                    ssh $vm sudo $dst {*}$cargs
+                if { $copy } {
+                    set dst [utils temporary [file join /tmp [file tail $fpath]]]
+                    SCopy $vm $cmd $dst recurse off mode a+x
+                    log NOTICE "Executing [dict get $exe exec] remotely (args: [string trim $cargs])"
+                    if { $sudo } {
+                        ssh $vm sudo $dst {*}$cargs
+                    } else {
+                        ssh $vm $dst {*}$cargs
+                    }
+                    if { !$keep } {
+                        ssh $vm rm -f $dst
+                    }
                 } else {
-                    ssh $vm $dst {*}$cargs
-                }
-                if { !$keep } {
-                    ssh $vm /bin/rm -f $dst
+                    log NOTICE "Executing [dict get $exe exec] remotely (args: [string trim $cargs])"
+                    if { $sudo } {
+                        ssh $vm sudo $cmd {*}$cargs
+                    } else {
+                        ssh $vm $cmd {*}$cargs
+                    }
                 }
             } else {
-                log NOTICE "Executing $fpath locally (args: [string trim $cargs])"
-                tooling run -keepblanks -stderr -raw -- [mount access $cmd] {*}$cargs
+                log NOTICE "Executing [dict get $exe exec] locally (args: [string trim $cargs])"
+                tooling run -keepblanks -stderr -raw -- $cmd {*}$cargs
             }
             
             # Remove temporary (subsituted) file, if any.
