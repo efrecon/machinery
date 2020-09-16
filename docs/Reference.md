@@ -12,7 +12,7 @@ token(s) as needed or even manage the life-cycle of several compose projects to
 be run on the cluster. `machinery` can automatically bring up specific project
 files onto machines that it controls. `machinery` is able to substitute the
 value of local environment variables in the compose project files before
-bringing the components up. Together with conventions for the dynamic
+bringing the services up. Together with conventions for the dynamic
 construction of network-related environment variables, this provides for a
 simple mechanism for service discovery.
 
@@ -93,7 +93,7 @@ restarts of the machines.
 
 #### swarm
 
-The command `swarm` will either schedule components to be run in the cluster or
+The command `swarm` will either schedule services to be run in the cluster or
 print out its current status.  When called without arguments, `swarm` will print
 out current cluster status i.e. the virtual machines that are registered within
 the master and their details.
@@ -104,7 +104,7 @@ recognises automatically two kinds of YAML files:
 * Compose projects files will be substituted for environment variables and sent
   to the master of the cluster.  You will have to use labels or other scheduling
   techniques if you want to pinpoint specific machines where to run these
-  components.
+  services.
 
 * `machinery` also recognises list of indirections to compose project files.
   These have exactly the same syntax as the [`compose` keys](#compose) of the
@@ -113,23 +113,23 @@ recognises automatically two kinds of YAML files:
 `swarm` also takes a number of options that should appear before its arguments.
 These specify what `docker-compose` operations will be executed on the specified
 files.  You can specify several options in a row, for example to restart
-components.  The supported options are:
+services.  The supported options are:
 
 * `-stop` matches the [`stop`](http://docs.docker.com/compose/cli/#stop) command
-  of `compose` and will stop the components.
+  of `compose` and will stop the services.
 
 * `-kill` matches the [`kill`](http://docs.docker.com/compose/cli/#kill) command
-  of `compose` and will kill the components.
+  of `compose` and will kill the services.
 
 * `-rm` matches the [`rm`](http://docs.docker.com/compose/cli/#rm) command
-  of `compose` and will remove the components without asking at the prompt.
+  of `compose` and will remove the services without asking at the prompt.
 
 * `-start` matches the [`start`](http://docs.docker.com/compose/cli/#start)
-  command of `compose` and will start stopped components.
+  command of `compose` and will start stopped services.
 
 * `-up` is the default when nothing is specified.  It matches the
   [`up`](http://docs.docker.com/compose/cli/#up) command of `compose` and
-  will create and start the components in the background.  Additional option
+  will create and start the services in the background.  Additional option
   can be provided through the YAML syntax of indirecting files.
 
 * `-options` is a way to pass instructions to `machinery` when parsing regular
@@ -175,7 +175,7 @@ it will be returned directly. To force regeneration of the token, you can
 specify the option `-force` to the command.
 
 Whenever a token needs to be generated, `machinery` will run `swarm create` in a
-component on the local machine.  The component is automatically removed once the
+service on the local machine.  The service is automatically removed once the
 token has been generated.  However, the image that might have been downloaded
 will remain on the local machine.
 
@@ -198,13 +198,13 @@ provided.
 #### ps
 
 When called without any argument, the command `ps` will ask the swarm
-master to return the list of all running components, as of
+master to return the list of all running services, as of
 `docker-machine ps`.  When called with arguments, these should be name
 matching patterns and the command will return the list of running
-components for that/those machine(s) instead.  Note that calling `ps`
+services for that/those machine(s) instead.  Note that calling `ps`
 with no argument, is different from running `ps "*"`.  In the first
-case, only the components scheduled via swarm are printed out.  In the
-second case, all components currently running in the cluster are
+case, only the services scheduled via swarm are printed out.  In the
+second case, all services currently running in the cluster are
 printed out, including those that would be issued from compose files
 attached specifically attached to machines.
 
@@ -220,7 +220,7 @@ comprised in the cluster.
 
 #### search
 
-`search` will look into the cluster for components matching one or
+`search` will look into the cluster for containers matching one or
 more name patterns.  The command takes an option called `-restrict`
 which argument should be a comma-separated list of patterns matching
 the names of the virtual machines in the cluster.  When `-restrict` is
@@ -229,17 +229,17 @@ provided with a list, only the machines which name match any of the
 glob-style pattern will be considered.
 
 All the remaining arguments to `search` should be glob-style patterns,
-and these will be matched against the component names.  `search` will
-output a table of the matching components, together with their full
+and these will be matched against the container names.  `search` will
+output a table of the matching containers, together with their full
 docker identifier and the machines on which they are running.
 
 `search` is different from `ps` as it does not relies on `swarm` when
-searching for the components.
+searching for the containers.
 
 #### forall
 
 `forall` can be used to execute the same docker command on a number of
-components or a number of virtual machines.  The command takes an
+containers or a number of virtual machines.  The command takes an
 option called `-restrict` which argument should be a comma-separated
 list of patterns matching the names of the virtual machines in the
 cluster.  When `-restrict` is not specified, `forall` will consider
@@ -247,11 +247,11 @@ all the virtual machines; when provided with a list, only the machines
 which name match any of the glob-style pattern will be considered.
 
 In the most usual case, `forall` should take at least two arguments.
-The first is a glob-style pattern matching the name of the components
+The first is a glob-style pattern matching the name of the containers
 on the (restricted set of) machines.  All remaining arguments are the
 name of the docker commands, and arguments that will be blindly passed
 to the docker command when it is run.  For example, the following
-command would restart all the components of the cluster (note the
+command would restart all the containers of the cluster (note the
 quote around the `*` to avoid shell substitution before sending the
 value to `machinery`):
 
@@ -259,24 +259,24 @@ value to `machinery`):
 
 In the other case, `forall` detects that the first argument is the
 name of an existing docker command and will then not run the command
-on matching components, which allows to run commands that do not
-require a component name or identifier, such as `docker pull` for
+on matching containers, which allows to run commands that do not
+require a container name or identifier, such as `docker pull` for
 example.  For example, the following would download the Alpine Linux
-component onto all the machines in your cluster:
+container onto all the machines in your cluster:
 
     machinery forall pull alpine
 
-In case you had components which name could match the name of a docker
+In case you had containers which name could match the name of a docker
 command, it is possible to segregate the pattern matching the
-component name from the command by inserting a double-dash in between.
-So the example below would again restart all the components, but
+container name from the command by inserting a double-dash in between.
+So the example below would again restart all the containers, but
 separation between the pattern and the command is now explicit:
 
     machinery forall "*" -- restart
 
 #### server
 
-### Interaction with system components
+### Interaction with system containers
 
 #### Networking Information <a name="netinfo" />
 
@@ -361,7 +361,7 @@ versions.
 
 The combination of `machinery`, `docker-machine` and `docker-compose` enables a
 single control point for an entire cluster.  This eases service discovery as it
-makes possible to pass information between components and machines of the
+makes possible to pass information between containers and machines of the
 cluster.  `machinery` provides a solution to this through extending the YAML
 format for `docker-compose`.  When substitution is turned on for a YAML compose
 project file, any occurrence of a *local* environment variable will be replaced
@@ -601,7 +601,7 @@ driver does not support that option.
 
 `labels` should be itself a dictionary.  The content of this dictionary will be
 used as labels for the docker machines that are created.  These labels can be
-used to schedule components on particular machines at a later time.
+used to schedule services on particular machines at a later time.
 
 #### `options`
 
@@ -636,7 +636,7 @@ the `$`-sign will be replaced by the value of that local variable.
 For example, specifying `$HOME` would arrange for the path to your
 home directory to be available at the same location within the guest
 machine; handy whenever you want to transfer development files or
-initiate components.  Relative path are resolved to the directory
+initiate containers.  Relative path are resolved to the directory
 hosting the cluster definition YAML file.
 
 The default type is `vboxsf` on virtualbox-based machines and `rsync`
@@ -653,7 +653,7 @@ registries once a virtual machine has been created, initialised and
 verified.  This can be handy if you want to make sure images are
 already present when your machine is being put into action.  For
 example, `docker-compose` will sometimes timeout the first time that
-it schedules components as image downloading takes too long.
+it schedules containers as image downloading takes too long.
 
 The default behaviour is to download images on the host and to
 transfer them to the virtual machine using a combination of `docker
@@ -687,7 +687,7 @@ thus allowing you to easily copy and/or transfer entire hierarchies of files.
 
 Additionally, a key called `options` can be specified and it will contain a list
 of additional options that will be passed to `docker-compose up`.  By default,
-all project files are brought up with the option `-d` to start their components
+all project files are brought up with the option `-d` to start their containers
 in the background.
 
 Another optional key called `substitution` can be set to a boolean.  When
@@ -739,7 +739,7 @@ the machine. There are two ways of describing file copies.
   host) separated from the destination path (on the machine) using the `:`
   character. There can also follow a number of hints placed behind a trailing
   `:`. These hints are separated from one another using a coma sign, but the
-  only recognised hint is currently `norecurse`which avoids recusrion when
+  only recognised hint is currently `norecurse` which avoidss recusrion when
   directories are being copied.
   
 * In its more complex form, each specification is a dictionary itself. This
