@@ -544,8 +544,10 @@ keys as described below:
 ### `machines`
 
 The machines top-level key, introduced in v2 contains a list of machines. In v1,
-these names are at the top-level of the YAML hierarchy instead. The following
-keys are allowed in machine descriptions:
+these names are at the top-level of the YAML hierarchy instead. Machines with a
+name starting with a `.` (dot) or `x-` will be automatically ignored. Hidden
+machines can be useful when combined with YAML anchors or the `extends` and
+`include` directives. The following keys are allowed in machine descriptions:
 
 #### `driver`
 
@@ -622,6 +624,15 @@ onto the standard syslog port `514` on UDP.
 
 At present, port forwarding is only meaningful and supported on virtualbox based
 machines.
+
+#### `extends`
+
+`extends` should point to the name of another machine to extend the definition
+of the current machine from. Current keys are recursively merged on top of the
+keys from the machine pointed at with `extends`. `extends` can be recursive, but
+at most `10` levels of resolutions will be performed. Using `extends` can be
+handy in collaboration with hidden machines and `include`, as an alternative to
+YAML anchors.
 
 #### `shares`
 
@@ -782,4 +793,12 @@ the machine. There are two ways of describing file copies.
 Copies are issued using the underlying `scp` command of `docker-machine`. This
 is still an experimental feature, but it eases migration of project relevant
 files to relevant machines on the cluster. This can even include secrets as
-transfers occured under securred conditions.
+transfers occurr under secured conditions.
+
+### `include`
+
+`include` can contain a list of files to import into the current YAML
+description. Inclusion happens early on during parsing, and included files might
+include other files themselves. `include` is usually used together with hidden
+machines, i.e. with a name starting with a `.` or `x-`, and the `extends` key in
+machine descriptions.
