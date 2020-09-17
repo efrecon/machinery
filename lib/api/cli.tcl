@@ -622,8 +622,8 @@ proc ::api::cli::command { cmd args } {
                             -steps [cluster steps "worker" [cluster defaults -steps]] \
                             -masters [Masters $cluster] \
                             -networks [dict get $cluster -networks] \
-                            -applications [dict get $cluster -applications]] \
-                            -environment [dict get $cluster -environment]} {
+                            -applications [dict get $cluster -applications] \
+                            -environment [dict get $cluster -environment]]} {
                         lappend created $vm
                     }
                 }                

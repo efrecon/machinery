@@ -20,6 +20,7 @@
 package require Tcl 8.6;  # We require chan pipe
 package require platform
 package require yaml;     # This is found in tcllib
+package require dicttool; # This is found in tcllib
 package require cluster::virtualbox
 package require cluster::vcompare
 package require cluster::unix
@@ -90,6 +91,8 @@ namespace eval ::cluster {
         # Patterns for virtual machines names that should be ignored from YAML
         # file
         variable -ignore    {.* x-*}
+        # Number of extends resolution loops / levels
+        variable -extend    10
         # Steps that should be executed on managers (patterns)
         variable manager    {ap* n*}
         # Supported sharing types.
@@ -165,7 +168,9 @@ proc ::cluster::defaults { args } {
 #
 # Arguments:
 #        yaml        Path to YAML description of cluster
+#        environment Array of environment variables to set
 #        machines    glob-style pattern to match on machine names
+#        force       Force reactualisation of the cache
 #
 # Results:
 #       Return a list of dictionaries, one dictionary for the state of
@@ -191,6 +196,7 @@ proc ::cluster::ls { yaml {machines *} { force 0 } } {
     # of keys (this is the first line of docker-machine ls output,
     # meaning the header).
     if { $capture } {
+        # Request for list of machines, parse and store in cache.
         log NOTICE "Capturing current overview of cluster"
         set state [tooling relatively -- [file dirname [StorageDir $yaml]] \
                         tooling machine -return -- -s [StorageDir $yaml] ls]
@@ -516,7 +522,7 @@ proc ::cluster::init { vm args } {
     # including the most important one (e.g. the one returned by
     # docker-machine ip) as environment variable declaration in a
     # file.
-    set vm [bind $vm]
+    set vm [bind $vm $environment]
     Discovery $vm
     
     set nm [dict get $vm -name]
@@ -681,10 +687,10 @@ proc ::cluster::ps { vm { swarm 0 } {direct 1}} {
     set vm [bind $vm]
     set nm [dict get $vm -name]
     if { $swarm } {
-        log NOTICE "Getting components of cluster"
+        log NOTICE "Getting services of cluster"
         Attach $vm -swarm
     } else {
-        log NOTICE "Getting components of $nm"
+        log NOTICE "Getting containers of $nm"
         Attach $vm
     }
     if { $direct } {
@@ -1876,6 +1882,8 @@ proc ::cluster::parse { fname args } {
         set machines [dict filter $d script {k v} \
                             { expr {![string equal $k "version"]}}]
     } elseif { [vcompare ge $version 2.0] } {
+        set d [MergeYAML $d [file dirname $fname]]
+        
         # Default to new swarm mode with the new version file format!
         set options {
             -clustering "swarm mode"
@@ -1965,6 +1973,8 @@ proc ::cluster::parse { fname args } {
             }
         }        
     }
+
+    set machines [Extend $machines]
 
     set vms {}
     set masters [list]
@@ -3829,8 +3839,7 @@ proc ::cluster::EnvironmentGet { vm d } {
         # compatible list.
         set rawenv [dict get $d environment]
         if { [string first "=" [lindex $rawenv 0]] >= 0 } {
-            set envlist [list]
-            foreach spec $environment {
+            foreach spec $rawenv {
                 set equal [string first "=" $spec]
                 if { $equal >= 0 } {
                     dict set environment \
@@ -3877,6 +3886,90 @@ proc ::cluster::WaitSSH { vm { sleep 5 } { retries 5 } } {
 }
 
 
+# ::cluster::MergeYAML -- Recursive inclusion resolution
+#
+#       In the dictionary passed as a parameter, recursively replace all the
+#       files pointed to by the content of the top key called include with their
+#       content (while removing the key called include itself).
+#
+# Arguments:
+#	    d	    Dictionary in which to perform inclusion resolution
+#	    maindir	Root directory for file inclusion, when relative paths specified
+#
+# Results:
+#       A dictionary with no top-level include keys, i.e. in which all
+#       references to another file have been replaced by the content of the
+#       file.
+#
+# Side Effects:
+#       Reads all externally pointed files
+proc ::cluster::MergeYAML { d maindir } {
+    if { [dict exists $d include] } {
+        set includes [dict get $d include]
+        dict unset d include
+        foreach fpath $includes {
+            # XXX: TODO: maybe do we want to support explicit external URLs
+            set fpath [mount access [file join $maindir $fpath]]
+            log info "Merging content of $fpath"
+            set subd [::yaml::yaml2dict -file $fpath]
+            set d [dict rmerge $d [MergeYAML $subd [file dirname $fpath]]]
+        }
+    }
+    return $d
+}
+
+
+# ::cluster::Extend -- Machine extension resolution
+#
+#       In the dictionary of machines passed as a parameter, replace all
+#       references to another machine pointed at by the value of an extend key
+#       by the content of that machine. Merge is recursive and made on top of
+#       the key/values of the machine to extend from.
+#
+# Arguments:
+#	    machines	Dictionary of machines.
+#
+# Results:
+#       A resolved dictionary of machines. Recursive resolution happens at most
+#       as the -extend global variable.
+#
+# Side Effects:
+#       None
+proc ::cluster::Extend { machines } {
+    for {set i 0} { $i < ${vars::-extend} } {incr i} {
+        set res [dict create]
+        set replaced 0
+        dict for {m keys} $machines {
+            if { [dict exists $keys extends] } {
+                set exm [dict get $keys extends]
+                dict unset keys extends; # Remove extend at once from the keys
+                if { [dict exists $machines $exm] } {
+                    # Get content of keys for the machine pointed at by the
+                    # extend and merge what we have on top of the referenced
+                    # machine
+                    log DEBUG "Extending machine $m from content of $exm"
+                    set keys [dict rmerge [dict get $machines $exm] $keys]
+                    # Replace with our merge, there might still be more extends
+                    # present, but we will be looping, so this is ok.
+                    dict set res $m $keys
+                    set replaced 1
+                } else {
+                    # Warn and do nothing, we should ignore that machine as its
+                    # description is obviously wrong.
+                    log WARN "$exm is not a known machine to extend from!"
+                }
+            } else {
+                dict set res $m $keys
+            }
+        }
+        set machines $res
+
+        # No replace made, we can give up earlier
+        if { ! $replaced } { break }
+    }
+
+    return $machines
+}
 
 
 package provide cluster 0.4
