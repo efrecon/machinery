@@ -41,14 +41,20 @@ namespace eval ::cluster::environment {
 proc ::cluster::environment::set { vm } {
     if { [dict exists $vm origin] } {
         ::set environment [read [cache $vm]]
-        dict for {k v} $environment {
-            ::set ::env($k) $v
-        }
+        export $environment
     } else {
         ::set environment {}
     }
     
     return $environment
+}
+
+
+proc ::cluster::environment::export { environment } {
+    dict for {k v} $environment {
+        log DEBUG "Exporting value of $k to environment and process tree"
+        ::set ::env($k) $v
+    }
 }
 
 

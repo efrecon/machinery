@@ -12,6 +12,7 @@
 package require cluster::swarm
 package require cluster::tooling
 package require cluster::utils
+package require cluster::environment
 
 namespace eval ::api::cli {
     namespace eval vars {
@@ -433,7 +434,13 @@ proc ::api::cli::init { {fname ""} } {
     set vars::yaml [resolve pfx $fname]
     set cspec [yaml $vars::yaml $pfx]
 
+    # Perform early mounts for accessing packed filesystems, secrets, etc.
     cluster vfs $vars::yaml ${vars::-mounts}
+
+    # Set the environment for the entire cluster ASAP. XXX: Maybe do we want to
+    # move this and the code below to an activation mechanism in the cluster::
+    # namespace?
+    environment export [dict get $cspec -environment]
     
     # Recap with current state of cluster as seen from docker-machine
     # and arrange for <cluster> to be the list of virtual machine
