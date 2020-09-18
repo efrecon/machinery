@@ -2,7 +2,13 @@
 version: 2
 
 include:
-    - templates/skeleton.yml
+    - depends/skeleton.yml
+
+env_file:
+    - depends/test.env
+
+environment:
+    - TEST=inmain
 
 machines:
     test:
