@@ -2852,6 +2852,15 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}} 
         switch -nocase -- $op {
             "UP" {
                 lappend cmd -d
+                # Automatically remove orphans containers
+                if { [vcompare ge [tooling version compose] 1.7] } {
+                    log TRACE "Automatically removing orphans"
+                    lappend cmd --remove-orphans
+                }
+                if { [vcompare ge [tooling version compose] 1.20] } {
+                    log TRACE "Automatically adding compose v3 compatibility"
+                    lappend cmd --compatibility
+                }
                 # Blindly add compose options if we had some.
                 foreach o $options {
                     lappend cmd $o
