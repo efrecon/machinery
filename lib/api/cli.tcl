@@ -729,7 +729,7 @@ proc ::api::cli::command { cmd args } {
             tooling runtime exit
             if { [utils getopt args -help] } {
                 chelp $cmd \
-                        "When called with no arguments, this will request the swarm master for a list of components.  When called with arguments, these should be the names of virtual machines and the list of components for each of these machines will be printed out.   Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
+                        "When called with no arguments, this will request the swarm master for a list of services.  When called with arguments, these should be the names of virtual machines and the list of containers for each of these machines will be printed out.   Apart from the command options, all arguments to this command should be machine names, as from the YAML description." \
                         {   -help "Print this help" }
             }
             set cluster [init]
