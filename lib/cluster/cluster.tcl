@@ -1976,6 +1976,8 @@ proc ::cluster::parse { fname args } {
 
     set machines [Extend $machines]
 
+    puts $machines
+
     set vms {}
     set masters [list]
     set clustering [dict get $options -clustering]
@@ -3950,22 +3952,24 @@ proc ::cluster::Extend { machines } {
         set replaced 0
         dict for {m keys} $machines {
             if { [dict exists $keys extends] } {
-                set exm [dict get $keys extends]
+                set extensions [dict get $keys extends]
                 dict unset keys extends; # Remove extend at once from the keys
-                if { [dict exists $machines $exm] } {
-                    # Get content of keys for the machine pointed at by the
-                    # extend and merge what we have on top of the referenced
-                    # machine
-                    log DEBUG "Extending machine $m from content of $exm"
-                    set keys [dict rmerge [dict get $machines $exm] $keys]
-                    # Replace with our merge, there might still be more extends
-                    # present, but we will be looping, so this is ok.
-                    dict set res $m $keys
-                    set replaced 1
-                } else {
-                    # Warn and do nothing, we should ignore that machine as its
-                    # description is obviously wrong.
-                    log WARN "$exm is not a known machine to extend from!"
+                foreach exm $extensions {
+                    if { [dict exists $machines $exm] } {
+                        # Get content of keys for the machine pointed at by the
+                        # extend and merge what we have on top of the referenced
+                        # machine
+                        log DEBUG "Extending machine $m from content of $exm"
+                        set keys [dict rmerge [dict get $machines $exm] $keys]
+                        # Replace with our merge, there might still be more extends
+                        # present, but we will be looping, so this is ok.
+                        dict set res $m $keys
+                        set replaced 1
+                    } else {
+                        # Warn and do nothing, we should ignore that machine as its
+                        # description is obviously wrong.
+                        log WARN "$exm is not a known machine to extend from!"
+                    }
                 }
             } else {
                 dict set res $m $keys

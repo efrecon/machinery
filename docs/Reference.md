@@ -627,12 +627,12 @@ machines.
 
 #### `extends`
 
-`extends` should point to the name of another machine to extend the definition
-of the current machine from. Current keys are recursively merged on top of the
-keys from the machine pointed at with `extends`. `extends` can be recursive, but
-at most `10` levels of resolutions will be performed. Using `extends` can be
-handy in collaboration with hidden machines and `include`, as an alternative to
-YAML anchors.
+`extends` should point to a list of names of another machines to extend the
+definition of the current machine from. Current keys are recursively merged on
+top of the keys from the machine pointed at with `extends`. `extends` can be
+recursive, but at most `10` levels of resolutions will be performed. Using
+`extends` can be handy in collaboration with hidden machines and `include`, as
+an alternative to YAML anchors.
 
 #### `shares`
 

@@ -12,7 +12,9 @@ environment:
 
 machines:
     test:
-        extends: .skeleton
+        extends:
+            - .skeleton
+            - .labelled
         prelude:
             -
                 exec: mkdir
