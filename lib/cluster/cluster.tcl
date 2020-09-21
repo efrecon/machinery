@@ -1976,8 +1976,6 @@ proc ::cluster::parse { fname args } {
 
     set machines [Extend $machines]
 
-    puts $machines
-
     set vms {}
     set masters [list]
     set clustering [dict get $options -clustering]
