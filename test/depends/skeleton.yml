@@ -7,6 +7,8 @@ machines:
     driver: virtualbox
     memory: "1GiB"
     size: "2GB"
+    labels:
+      environment: dev
 
   .labelled:
     labels:

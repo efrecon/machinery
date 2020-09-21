@@ -3921,7 +3921,7 @@ proc ::cluster::MergeYAML { d maindir } {
             set fpath [mount access [file join $maindir $fpath]]
             log info "Merging content of $fpath"
             set subd [::yaml::yaml2dict -file $fpath]
-            set d [dict rmerge $d [MergeYAML $subd [file dirname $fpath]]]
+            set d [dict rlamerge $d [MergeYAML $subd [file dirname $fpath]]]
         }
     }
     return $d
@@ -3958,7 +3958,7 @@ proc ::cluster::Extend { machines } {
                         # extend and merge what we have on top of the referenced
                         # machine
                         log DEBUG "Extending machine $m from content of $exm"
-                        set keys [dict rmerge [dict get $machines $exm] $keys]
+                        set keys [dict rlamerge [dict get $machines $exm] $keys]
                         # Replace with our merge, there might still be more extends
                         # present, but we will be looping, so this is ok.
                         dict set res $m $keys
@@ -3982,5 +3982,62 @@ proc ::cluster::Extend { machines } {
     return $machines
 }
 
+if {[::info commands ::tcl::dict::rlamerge] eq {}} {
+  proc ::tcl::dict::_psearch { k ptns } {
+    foreach p $ptns {
+      if { [string match $p $k] } {
+        return 1
+      }
+    }
+    return 0
+  }
+
+  ###
+  # title: A recursive form of dict merge
+  # description:
+  # A routine to recursively dig through dicts and merge
+  # adapted from http://stevehavelka.com/tcl-dict-operation-nested-merge/
+  # This appends to list values
+  ###
+  proc ::tcl::dict::rlamerge {args} {
+    # Parse possible list of restricted keys to consider as lists
+    if { [lindex $args 0] eq "-restrict" } {
+      ::set restrictions [lindex $args 1]
+      ::set a [lindex $args 2]
+      ::set args [lrange $args 3 end]
+    } else {
+      ::set restrictions [list "*"]
+      ::set a [lindex $args 0]
+      ::set args [lrange $args 1 end]
+    }
+
+
+    ::set result $a
+    # Merge b into a, and handle nested dicts appropriately
+    ::foreach b $args {
+      for { k v } $b {
+        if {[string index $k end] eq ":"} {
+          # Element names that end in ":" are assumed to be literals
+          set result $k $v
+        } elseif { [dict exists $result $k] } {
+          # key exists in a and b?  let's see if both values are dicts
+          # both are dicts, so merge the dicts
+          if { [is_dict [get $result $k]] && [is_dict $v] } {
+            set result $k [rlamerge -restrict $restrictions [get $result $k] $v]
+          } elseif { [_psearch $k $restrictions] && [string is list [get $result $k]] && [string is list $v] } {
+            lappend result $k {*}$v
+          } else {  
+            set result $k $v
+          }
+        } else {
+          set result $k $v
+        }
+      }
+    }
+    return $result
+  }
+  namespace ensemble configure dict -map [dict replace\
+      [namespace ensemble configure dict -map] rlamerge ::tcl::dict::rlamerge]
+}
 
 package provide cluster 0.4
