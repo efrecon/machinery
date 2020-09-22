@@ -33,12 +33,14 @@ machines:
             - 8080:80
             - 20514:514/udp
             - 9090
+        environment:
+            - TEST=overrideinvm
         compose:
-        -
-            environment:
-                - VERSION=1.15-alpine
-            env_file:
-                - myvars.env
-            files:
-                - docker-compose.yml
-            project: test
+            -
+                environment:
+                    - VERSION=1.15-alpine
+                env_file:
+                    - myvars.env
+                files:
+                    - docker-compose.yml
+                project: test
