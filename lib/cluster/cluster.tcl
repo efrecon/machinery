@@ -3855,7 +3855,7 @@ proc ::cluster::DefaultMachine {} {
 
 # ::cluster::EnvironmentGet -- Get environment
 #
-#       Provided a dictionay passed as an argument, first read the content of
+#       Provided a dictionary passed as an argument, first read the content of
 #       the env files that are pointed at by the env_file key, in order, then
 #       read the content of the environment key. In the environment key, both
 #       dictionaries and lists of var=val are recognised. Return a dictionary.
@@ -3871,34 +3871,29 @@ proc ::cluster::DefaultMachine {} {
 #       Is able to access automounted VFS 
 proc ::cluster::EnvironmentGet { vm d } {
     set environment [dict create]
-    if { [dict exists $d env_file] } {
-        foreach fpath [dict get $d env_file] {
-            if { $vm ne "" } {
-                set fullpath [mount access [AbsolutePath $vm $fpath]]
-            } else {
-                set fullpath [mount access $fpath]
-            }
-            log DEBUG "Reading environment from $fpath"
-            set environment [dict merge $environment \
-                                [environment read $fullpath]]
-        }
-    }
-    if { [dict exists $d environment] } {
-        # Convert environment specifications using equal to proper array set
-        # compatible list.
-        set rawenv [dict get $d environment]
-        if { [string first "=" [lindex $rawenv 0]] >= 0 } {
-            foreach spec $rawenv {
-                set equal [string first "=" $spec]
-                if { $equal >= 0 } {
-                    dict set environment \
-                        [string toupper [string trim [string range $spec 0 [expr {$equal-1}]]]] \
-                        [string trim [string range $spec [expr {$equal+1}] end]]
-                }
-            }
+    foreach fpath [utils dget $d env_file [utils dget $d -env_file [list]]] {
+        if { $vm ne "" } {
+            set fullpath [mount access [AbsolutePath $vm $fpath]]
         } else {
-            set environment [dict merge $environment $rawenv]
+            set fullpath [mount access $fpath]
         }
+        log DEBUG "Reading environment from $fpath"
+        set environment [dict merge $environment \
+                            [environment read $fullpath]]
+    }
+
+    set rawenv [utils dget $d environment [utils dget $d -environment [dict create]]]
+    if { [string first "=" [lindex $rawenv 0]] >= 0 } {
+        foreach spec $rawenv {
+            set equal [string first "=" $spec]
+            if { $equal >= 0 } {
+                dict set environment \
+                    [string toupper [string trim [string range $spec 0 [expr {$equal-1}]]]] \
+                    [string trim [string range $spec [expr {$equal+1}] end]]
+            }
+        }
+    } else {
+        set environment [dict merge $environment $rawenv]
     }
     return $environment
 }
