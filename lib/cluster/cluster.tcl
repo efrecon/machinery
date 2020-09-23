@@ -201,7 +201,7 @@ proc ::cluster::ls { yaml {machines *} { force 0 } } {
         set state [tooling relatively -- [file dirname [StorageDir $yaml]] \
                         tooling machine -return -- -s [StorageDir $yaml] ls]
         dict set vars::cluster cluster [tooling parser $state]
-        dict set vars::cluster last $now
+        dict set vars::cluster last [clock milliseconds]
     }
     
     set cluster {};   # The list of dictionaries we will return
