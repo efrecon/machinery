@@ -1550,7 +1550,7 @@ proc ::cluster::halt { vm {masters {}} } {
 # Side Effects:
 #       None.
 proc ::cluster::ssh { vm args } {
-    enviroment push $vm $vm
+    environment push $vm $vm
     set nm [dict get $vm -name]
     log NOTICE "Entering machine $nm..."
     if { [llength $args] > 0 } {
@@ -1633,7 +1633,7 @@ proc ::cluster::pull { vm {images {}} } {
         set images [dict get $vm -images]
     }
 
-    enviroment push $vm $vm
+    environment push $vm $vm
     set nm [dict get $vm -name]
     log NOTICE "Pulling images for $nm: $images..."
     foreach img $images {
@@ -1737,7 +1737,7 @@ proc ::cluster::pull { vm {images {}} } {
 #       None.
 proc ::cluster::destroy { vm {masters {}}} {
     halt $vm $masters
-    enviroment push $vm $vm
+    environment push $vm $vm
     set nm [dict get $vm -name]
     if { [dict exists $vm state] } {
         log NOTICE "Removing machine $nm..."
@@ -1768,7 +1768,7 @@ proc ::cluster::destroy { vm {masters {}}} {
 # Side Effects:
 #       None.
 proc ::cluster::inspect { vm } {
-    enviroment push $vm $vm
+    environment push $vm $vm
     set nm [dict get $vm -name]
     set json ""
     foreach l [tooling relatively -- [file dirname [storage $vm]] \
@@ -1795,7 +1795,7 @@ proc ::cluster::inspect { vm } {
 # Side Effects:
 #       None.
 proc ::cluster::start { vm { sync 1 } { sleep 1 } { retries 3 } } {
-    enviroment push $vm $vm
+    environment push $vm $vm
     set nm [dict get $vm -name]
     if { $retries < 0 } {
         set retries ${vars::-retries}

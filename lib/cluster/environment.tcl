@@ -83,11 +83,11 @@ proc ::cluster::environment::push { environment } {
 }
 
 proc ::cluster::environment::pop { { howmany 1 } } {
-    for { set i 0 } { $i < $howmany } { incr i } {
+    for { ::set i 0 } { $i < $howmany } { incr i } {
         # Get back both variables with information from the push from the stack and
         # pop them away.
-        ::set setback [lindex vars::stack end-1]
-        ::set remove [lindex vars::stack end]
+        ::set setback [lindex $vars::stack end-1]
+        ::set remove [lindex $vars::stack end]
         ::set vars::stack [lrange $vars::stack 0 end-2]
         # Unset the variables that should be unset, and re-export back the previous
         # state.
