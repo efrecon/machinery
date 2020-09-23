@@ -12,6 +12,7 @@ namespace eval ::cluster::environment {
         # Character for shell-compatible quoting
         variable -quote       "\""
         variable -backslashed {"\\\$" "\$" "\\\"" \" "\\'" ' "\\\\" "\\" "\\`" "`"}
+        variable stack        {}
     }
     # Export all lower case procedure, arrange to be able to access
     # commands from the parent (cluster) namespace from here and
@@ -45,7 +46,7 @@ proc ::cluster::environment::set { vm } {
     } else {
         ::set environment {}
     }
-    
+
     return $environment
 }
 
@@ -57,6 +58,55 @@ proc ::cluster::environment::export { environment } {
     }
 }
 
+
+proc ::cluster::environment::push { environment } {
+    # This variable will hold a dictionary with the value of the environment
+    # variables before they are pushed into the environment, if relevant
+    ::set setback [dict create]
+    # This variable will hold a list of the names of the environment variables
+    # that didn't exist but are being set.
+    ::set remove [list]
+    # Check current environment against the one being pushed. Collect in the
+    # variables described above, depending on if the variables already existed
+    # in the process environment or not.
+    dict for {k v} $environment {
+        if { [info exists ::env($k)] } {
+            dict set setback $k $::env($k)
+        } else {
+            lappend remove $k
+        }
+    }
+    # Remember the old state of the environment in the global vars::stack and
+    # finally set the variables that are pushed onto the process environment.
+    lappend vars::stack $setback $remove
+    export $environment
+}
+
+proc ::cluster::environment::pop { { howmany 1 } } {
+    for { ::set i 0 } { $i < $howmany } { incr i } {
+        # Get back both variables with information from the push from the stack and
+        # pop them away.
+        ::set setback [lindex $vars::stack end-1]
+        ::set remove [lindex $vars::stack end]
+        ::set vars::stack [lrange $vars::stack 0 end-2]
+        # Unset the variables that should be unset, and re-export back the previous
+        # state.
+        foreach k $remove {
+            log DEBUG "Removing $k from environment"
+            ::unset ::env($k)
+        }
+        export $setback
+    }
+}
+
+proc ::cluster::environment::clean { ptn } {
+    log DEBUG "Cleaning environment from variables matching $ptn"
+    foreach k [array names ::env $ptn] {
+        log TRACE "Removing $k from environment"
+        unset ::env($k)
+    }
+
+}
 
 proc ::cluster::environment::cache { vm } {
     return [CacheFile [dict get $vm origin] ${vars::-ext}]
@@ -89,7 +139,7 @@ proc ::cluster::environment::read { fpath } {
         close $fd
     }
     log DEBUG "Read [join [dict keys $d] {, }] from $fpath"
-    
+
     return $d
 }
 
@@ -196,7 +246,7 @@ proc ::cluster::environment::resolve { str } {
         lappend mapper \$\{${e}\} [::set ::env($e)]
     }
     ::set quick [string map $mapper $str]
-    
+
     # Iteratively modify quick for replacing occurences of
     # ${name:default} constructs.  We do this until there are no
     # match.
@@ -236,7 +286,7 @@ proc ::cluster::environment::resolve { str } {
             ::set done 1
         }
     }
-    
+
     return $quick
 }
 
