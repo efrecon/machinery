@@ -3162,7 +3162,7 @@ proc ::cluster::Exec { vm args } {
                     set rootname [file rootname [file tail $fpath]]
                     set ext [file extension $fpath]
                     set tmp_fpath [utils temporary [file join [utils tmpdir] $rootname]]$ext
-                    set fd [open $tmp_fpath w]
+                    set fd [open $tmp_fpath w 0755]
                     puts -nonewline $fd $dta
                     close $fd
                     
