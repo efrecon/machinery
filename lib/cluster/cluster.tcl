@@ -889,14 +889,9 @@ proc ::cluster::compose { vm ops {swarm 0} { projects {} } } {
                 if { [dict exists $project substitution] } {
                     SubstitutionParse [dict get $project substitution] patterns
                 }
-                set options [dict create]
-                if { [dict exists $project options] } {
-                    set options [dict get $project options]
-                }
-                set projname [dict create]
-                if { [dict exists $project project] } {
-                    set projname [dict get $project project]
-                }
+                set options [utils dget $project options [dict create]]
+                set projname [utils dget $project project ""]
+
                 # Read environment from files pointed at by env_file, override
                 # by the value of the environment
                 set environment [EnvironmentGet $vm $project]
@@ -1641,6 +1636,7 @@ proc ::cluster::pull { vm {images {}} } {
 
     environment push [EnvironmentGet $vm $vm]
     set nm [dict get $vm -name]
+    set images [environment resolve $images]
     log NOTICE "Pulling images for $nm: $images..."
     foreach img $images {
         # Start by computing caching hint.
@@ -2737,19 +2733,13 @@ proc ::cluster::Ports { pspec } {
 
 
 proc ::cluster::Project { fpaths ops args } {
-    set patterns [utils getopt args -patterns [list]]
-    set project [utils getopt args -project ""]
-    set options [utils getopt args -options [list]]
-    set environment [utils getopt args -environment [list]]
-    set keep [utils getopt args -keep 0]
+    utils getopt args -patterns patterns [list]
+    utils getopt args -project project ""
+    utils getopt args -options options [list]
+    utils getopt args -environment environment [list]
+    utils getopt args -keep keep 0
 
-    set envvars [list]
-    array set envcopy [array get ::env];  # Copy current environment
-    foreach {k v} $environment {
-        lappend envvars $k
-        set ::env($k) $v
-    }
-
+    environment push $environment
     set composed ""
     
     foreach op $ops {
@@ -2938,13 +2928,7 @@ proc ::cluster::Project { fpaths ops args } {
 
     # Cleanup environment by removing variables that we had added and reverting
     # the value of variables that we had changed.
-    foreach k $envvars {
-        if { $k in [array names envcopy] } {
-            set ::env($k) $envcopy($k)
-        } else {
-            unset ::env($k)
-        }
-    }
+    environment pop
     
     return $composed
 }
