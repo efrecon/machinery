@@ -4,7 +4,6 @@ version: 2
 machines:
   .skeleton:
     swarm: off
-    driver: virtualbox
     memory: "1GiB"
     size: "2GB"
     labels:

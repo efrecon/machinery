@@ -771,14 +771,15 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
             compose $master $op 1 $pinfo
         } else {
             log INFO "Scheduling compose project $fpath in cluster"
-            set substitution 1
+            set patterns [list *]
+            set keep 0
             set projname ""
             set options {}
             set environment [EnvironmentGet $master $opts]
             foreach {k v} $opts {
                 switch -nocase -- $k {
                     "substitution" {
-                        set substitution [string is true $v]
+                        SubstitutionParse $v patterns
                     }
                     "project" {
                         set projname $v
@@ -787,14 +788,16 @@ proc ::cluster::swarm { master op fpath {opts {}}} {
                         set options $v
                     }
                     "keep" {
-                        if { [string is true $v] } {
-                            set substitution 2
-                        }
+                        set keep [string is true $v]
                     }
                 }
             }
             Attach $master -swarm
-            Project $fpath $op $substitution $projname $options $environment
+            Project $fpath $op  -patterns $patterns \
+                                -project $projname \
+                                -options $options \
+                                -environment $environment \
+                                -keep $keep
         }
     } else {
         log WARN "Project file at $fpath does not exist!"
@@ -882,10 +885,9 @@ proc ::cluster::compose { vm ops {swarm 0} { projects {} } } {
                             "RM" "Removing"] [string toupper $op]]
                 }
                 log NOTICE "[join $what ,\ ] services from [join $apaths ,\ ] in $nm"
-                set substitution 0
+                set patterns [list]
                 if { [dict exists $project substitution] } {
-                    set substitution \
-                            [string is true [dict get $project substitution]]
+                    SubstitutionParse [dict get $project substitution] patterns
                 }
                 set options [dict create]
                 if { [dict exists $project options] } {
@@ -898,7 +900,11 @@ proc ::cluster::compose { vm ops {swarm 0} { projects {} } } {
                 # Read environment from files pointed at by env_file, override
                 # by the value of the environment
                 set environment [EnvironmentGet $vm $project]
-                set parsed [Project $apaths $ops $substitution $projname $options $environment]
+                set parsed [Project $apaths $ops \
+                                -patterns $patterns \
+                                -project $projname \
+                                -options $options \
+                                -environment $environment]
                 if { $parsed ne "" } {
                     lappend composed $parsed
                 }
@@ -2730,7 +2736,13 @@ proc ::cluster::Ports { pspec } {
 }
 
 
-proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}} {environment {}}} {
+proc ::cluster::Project { fpaths ops args } {
+    set patterns [utils getopt args -patterns [list]]
+    set project [utils getopt args -project ""]
+    set options [utils getopt args -options [list]]
+    set environment [utils getopt args -environment [list]]
+    set keep [utils getopt args -keep 0]
+
     set envvars [list]
     array set envcopy [array get ::env];  # Copy current environment
     foreach {k v} $environment {
@@ -2756,12 +2768,12 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}} 
         cd [file dirname [lindex $fpaths 0]]
     }
     
-    # Perform substituion of environment variables if requested from
+    # Perform substitution of environment variables if requested from
     # the VM description (and thus the YAML file).
     set temporaries [list]
     set composed [list]
     foreach fpath $fpaths {
-        if { $substitution } {
+        if { [llength $patterns] > 0 } {
             # XXX: Can we fold this in the extend framework, both
             # implementations seems to be doing more or less the same?
             
@@ -2770,7 +2782,7 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}} 
             # whenever a variable does not exist,
             # e.g. ${VARNAME:defaultValue}.
             set fd [open $fpath]
-            set yaml [environment resolve [read $fd]]
+            set yaml [environment resolve [read $fd] $patterns]
             close $fd
             
             # Parse the YAML project to see if it contains extending services,
@@ -2916,9 +2928,9 @@ proc ::cluster::Project { fpaths ops {substitution 0} {project ""} {options {}} 
     }
     
     # Cleanup files in temporaries list.
-    if { $substitution < 2 && [llength $temporaries] > 0 } {
+    if { !$keep && [llength $temporaries] > 0 } {
         log INFO "Cleaning up [llength $temporaries] temporary file(s)\
-                from [utils tmpdir]"
+                  from [utils tmpdir]"
         foreach tmp_fpath $temporaries {
             file delete -force -- $tmp_fpath
         }
@@ -3104,8 +3116,7 @@ proc ::cluster::IsRunning { vm { force 0 } } {
         }
     }
     return 0
-    
-    
+
     if { [dict exists $vm state] } {
         set state [dict get $vm state]
         if { [lsearch -nocase ${vars::-running} $state] >= 0 } {
@@ -3118,33 +3129,34 @@ proc ::cluster::IsRunning { vm { force 0 } } {
 
 proc ::cluster::Exec { vm args } {
     set nm [dict get $vm -name]
-    
+
     # Convert dash-led arg-style into YAML internal, just in case...
     foreach {k v} $args {
         dict set exe [string trimleft $k -] $v
     }
-    
+
     if { [dict exists $exe exec] } {
-        set substitution 0
+        set patterns [list]
+        set scope none
         if { [dict exists $exe substitution] } {
-            set substitution \
-                    [string is true [dict get $exe substitution]]
+            SubstitutionParse [dict get $exe substitution] patterns scope
         }
-        
+
+        # Get list of arguments to program to execute
         set cargs [list]
         if { [dict exists $exe args] } {
-            if { $substitution } {
-                set cargs [environment resolve [dict get $exe args]]
+            if { $scope eq "both" || $scope eq "args" || $scope eq "arguments" } {
+                set cargs [environment resolve [dict get $exe args] $patterns]
             } else {
                 set cargs [dict get $exe args]
             }
         }
-        
+
         set remotely [utils dget $exe remote 0]
         set copy [utils dget $exe copy 1]
         set keep [utils dget $exe keep 0]
         set sudo [utils dget $exe sudo 0]
-        
+
         # Resolve using initial location of YAML description file
         set cmd ""
         set tmp_fpath ""
@@ -3152,20 +3164,21 @@ proc ::cluster::Exec { vm args } {
         if { $copy } {
             set fpath [mount access [AbsolutePath $vm [dict get $exe exec]]]
             if { [file exists $fpath] } {
-                if { $substitution } {
+                if { $scope eq "both" || $scope eq "program" \
+                        || $scope eq "binary" || $scope eq "script" } {
                     # Read and substitute content of file
                     set fd [open $fpath]
-                    set dta [environment resolve [read $fd]]
+                    set dta [environment resolve [read $fd] $patterns]
                     close $fd
-                    
+
                     # Dump to temporary location
                     set rootname [file rootname [file tail $fpath]]
                     set ext [file extension $fpath]
                     set tmp_fpath [utils temporary [file join [utils tmpdir] $rootname]]$ext
-                    set fd [open $tmp_fpath w 0755]
+                    set fd [open $tmp_fpath w 0755];  # Make executable also!
                     puts -nonewline $fd $dta
                     close $fd
-                    
+
                     set cmd $tmp_fpath
                 } else {
                     set cmd $fpath
@@ -3176,7 +3189,7 @@ proc ::cluster::Exec { vm args } {
         } else {
             set cmd [mount access [dict get $exe exec]]
         }
-        
+
         if { $cmd ne "" } {
             if { $remotely } {
                 if { $copy } {
@@ -3203,7 +3216,7 @@ proc ::cluster::Exec { vm args } {
                 log NOTICE "Executing [dict get $exe exec] locally (args: [string trim $cargs])"
                 tooling run -keepblanks -stderr -raw -- $cmd {*}$cargs
             }
-            
+
             # Remove temporary (subsituted) file, if any.
             if { $tmp_fpath ne "" && !$keep } {
                 file delete -force -- $tmp_fpath
@@ -3930,6 +3943,28 @@ proc ::cluster::WaitSSH { vm { sleep 5 } { retries 5 } } {
 }
 
 
+proc ::cluster::SubstitutionParse { v { _patterns "" } { _scope "" } } {
+    if { $_scope ne "" } {
+        upvar $_scope scope
+    }
+    if { $_patterns ne "" } {
+        upvar $_patterns patterns
+    }
+
+    if { [string is boolean -strict $v] } {
+        if { [string is true $v] } {
+            set scope both
+            set patterns [list *]
+        } else {
+            set scope none
+            set patterns [list]
+        }
+    } else {
+        set scope [utils dget $v scope both]
+        set patterns [utils dget $v patterns [list *]]
+    }
+}
+
 # ::cluster::MergeYAML -- Recursive inclusion resolution
 #
 #       In the dictionary passed as a parameter, recursively replace all the
@@ -4061,7 +4096,7 @@ if {[::info commands ::tcl::dict::rlamerge] eq {}} {
             set result $k [rlamerge -restrict $restrictions [get $result $k] $v]
           } elseif { [_psearch $k $restrictions] && [string is list [get $result $k]] && [string is list $v] } {
             lappend result $k {*}$v
-          } else {  
+          } else {
             set result $k $v
           }
         } else {

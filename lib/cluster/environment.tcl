@@ -237,13 +237,15 @@ proc ::cluster::environment::write { fpath enviro { lead "" } } {
 #
 # Side Effects:
 #       None.
-proc ::cluster::environment::resolve { str } {
+proc ::cluster::environment::resolve { str { patterns {*}}} {
     # Do a quick string mapping for $VARNAME and ${VARNAME} and store
     # result in variable called quick.
     ::set mapper {}
     foreach e [array names ::env] {
-        lappend mapper \$${e} [::set ::env($e)]
-        lappend mapper \$\{${e}\} [::set ::env($e)]
+        if { [MultiMatch $e $patterns] } {
+            lappend mapper \$${e} [::set ::env($e)]
+            lappend mapper \$\{${e}\} [::set ::env($e)]
+        }
     }
     ::set quick [string map $mapper $str]
 
@@ -269,14 +271,19 @@ proc ::cluster::environment::resolve { str } {
             ::set dft [string range $quick $dft_start $dft_stop]
             # If that variable is declared and exist, replace by its
             # value, otherwise replace with the default value.
-            if { [info exists ::env($var)] } {
-                if { $marker eq "-" && [::set ::env($var)] eq ""  } {
-                    ::set quick \
-                        [string replace $quick $range_start $range_stop $dft]
+            if { [MultiMatch $var $patterns] } {
+                if { [info exists ::env($var)] } {
+                    if { $marker eq "-" && [::set ::env($var)] eq ""  } {
+                        ::set quick \
+                            [string replace $quick $range_start $range_stop $dft]
+                    } else {
+                        ::set quick \
+                            [string replace $quick $range_start $range_stop \
+                                [::set ::env($var)]]
+                    }
                 } else {
                     ::set quick \
-                        [string replace $quick $range_start $range_stop \
-                            [::set ::env($var)]]
+                        [string replace $quick $range_start $range_stop $dft]
                 }
             } else {
                 ::set quick \
@@ -305,5 +312,13 @@ proc ::cluster::environment::quote { str } {
     return $ret
 }
 
+proc ::cluster::environment::MultiMatch { v patterns } {
+    foreach ptn $patterns {
+        if { [string match $ptn $v] } {
+            return 1
+        }
+    }
+    return 0
+}
 
 package provide cluster::environment 0.2
