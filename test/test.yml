@@ -75,16 +75,18 @@ machines:
                 sudo: on
         images:
             - alpine
+            - nginx:${VERSION:-latest}
         ports:
             - 8080:80
             - 20514:514/udp
             - 9090
         environment:
             - TEST=overrideinvm
+            - VERSION=1.19-alpine
         compose:
             -
                 environment:
-                    - VERSION=1.15-alpine
+                    - NOTUSED=ForDemo
                 env_file:
                     - myvars.env
                 files:
