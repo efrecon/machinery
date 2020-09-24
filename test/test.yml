@@ -3,6 +3,7 @@ version: 2
 
 include:
     - depends/skeleton.yml
+#    - depends/google.yml
 
 env_file:
     - depends/test.env
@@ -14,6 +15,7 @@ machines:
     test:
         extends:
             - .skeleton
+            - .google
             - .labelled
         prelude:
             -
@@ -22,6 +24,50 @@ machines:
                 sudo: on
                 remote: on
                 copy: off
+            -
+                exec: bin/witness.sh
+                args: $TEST
+                sudo: on
+                remote: on
+                substitution: on
+            -
+                exec: bin/witness.sh
+                args: $TEST
+                sudo: on
+                remote: on
+                substitution: off
+            -
+                exec: bin/witness.sh
+                args: $TEST
+                sudo: on
+                remote: on
+                substitution:
+                    scope: both
+            -
+                exec: bin/witness.sh
+                args: $TEST
+                sudo: on
+                remote: on
+                substitution:
+                    scope: args
+            -
+                exec: bin/witness.sh
+                args: $TEST
+                sudo: on
+                remote: on
+                substitution:
+                    scope: args
+                    patterns:
+                        - A*
+            -
+                exec: bin/witness.sh
+                args: $TEST
+                sudo: on
+                remote: on
+                substitution:
+                    scope: args
+                    patterns:
+                        - TES*
         files:
             -
                 source: test/pwd/access.cfg
