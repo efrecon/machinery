@@ -13,6 +13,8 @@ environment:
 
 machines:
     test:
+        aliases:
+            - emmanuel
         extends:
             - .skeleton
             - .google

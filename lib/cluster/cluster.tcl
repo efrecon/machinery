@@ -2011,7 +2011,6 @@ proc ::cluster::parse { fname args } {
             }
         }        
     }
-
     set machines [Extend $machines]
 
     set vms {}
@@ -2065,7 +2064,7 @@ proc ::cluster::parse { fname args } {
                     # save the prefix in each VM instead?
                     if { $k eq "aliases" && $pfx ne "" } {
                         set aliases {}
-                        foreach a [dict get $d $m $k] {
+                        foreach a [dict get $machines $m $k] {
                             lappend aliases ${pfx}${vars::-separator}$a
                         }
                         dict set vm -$k $aliases
