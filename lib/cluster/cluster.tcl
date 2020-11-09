@@ -3859,13 +3859,14 @@ proc ::cluster::DefaultMachine {} {
 # Arguments:
 #       vm      Virtual machine description
 #       d    	Dictionary to read the env_file and environment keys from
+#       resolve Resolve values coming from environment decl. (not file!)
 #
 # Results:
 #       A dictionary
 #
 # Side Effects:
 #       Is able to access automounted VFS 
-proc ::cluster::EnvironmentGet { vm d } {
+proc ::cluster::EnvironmentGet { vm d {resolve 1} } {
     set environment [dict create]
     foreach fpath [utils dget $d env_file [utils dget $d -env_file [list]]] {
         if { $vm ne "" } {
@@ -3878,18 +3879,35 @@ proc ::cluster::EnvironmentGet { vm d } {
                             [environment read $fullpath]]
     }
 
+    # Detect = style or dictionary style declaration and extract the values into
+    # the environment dictionary. Resolve the values based on existing
+    # environment variables.
     set rawenv [utils dget $d environment [utils dget $d -environment [dict create]]]
     if { [string first "=" [lindex $rawenv 0]] >= 0 } {
         foreach spec $rawenv {
             set equal [string first "=" $spec]
             if { $equal >= 0 } {
-                dict set environment \
-                    [string toupper [string trim [string range $spec 0 [expr {$equal-1}]]]] \
-                    [string trim [string range $spec [expr {$equal+1}] end]]
+                if { [string is true $resolve] } {
+                    dict set environment \
+                        [string toupper [string trim [string range $spec 0 [expr {$equal-1}]]]] \
+                        [environment resolve [string trim [string range $spec [expr {$equal+1}] end]]]
+                } else {
+                    dict set environment \
+                        [string toupper [string trim [string range $spec 0 [expr {$equal-1}]]]] \
+                        [string trim [string range $spec [expr {$equal+1}] end]]
+                }
             }
         }
     } else {
-        set environment [dict merge $environment $rawenv]
+        if { [string is true $resolve] } {
+            set resolved_env [dict create]
+            dict for {k v} $rawenv {
+                dict set resolved_env $k [environment resolve $v]
+            }
+            set environment [dict merge $environment $resolved_env]
+        } else {
+            set environment [dict merge $environment $rawenv]
+        }
     }
     return $environment
 }
