@@ -2384,6 +2384,8 @@ proc ::cluster::Create { vm { token "" } {masters {}} } {
             vmwarefusion --vmwarefusion-disk-size 1
             vmwarevsphere --vmwarevsphere-disk-size 1
             kvm --kvm-disk-size 1
+            google --google-disk-size 0.001
+            exoscale --exoscale-disk-size 0.001
         }
         set found 0
         foreach { p opt mult } $SOPT {
