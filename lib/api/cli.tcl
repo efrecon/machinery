@@ -46,12 +46,12 @@ namespace eval ::api::cli {
             help    "Print out help or command help"
             up      "Create and bring up cluster and/or specific machines"
             halt    "Bring down cluster and/or specific machines"
-            token   "Create (new) swarm token, force regeneration with -force"
+            token   "DEPRECATED! Create (new) swarm token, force regeneration with -force"
             destroy "Destroy cluster and/or specific machines"
             restart "Restart whole cluster and/or specific machines"
             env     "Export environment variables for discovery"
             reinit  "Rerun finalisation stages on machine(s), specify via -step"
-            swarm   "Lifecycle management of containers via swarm"
+            swarm   "DEPRECATED! Lifecycle management of containers via swarm"
             stack   "Stack lifecycle for new swarm mode"
             node    "Relays low(er)-level node operations for new swarm mode"
             sync    "One shot synchronisation of rsync shares"
@@ -595,7 +595,7 @@ proc ::api::cli::command { cmd args } {
             tooling runtime exit
             if { [utils getopt args -help] } {
                 chelp $cmd \
-                        "Possibly generate and print out the swarm token for this cluster.  Tokens are cached on disk in a hidden file for reuse. Use the -force option to force the generation of a new token if necessary." \
+                        "Possibly generate and print out the old swarm token for this cluster.  Tokens are cached on disk in a hidden file for reuse. Use the -force option to force the generation of a new token if necessary." \
                         {   -help "Print this help"
                             -force "For regeneration of a new token" }
             }
@@ -678,7 +678,7 @@ proc ::api::cli::command { cmd args } {
             tooling runtime exit
             if { [utils getopt args -help] } {
                 chelp $cmd \
-                        "When called with no arguments, just print out the cluster info.  When called with arguments, these should be YAML file ready for compose, or YAML files containing indirections to YAML project files, as in the main cluster YAML description syntax." \
+                        "DEPRECATED! This is to manage old swarms. When called with no arguments, just print out the cluster info.  When called with arguments, these should be YAML file ready for compose, or YAML files containing indirections to YAML project files, as in the main cluster YAML description syntax." \
                         {   -help "Print this help"
                     -stop "Stop the containers"
                     -kill "Forcedly kill the containers"
