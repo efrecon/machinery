@@ -51,7 +51,7 @@ namespace eval ::api::cli {
             restart "Restart whole cluster and/or specific machines"
             env     "Export environment variables for discovery"
             reinit  "Rerun finalisation stages on machine(s), specify via -step"
-            swarm   "Lifecycle management of components via swarm"
+            swarm   "Lifecycle management of containers via swarm"
             stack   "Stack lifecycle for new swarm mode"
             node    "Relays low(er)-level node operations for new swarm mode"
             sync    "One shot synchronisation of rsync shares"
@@ -475,7 +475,7 @@ proc ::api::cli::init { {fname ""} } {
 #       The token to use for swarm orchestration.
 #
 # Side Effects:
-#       Token generation will kick-off a local docker component.
+#       Token generation will kick-off a local docker container.
 proc ::api::cli::token {{force 0} {yaml ""}} {
     if { $yaml eq "" } {
         set yaml $vars::yaml
@@ -680,11 +680,11 @@ proc ::api::cli::command { cmd args } {
                 chelp $cmd \
                         "When called with no arguments, just print out the cluster info.  When called with arguments, these should be YAML file ready for compose, or YAML files containing indirections to YAML project files, as in the main cluster YAML description syntax." \
                         {   -help "Print this help"
-                    -stop "Stop the components"
-                    -kill "Forcedly kill the components"
-                    -rm "Remove the components"
-                    -up "(re)create the components (this is the default)"
-                    -start "Start the components"
+                    -stop "Stop the containers"
+                    -kill "Forcedly kill the containers"
+                    -rm "Remove the containers"
+                    -up "(re)create the containers (this is the default)"
+                    -start "Start the containers"
                 -options "Takes a comma separated string as argument, each item should look like key=value, where the keys are as of the compose indirection YAML specification, e.g. project, substitution, etc." }
             }
             set cluster [cli init]
@@ -928,17 +928,32 @@ proc ::api::cli::command { cmd args } {
             # mainly an alias to docker-machine ssh.
             if { [utils getopt args -help] } {
                 chelp $cmd \
-                        "This command takes at least the name of a machine as an argument.  Without any further arguments, it will ssh into the machine, otherwise the remaining of the arguments form a command to execute on the machine.  The name of the machine should be as from the YAML description." \
+                        "This command takes at least a filter matching name(s) of (a) machine(s) as an argument.  Without any further arguments and when that filter resolves to a single machine, it will ssh into the machine interactively. Otherwise the remaining of the arguments form a command to execute on all the machines that the filter resolves to.  The name of the machines should be as from the YAML description." \
                         { -help "Print this help" }
             }
             set cluster [init]
             if { [llength $args] == 0 } {
                 log ERROR "Need at least the name of a machine"
             }
-            set vm [cluster find $cluster [lindex $args 0]]
+            # Separate list of machines from rest or arguments.
+            set vms [machines $cluster [lindex $args 0]]
             set args [lrange $args 1 end]
-            if { $vm ne "" } {
-                eval [linsert $args 0 cluster ssh $vm]
+            # Provide an interactive prompt to the machine when no arguments are
+            # provided, we can only do this when the machine filter resolves to
+            # a single machine.
+            if { [llength $args] == 0 } {
+                if { [llength $vms] > 1 } {
+                    log ERROR "You cannot enter several machines at the same time!"
+                } else {
+                    cluster ssh [lindex $vms 0]
+                }
+            } else {
+                # When arguments are provided, execute the command that they
+                # form on each machine that the first argument filter resolves
+                # to.
+                foreach vm $vms {
+                    eval [linsert $args 0 cluster ssh $vm]
+                }
             }
         }
         "server" {
@@ -965,11 +980,11 @@ proc ::api::cli::command { cmd args } {
         }
         "search" {
             tooling runtime exit
-            # Search for components, arguments are glob-style patterns
+            # Search for containers, arguments are glob-style patterns
             # to match against container names.
             if { [utils getopt args -help] } {
                 chelp $cmd \
-                        "Search for components by their names within the cluster and list them.  This command takes glob-style patterns to match against the component names.  No arguments is the same as providing the pattern *, matching any component name" \
+                        "Search for containers by their names within the cluster and list them.  This command takes glob-style patterns to match against the container names.  No arguments is the same as providing the pattern *, matching any container name" \
                         { -help "Print this help"
                 -restrict "Comma-separated list of patterns for machine subset selection"}
             }
@@ -991,14 +1006,14 @@ proc ::api::cli::command { cmd args } {
         "forall" {
             tooling runtime exit
             # Execute docker commands, first argument is glob-style
-            # pattern to match against component name, second is
+            # pattern to match against container name, second is
             # docker command to execute, remaining arguments are
             # options to the docker command.  First argument is
             # optional, so we can run commands that are not bound to
-            # components.
+            # containers.
             if { [utils getopt args -help] } {
                 chelp $cmd \
-                        "Execute docker command on components in the cluster.  The first argument is a pattern to match against the name of the components within all machines, the second argument is the docker (sub-) command to execute and the remaining arguments are blindly passed to the command at execution time.  The first argument is optional, in which case the docker command and its argument will be executed in all machines as of the -respect option.  For the (rare!) cases where the pattern is also docker command, you can separate the pattern and the command by a double-dash to make these argument types explicit." \
+                        "Execute docker command on containers in the cluster.  The first argument is a pattern to match against the name of the containers within all machines, the second argument is the docker (sub-) command to execute and the remaining arguments are blindly passed to the command at execution time.  The first argument is optional, in which case the docker command and its argument will be executed in all machines as of the -respect option.  For the (rare!) cases where the pattern is also docker command, you can separate the pattern and the command by a double-dash to make these argument types explicit." \
                         { -help "Print this help"
                 -restrict "Comma-separated list of patterns for machine subset selection" }
             }
@@ -1007,11 +1022,11 @@ proc ::api::cli::command { cmd args } {
             set subset [split $subset ","]
             set machines [machines $cluster $subset]
             # When we have a double-dash, it explicitely separates the
-            # patterns to match against the component names from the
+            # patterns to match against the container names from the
             # command to execute.  When we don't we peek to see if the
             # first argument is actually the name of a docker command.
             # If it is, then we'll execute that command on no
-            # particular components (think commands like pull here).
+            # particular containers (think commands like pull here).
             set idx [lsearch $args --]
             if { $idx >= 1 } {
                 set ptn [lindex $args 0]
