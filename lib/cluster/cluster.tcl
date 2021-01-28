@@ -1954,7 +1954,7 @@ proc ::cluster::parse { fname args } {
             log NOTICE "Automatically applying tweaks from sibling file: $tweaks"
             set applied [tweak [::yaml::yaml2dict -file $tweaks]]
             if { [llength $applied] } {
-                log NOTICE "Applied [llength $applied] tweaks to internal configurations"
+                log INFO "Applied [llength $applied] tweaks to internal configurations"
             }
         }
     }

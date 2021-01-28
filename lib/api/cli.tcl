@@ -275,7 +275,7 @@ proc ::api::cli::globals { appname argv_ } {
     # Apply low-level command-line tweaks.
     set tweaks [cluster tweak ${vars::-tweaks}]
     if { [llength $tweaks] } {
-        log NOTICE "Applied [llength $tweaks] tweaks to internal configurations"
+        log INFO "Applied [llength $tweaks] tweaks to internal configurations"
     }
 }
 
