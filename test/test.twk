@@ -1,0 +1,11 @@
+# This file should be in YAML format and is an example for how to force in some
+# low-level options together with a cluster file definition.
+
+# Turn off image caching, images specified by the cluster file will be
+# downloaded at the machine in all cases.
+.cache: "-"
+
+# This just sets back the -color option of the cluster::utils namespace to the
+# same value that it has by default. This is just meant as an example to access
+# sub-namespaces.
+utils.color: "auto"
