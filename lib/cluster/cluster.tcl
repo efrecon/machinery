@@ -85,6 +85,11 @@ namespace eval ::cluster {
         variable -steps     {shares registries files images prelude networks compose addendum applications}
         # Automount extensions
         variable -automount {.zip .tar .kit}
+        # Automatically tweak whenever a file with this extension also exists.
+        # Tweaking is applied before the cluster file is parsed and the file
+        # itself should be in YAML format. When this is empty, no tweaking per
+        # file will occur.
+        variable -tweak     .twk
         # Machinery specific defaults for machine creation (dictionary, per
         # driver). Must use long-options with double-dash here only!!
         variable -defaults  {virtualbox {--virtualbox-no-vtx-check}}
@@ -1870,6 +1875,46 @@ proc ::cluster::vfs { fname mounts } {
 }
 
 
+# ::cluster::tweak -- Tweak internal configuration
+#
+#       This procedure takes an even-long list as an argument. The list should
+#       alternatively contain a tweak and its value. A tweak should be composed
+#       of the name of a sub-namespace, followed by a dot (.), followed by the
+#       name of a dash-led variable from the vars sub-namespace (dash omitted).
+#       Whenever such a variable exists, it will be set to the value coming from
+#       the list.
+#
+# Arguments:
+#       tweaks      See above
+#
+# Results:
+#       List of successfull tweaks.
+#
+# Side Effects:
+#       This might change plenty of "good" defaults. Power comes with
+#       responsability.
+proc ::cluster::tweak { tweaks } {
+    set applied [list]
+    foreach { tweak value } $tweaks {
+        foreach {ns var} [split $tweak .] break
+        if { $var ne "" } {
+            if { $ns eq "" } {
+                set tgt [namespace current]
+            } else {
+                set tgt [namespace current]::[string trimleft $ns :]
+            }
+            if { [catch {utils defaults $tgt $var $value} res] == 0 } {
+                log DEBUG "Applied $var = $value in $tgt"
+                lappend applied $tweak
+            } else {
+                log WARN "Could not apply tweak $tweak: $res"
+            }
+        }
+    }
+    return $applied
+}
+
+
 # ::cluster::parse -- Parse YAML description
 #
 #       This procedure will parse a cluster YAML description and
@@ -1894,11 +1939,26 @@ proc ::cluster::vfs { fname mounts } {
 #       description dictionaries.
 #
 # Side Effects:
-#       None.
+#       When a sibling file with the extension .twk exists (in YAML format), its
+#       content will be read and applied to all namespace local options in this
+#       directory
 proc ::cluster::parse { fname args } {
     utils getopt args -prefix pfx [file rootname [file tail $fname]]
     utils getopt args -driver drv "none"
-    
+
+    # Automatically tweak the entire project based on any sibling file with the
+    # .twk extension.
+    if { "${vars::-tweak}" ne "" } {
+        set tweaks [file rootname $fname].twk
+        if { [file exists $tweaks] } {
+            log NOTICE "Automatically applying tweaks from sibling file: $tweaks"
+            set applied [tweak [::yaml::yaml2dict -file $tweaks]]
+            if { [llength $applied] } {
+                log NOTICE "Applied [llength $applied] tweaks to internal configurations"
+            }
+        }
+    }
+
     set d [::yaml::yaml2dict -file $fname]
     
     # Get version, default to 1

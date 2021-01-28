@@ -187,13 +187,13 @@ proc ::api::cli::globals { appname argv_ } {
             set vars::$arg $val
         }
     }
-    
+
     # Remember application name for later.
     set vars::appname $appname
-    
+
     # Access global arguments.
     upvar $argv_ argv
-    
+
     # Roll forward to look for separating -- or first
     # command. Anything before the -- or command are the global
     # options, anything else is the command.
@@ -221,24 +221,24 @@ proc ::api::cli::globals { appname argv_ } {
             help "Couldn't find a known command!"
         }
     }
-    
+
     # No Arguments remaining?? dump help and exit since we need a command
     # to know what to really do...
     if { [llength $argv] <= 0 } {
         help "No command specified!"
     }
-    
+
     # Did we request for help? Output and goodbye
     if { [utils getopt opts "-help"] } {
         help
     }
-    
+
     # Do we have a configure file to read, do this at once.
     utils getopt opts -config vars::-config ${vars::-config}
     if { ${vars::-config} ne "" } {
         Config ${vars::-config}
     }
-    
+
     # Eat all program options from the command line, the latest value
     # will be the one as we don't have options that can appear several
     # times.
@@ -249,12 +249,12 @@ proc ::api::cli::globals { appname argv_ } {
             utils getopt opts $opt vars::$opt [set vars::$opt]
         }
     }
-    
+
     # Remaining opts? They are unknown!
     if { [llength $opts] > 0 } {
         help "'$opts' contains unknown global options!"
     }
-    
+
     # Pass arguments from the command-line as the defaults for the cluster
     # module.
     foreach k [list -verbose] {
@@ -266,28 +266,14 @@ proc ::api::cli::globals { appname argv_ } {
     foreach k [list -machine -docker -compose] {
         utils defaults cluster::tooling $k [set vars::$k]
     }
-    
+
     if { ${vars::-dns} ne "" } {
         package require dns
         ::dns::configure -nameserver ${vars::-dns}
     }
 
-    set tweaks [list]
-    foreach { tweak value } ${vars::-tweaks} {
-        foreach {ns var} [split $tweak .] break
-        if { $var ne "" } {
-            if { $ns eq "" } {
-                set tgt cluster
-            } else {
-                set tgt cluster::[string trimleft $ns :]
-            }
-            if { [catch {utils defaults $tgt $var $value}] == 0 } {
-                lappend tweaks $tweak
-            } else {
-                log WARN "Could not apply tweak $tweak: $res"
-            }
-        }
-    }
+    # Apply low-level command-line tweaks.
+    set tweaks [cluster tweak ${vars::-tweaks}]
     if { [llength $tweaks] } {
         log NOTICE "Applied [llength $tweaks] tweaks to internal configurations"
     }

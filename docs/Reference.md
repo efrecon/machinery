@@ -56,10 +56,10 @@ an argument will properly mount the shares.  On all other drivers,
 `machinery` will use rsync when bringing up and down the machines to
 keep the directories synchronised.
 
-In addition, `machinery` keeps a hidden environment file with the
-networking information for all the machines of the cluster ([see
-below](#netinfo)).  This file will have the same root name as the
-cluster YAML file, but with a leading `.` to hide it and the extension
+In addition, `machinery` keeps a hidden environment file with the networking
+information for all the machines of the cluster (see
+[below](#networking-information)).  This file will have the same root name as
+the cluster YAML file, but with a leading `.` to hide it and the extension
 `.env` (see `env` [command description](#env)).
 
 When using v2 of the file format, any network that has not been created but has
@@ -179,7 +179,7 @@ service on the local machine.  The service is automatically removed once the
 token has been generated.  However, the image that might have been downloaded
 will remain on the local machine.
 
-#### env <a name="env" />
+#### env
 
 The command `env` will output all necessary bash commands to declare the
 environment variables for network discovery.  In other words, running `eval
@@ -278,7 +278,7 @@ separation between the pattern and the command is now explicit:
 
 ### Interaction with system containers
 
-#### Networking Information <a name="netinfo" />
+#### Networking Information
 
 `machinery` keeps a hidden environment file with the networking information for
 all the machines of the cluster.  This file will have the same root name as the
@@ -336,15 +336,14 @@ will show up its real name, i.e. `mycluster-db`.  This behaviour will help you
 managing several clusters from the same directory, for example when staging or
 when running sub-sets of your architecture for development.
 
-Note, that when neither a specifiy YAML file is pointed at using
-`-cluster`, nor a default file called `cluster.yml` is found in the
-current directory, `machinery` will try to find a good candidate YAML
-description file automatically.  It will list all files ending with
-`.yml` in the current directory and will consider those which first
-empty line contains the marker `#docker-machinery`.  Whenever, only
-one candidate is found, this file will be taken into consideration as
-if it had been specifically pointed at using the `-cluster` global
-option.
+Note, that when neither a specific YAML file is pointed at using `-cluster`, nor
+a default file called `cluster.yml` is found in the current directory,
+`machinery` will try to find a good candidate YAML description file
+automatically.  It will list all files ending with `.yml` in the current
+directory and will consider those which first empty line contains the marker
+`#docker-machinery`.  Whenever, only one candidate is found, this file will be
+taken into consideration as if it had been specifically pointed at using the
+`-cluster` global option.
 
 `docker-machine` itself stores a number of files that are necessary for
 bootstrapping machines or for storing keys and certificates that are relevant
@@ -357,7 +356,7 @@ they used the default directory `.docker` in your home directory. You can use
 the global option `-storage` to interact with projects created using those
 versions.
 
-#### Interaction with `docker-compose` <a name="docker-compose" />
+#### Interaction with `docker-compose`
 
 The combination of `machinery`, `docker-machine` and `docker-compose` enables a
 single control point for an entire cluster.  This eases service discovery as it
@@ -370,13 +369,14 @@ for default values, e.g. `${MYVAR:default}` will be replaced by the content of
 the environment variable `MYVAR` if it existed, or by `default` if it did not
 exist.  The implementation will perform local substitution into a temporary file
 that will be passed to `docker-compose`.  In particular, all the environment
-variables described [above](#netinfo) will be available for substitution prior
-to `docker-compose`.
+variables described [above](#networking-information) will be available for
+substitution prior to `docker-compose`.
 
 Authoring YAML files this way does not follow the official syntax, but you
 should still be able to pass your files to `docker-compose` after having fed
-them through
-[envsubst](https://www.gnu.org/software/gettext/manual/html_node/envsubst-Invocation.html).
+them through [envsubst].
+
+  [envsubst]: https://www.gnu.org/software/gettext/manual/html_node/envsubst-Invocation.html
 
 #### Interaction with `VBoxManage`
 
@@ -394,7 +394,7 @@ started, a mount operation will be performed using an `docker-machine
 ssh`.
 
 In practice, mounting of shares should be transparent to you,
-independantly to how you start the machine: using the `start`
+independently to how you start the machine: using the `start`
 sub-command of `machinery`, starting manually using `docker-machine
 start`).
 
@@ -523,6 +523,22 @@ option was introduced in version 0.7, to run `machinery` on clusters that were
 created using prior versions, you will have to point out the default
 `docker-machine` location, i.e. usually under `.docker/machine` in your home
 directory.
+
+#### `-tweaks`
+
+This option takes an even-long list of alternatively tweaks and their values.
+These are low-level tweaks that can deeply change the behaviour of `machinery`
+and usually require an understanding of the code-based. The name of each tweak
+has two components separated by a dot `.`. The first component is the name of
+one of the sub-namespaces implemented as part of the libraries in the
+[`cluster`](../lib/cluster/) sub-directory of the project. The second part
+should match the name of the dash-led options of that sub-namespace, sans the
+leading dash. When the first part is empty, it refers to the main namespace.
+
+For example, if the value of this command-line option was `utils.color 0`, it
+would force off colouring of the logs, as the implementation of
+[utils](../lib/cluster/utils.tcl) recognises the dash-led global option
+`-color` this way.
 
 ## YAML Specification
 
@@ -688,7 +704,7 @@ server is the URL to the registry and the other fields are self-explanatory.
 `machinery` will log into all specified registries before attempting to
 pre-download images as explained above.
 
-#### `compose` <a name="compose" />
+#### `compose`
 
 `compose` should be a list of dictionaries that will, each, reference a
 `docker-compose` project file.  Each dictionary must have a key called `file`
@@ -703,9 +719,9 @@ in the background.
 
 Another optional key called `substitution` can be set to a boolean.  When
 `true`, the YAML compose file will be substituted for local environment
-variables before being parsed by `docker-compose`.  See [above](#docker-compose)
-for more information. Note that modern `docker-compose` will alway substitute
-for you.
+variables before being parsed by `docker-compose`.  See
+[above](#interaction-with-docker-compose) for more information. Note that modern
+`docker-compose` will alway substitute for you.
 
 Two keys called `env_file` and `environment` can be used to point at environment
 variables to be set when composing. `environment` has precedence over the
@@ -759,36 +775,27 @@ the machine. There are two ways of describing file copies.
   `:`. These hints are separated from one another using a coma sign, but the
   only recognised hint is currently `norecurse` which avoidss recusrion when
   directories are being copied.
-  
 * In its more complex form, each specification is a dictionary itself. This
   dictionary can contain the following keys:
-  
   - `source` should point to the source file (or directory) and should always be
     present.
-    
   - `destination` should point to the destination file (or directory) at the
     host and should always be present.
-    
   - `sudo` is a boolean that, when on, will arrange for the file or directory to
     be copied to a temporary location before it is moved in place, at the host,
     using elevated privileges. This is to allow copying to sensitive parts of
     the filesystem.
-    
   - `recurse` can be `auto` or a boolean. When `auto` is used, directories will
     be recursively coped automatically. Otherwise, the recursion will happen as
     specified by the boolean.
-    
   - `delta` is a boolean that turns off delta-intelligent copying via `rsync` when
-    the tool is picked up for copy by `docker-machine`. 
-
+    the tool is picked up for copy by `docker-machine`.
   - `mode` arranges for the mode of the file/directory at the host to be
-    modified using `chmod`. This is mostly used together with `sudo`. 
-
+    modified using `chmod`. This is mostly used together with `sudo`.
   - `owner` arranges for the owner of the file/directory at the host to be
-    modified using `chown`. This is mostly used together with `sudo`. 
-
+    modified using `chown`. This is mostly used together with `sudo`.
   - `group` arranges for the group of the file/directory at the host to be
-    modified using `chgrp`. This is mostly used together with `sudo`. 
+    modified using `chgrp`. This is mostly used together with `sudo`.
 
 Copies are issued using the underlying `scp` command of `docker-machine`. This
 is still an experimental feature, but it eases migration of project relevant
@@ -802,3 +809,15 @@ description. Inclusion happens early on during parsing, and included files might
 include other files themselves. `include` is usually used together with hidden
 machines, i.e. with a name starting with a `.` or `x-`, and the `extends` key in
 machine descriptions.
+
+## YAML Tweaks
+
+By default, if a sibling file with the same name as the cluster file, but the
+extension `.twk`, exists, it will be read prior to reading the cluster file.
+Reading this file has the same behaviour as the global command-line option
+[`-tweaks`](#-tweaks). Pay specifically attention to the fact that the content
+of this file will be read (and applied) *after* the information that would have
+come from the command-line, which is a bit counter-intuitive.
+
+The file should be YAML formatted, each key will form the name of a tweak, and
+its value the value of the tweak.
