@@ -820,4 +820,8 @@ of this file will be read (and applied) *after* the information that would have
 come from the command-line, which is a bit counter-intuitive.
 
 The file should be YAML formatted, each key will form the name of a tweak, and
-its value the value of the tweak.
+its value the value of the tweak. Read [here](#-tweaks) for more details about
+those tweaks.
+
+If you wanted to turn this behaviour off, you can pass the following to the
+`-tweaks` command-line option: `.tweak ""`.
