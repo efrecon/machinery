@@ -11,8 +11,12 @@ namespace eval ::cluster::utils {
         variable verboseTags {1 FATAL 2 ERROR 3 WARN 4 NOTICE 5 INFO 6 DEBUG 7 TRACE}
         # File descriptor to dump log messages to
         variable -log       stderr
+        # How to dump log messages, auto will detect when dumping to TTY and
+        # will use colours.
+        variable -color     auto
         # Date log output
         variable -date      "%Y%m%d %H%M%S"
+        variable -hdate     "%Y%m%d/%H:%M:%S"
         # Options marker
         variable -marker    "-"
         # Temporary directory, empty for good platform guess
@@ -152,7 +156,11 @@ proc ::cluster::utils::log { lvl msg } {
     # If we should output (i.e. level of message is below the global
     # module level), pretty print and output.
     if { [outlog $lvl l] } {
-        set toTTY [dict exists [fconfigure ${vars::-log}] -mode]
+        if { "${vars::-color}" eq "auto" } {
+            set toTTY [dict exists [fconfigure ${vars::-log}] -mode]
+        } else {
+            set toTTY ${vars::-color}
+        }
         # Output the whole line.
         if { $toTTY } {
             puts ${vars::-log} [LogTerminal $l $msg]
@@ -574,9 +582,16 @@ proc ::cluster::utils::LogTerminal { lvl msg } {
     } else {
         set lbl [format %.6s "$lvl        "]
     }
-    # Start by appending a human-readable level, using colors to
+    # Start by appending a human-readable date
+    if { ${vars::-hdate} eq "" } {
+        set line ""
+    } else {
+        set dt [clock format [clock seconds] -format ${vars::-hdate}]
+        set line "[+ light]\[$dt\][+ normal] "
+    }
+    # Continue by appending a human-readable level, using colors to
     # rank the levels. (see the + procedure below)
-    set line "\["
+    append line "\["
     array set LABELER { 3 yellow 2 red 1 purple 4 blue 6 light }
     if { [info exists LABELER($lvl)] } {
         append line [+ $LABELER($lvl)]$lbl[+ normal]
@@ -591,7 +606,7 @@ proc ::cluster::utils::LogTerminal { lvl msg } {
     } else {
         append line $msg
     }
-    
+
     return $line
 }
 
@@ -611,14 +626,20 @@ proc ::cluster::utils::LogTerminal { lvl msg } {
 # Side Effects:
 #       None.
 proc ::cluster::utils::LogStandard { lvl msg } {
+    if { ${vars::-date} eq "" } {
+        set line ""
+    } else {
+        set dt [clock format [clock seconds] -format ${vars::-date}]
+        set line "\[$dt\] "
+    }
     array set TAGGER $vars::verboseTags
     if { [info exists TAGGER($lvl)] } {
         set lbl $TAGGER($lvl)
     } else {
         set lbl $lvl
     }
-    set dt [clock format [clock seconds] -format ${vars::-date}]
-    return "\[$dt\] \[$lbl\] $msg"
+    append line "\[$lbl\] $msg"
+    return $line
 }
 
 
