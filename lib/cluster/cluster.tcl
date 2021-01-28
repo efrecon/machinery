@@ -1553,7 +1553,11 @@ proc ::cluster::halt { vm {masters {}} } {
 proc ::cluster::ssh { vm args } {
     environment push [EnvironmentGet $vm $vm]
     set nm [dict get $vm -name]
-    log NOTICE "Entering machine $nm..."
+    if { [llength $args] } {
+        log NOTICE "Executing in machine $nm: $args"
+    } else {
+        log NOTICE "Entering machine: $nm"
+    }
     if { [llength $args] > 0 } {
         set res [eval [linsert $args 0 tooling relatively -- [file dirname [storage $vm]] \
                             tooling machine -raw -stderr -- -s [storage $vm] ssh $nm]]
