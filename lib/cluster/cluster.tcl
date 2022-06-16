@@ -533,6 +533,13 @@ proc ::cluster::init { vm args } {
 
     set nm [dict get $vm -name]
 
+    # (re)join the swarm. This is usually not necessary, but here in case...
+    if { [lsearch -nocase -glob $steps j*] >= 0 && \
+            [swarmmode mode $vm] ne "" && \
+            [llength $masters] } {
+        swarmmode join $vm $masters
+    }
+
     # Shares, will (possibly) mount local directories onto the virtual machine,
     # alt. copy files early.
     if { [lsearch -nocase -glob $steps s*] >= 0 } {
